@@ -1,0 +1,4603 @@
+version: 1
+directus: 12.2.0
+vendor: postgres
+collections:
+  - collection: corpus_documents
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: corpus_documents
+      color: null
+      display_template: '{{name}}'
+      group: localization_pipeline
+      hidden: false
+      icon: article
+      item_duplication_fields: null
+      note: 中文原始语料、切段和候选提取结果。
+      preview_url: null
+      singleton: false
+      sort: 1
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 中文语料
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: corpus_documents
+  - collection: localization_assets
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: localization_assets
+      color: null
+      display_template: null
+      group: null
+      hidden: false
+      icon: translate
+      item_duplication_fields: null
+      note: null
+      preview_url: null
+      singleton: false
+      sort: 1
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 四语术语资产
+      unarchive_value: null
+      versioning: false
+  - collection: localization_pipeline
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: localization_pipeline
+      color: null
+      display_template: null
+      group: null
+      hidden: false
+      icon: account_tree
+      item_duplication_fields: null
+      note: null
+      preview_url: null
+      singleton: false
+      sort: 2
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 语料与规则
+      unarchive_value: null
+      versioning: false
+  - collection: style_profiles
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: style_profiles
+      color: null
+      display_template: '{{name}}'
+      group: localization_pipeline
+      hidden: false
+      icon: style
+      item_duplication_fields: null
+      note: 按目标语言、语体和领域维护的翻译风格规则。
+      preview_url: null
+      singleton: false
+      sort: 4
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 语体配置
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: style_profiles
+  - collection: term_candidates
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: term_candidates
+      color: null
+      display_template: '{{source}}'
+      group: localization_pipeline
+      hidden: false
+      icon: manage_search
+      item_duplication_fields: null
+      note: 从中文语料提取、等待人工确认的候选术语。
+      preview_url: null
+      singleton: false
+      sort: 3
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 术语候选
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: term_candidates
+  - collection: term_import_batches
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: term_import_batches
+      color: null
+      display_template: '{{filename}}'
+      group: localization_pipeline
+      hidden: false
+      icon: upload_file
+      item_duplication_fields: null
+      note: 中外文表格上传、清洗与入库批次记录。
+      preview_url: null
+      singleton: false
+      sort: 2
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 术语导入批次
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: term_import_batches
+  - collection: terms_ja_jp
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: status
+      archive_value: archived
+      autosave_revision_interval: null
+      collapse: open
+      collection: terms_ja_jp
+      color: null
+      display_template: '{{source}} → {{target}}'
+      group: localization_assets
+      hidden: false
+      icon: translate
+      item_duplication_fields: null
+      note: 日语术语库。与其他目标语言物理隔离。
+      preview_url: null
+      singleton: false
+      sort: 1
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 日语术语库
+      unarchive_value: draft
+      versioning: true
+    schema:
+      name: terms_ja_jp
+  - collection: terms_ko_kr
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: status
+      archive_value: archived
+      autosave_revision_interval: null
+      collapse: open
+      collection: terms_ko_kr
+      color: null
+      display_template: '{{source}} → {{target}}'
+      group: localization_assets
+      hidden: false
+      icon: translate
+      item_duplication_fields: null
+      note: 韩语术语库。与其他目标语言物理隔离。
+      preview_url: null
+      singleton: false
+      sort: 2
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 韩语术语库
+      unarchive_value: draft
+      versioning: true
+    schema:
+      name: terms_ko_kr
+  - collection: terms_th_th
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: status
+      archive_value: archived
+      autosave_revision_interval: null
+      collapse: open
+      collection: terms_th_th
+      color: null
+      display_template: '{{source}} → {{target}}'
+      group: localization_assets
+      hidden: false
+      icon: translate
+      item_duplication_fields: null
+      note: 泰语术语库。与其他目标语言物理隔离。
+      preview_url: null
+      singleton: false
+      sort: 4
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 泰语术语库
+      unarchive_value: draft
+      versioning: true
+    schema:
+      name: terms_th_th
+  - collection: terms_zh_hant_tw
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: status
+      archive_value: archived
+      autosave_revision_interval: null
+      collapse: open
+      collection: terms_zh_hant_tw
+      color: null
+      display_template: '{{source}} → {{target}}'
+      group: localization_assets
+      hidden: false
+      icon: translate
+      item_duplication_fields: null
+      note: 繁体中文（台湾）术语库。与其他目标语言物理隔离。
+      preview_url: null
+      singleton: false
+      sort: 3
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 繁体中文（台湾）术语库
+      unarchive_value: draft
+      versioning: true
+    schema:
+      name: terms_zh_hant_tw
+fields:
+  - collection: corpus_documents
+    field: id
+    type: uuid
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: corpus_documents
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: name
+    type: string
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: name
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 语料名称
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: name
+      table: corpus_documents
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: source_language
+    type: string
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: source_language
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 源语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source_language
+      table: corpus_documents
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: domain
+    type: string
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: corpus_documents
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: content_type
+    type: string
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: content_type
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: corpus_documents
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: text
+    type: text
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: text
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文原文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: text
+      table: corpus_documents
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: segments
+    type: json
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: segments
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 切分句段
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: segments
+      table: corpus_documents
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: candidates
+    type: json
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: candidates
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 术语候选
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: candidates
+      table: corpus_documents
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: corpus_documents
+    field: date_created
+    type: timestamp
+    meta:
+      collection: corpus_documents
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: corpus_documents
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: id
+    type: uuid
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: style_profiles
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: name
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: name
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 配置名称
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: name
+      table: style_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: target_locale
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: style_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: content_type
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: style_profiles
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: domain
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: style_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: instructions
+    type: text
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: instructions
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 翻译规则
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: instructions
+      table: style_profiles
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: examples
+    type: json
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: examples
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 正反例
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: examples
+      table: style_profiles
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: status
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 启用
+            value: active
+          - text: 草稿
+            value: draft
+          - text: 停用
+            value: inactive
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 启用
+            value: active
+          - text: 草稿
+            value: draft
+          - text: 停用
+            value: inactive
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: style_profiles
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: style_profiles
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: id
+    type: uuid
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: term_candidates
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: source
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: source
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选中文词
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: source
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: frequency
+    type: integer
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: frequency
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 出现频次
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: frequency
+      table: term_candidates
+      data_type: integer
+      default_value: 1
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: score
+    type: float
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: score
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选分数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: score
+      table: term_candidates
+      data_type: real
+      default_value: null
+      max_length: null
+      numeric_precision: 24
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: corpus_id
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: corpus_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源语料 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: corpus_id
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: status
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 待确认
+            value: pending
+          - text: 已采用
+            value: accepted
+          - text: 已忽略
+            value: rejected
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 待确认
+            value: pending
+          - text: 已采用
+            value: accepted
+          - text: 已忽略
+            value: rejected
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 处理状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: term_candidates
+      data_type: character varying
+      default_value: pending
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: date_created
+    type: timestamp
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: term_candidates
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: target
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: target
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选译法
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: target_locale
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: term_candidates
+      data_type: character varying
+      default_value: ja-JP
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: batch_id
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: batch_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 导入批次 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: batch_id
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: source_file
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: source_file
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源文件
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source_file
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: row_number
+    type: integer
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: row_number
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 原表行号
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: row_number
+      table: term_candidates
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: decision
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 可入库
+            value: ready
+          - text: 需复核
+            value: review
+          - text: 已排除
+            value: excluded
+      field: decision
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 可入库
+            value: ready
+          - text: 需复核
+            value: review
+          - text: 已排除
+            value: excluded
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 清洗结论
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: decision
+      table: term_candidates
+      data_type: character varying
+      default_value: review
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: reason
+    type: text
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: reason
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 判断依据
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: reason
+      table: term_candidates
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: id
+    type: uuid
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: term_import_batches
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: filename
+    type: string
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: filename
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 文件名
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: filename
+      table: term_import_batches
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: file_type
+    type: string
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: file_type
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 文件类型
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: file_type
+      table: term_import_batches
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: source_language
+    type: string
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: source_language
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 源语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source_language
+      table: term_import_batches
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: requested_locale
+    type: string
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: requested_locale
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 指定目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: requested_locale
+      table: term_import_batches
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: row_count
+    type: integer
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: row_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 扫描行数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: row_count
+      table: term_import_batches
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: candidate_count
+    type: integer
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: candidate_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选数量
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: candidate_count
+      table: term_import_batches
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: status
+    type: string
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 审核中
+            value: reviewing
+          - text: 已完成
+            value: completed
+          - text: 已取消
+            value: cancelled
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 审核中
+            value: reviewing
+          - text: 已完成
+            value: completed
+          - text: 已取消
+            value: cancelled
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 批次状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: term_import_batches
+      data_type: character varying
+      default_value: reviewing
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: ai_used
+    type: boolean
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: ai_used
+      group: null
+      hidden: false
+      interface: boolean
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: AI 已参与
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: ai_used
+      table: term_import_batches
+      data_type: boolean
+      default_value: false
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: summary
+    type: json
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: summary
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 清洗摘要
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: summary
+      table: term_import_batches
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_import_batches
+    field: date_created
+    type: timestamp
+    meta:
+      collection: term_import_batches
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 11
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: term_import_batches
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: id
+    type: uuid
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: terms_ja_jp
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: source
+    type: string
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: source
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文源词
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source
+      table: terms_ja_jp
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: target
+    type: string
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: target
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 正式译法
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target
+      table: terms_ja_jp
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: aliases
+    type: json
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: aliases
+      group: null
+      hidden: false
+      interface: tags
+      note: 只存中文源词的别名
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 中文别名
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: aliases
+      table: terms_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: forbidden
+    type: json
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: forbidden
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 禁用译法
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: forbidden
+      table: terms_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: domains
+    type: json
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: domains
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: domains
+      table: terms_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: content_types
+    type: json
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: content_types
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 适用语体
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_types
+      table: terms_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: enforcement
+    type: string
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      field: enforcement
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 约束级别
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: enforcement
+      table: terms_ja_jp
+      data_type: character varying
+      default_value: required
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: status
+    type: string
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 审批状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: terms_ja_jp
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: provenance
+    type: string
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: provenance
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: provenance
+      table: terms_ja_jp
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: note
+    type: text
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: note
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 备注
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: note
+      table: terms_ja_jp
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: date_created
+    type: timestamp
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: terms_ja_jp
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ja_jp
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: terms_ja_jp
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: id
+    type: uuid
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: terms_ko_kr
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: source
+    type: string
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: source
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文源词
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source
+      table: terms_ko_kr
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: target
+    type: string
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: target
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 正式译法
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target
+      table: terms_ko_kr
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: aliases
+    type: json
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: aliases
+      group: null
+      hidden: false
+      interface: tags
+      note: 只存中文源词的别名
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 中文别名
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: aliases
+      table: terms_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: forbidden
+    type: json
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: forbidden
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 禁用译法
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: forbidden
+      table: terms_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: domains
+    type: json
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: domains
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: domains
+      table: terms_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: content_types
+    type: json
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: content_types
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 适用语体
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_types
+      table: terms_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: enforcement
+    type: string
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      field: enforcement
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 约束级别
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: enforcement
+      table: terms_ko_kr
+      data_type: character varying
+      default_value: required
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: status
+    type: string
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 审批状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: terms_ko_kr
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: provenance
+    type: string
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: provenance
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: provenance
+      table: terms_ko_kr
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: note
+    type: text
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: note
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 备注
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: note
+      table: terms_ko_kr
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: date_created
+    type: timestamp
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: terms_ko_kr
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_ko_kr
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: terms_ko_kr
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: id
+    type: uuid
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: terms_th_th
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: source
+    type: string
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: source
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文源词
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source
+      table: terms_th_th
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: target
+    type: string
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: target
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 正式译法
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target
+      table: terms_th_th
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: aliases
+    type: json
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: aliases
+      group: null
+      hidden: false
+      interface: tags
+      note: 只存中文源词的别名
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 中文别名
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: aliases
+      table: terms_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: forbidden
+    type: json
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: forbidden
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 禁用译法
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: forbidden
+      table: terms_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: domains
+    type: json
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: domains
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: domains
+      table: terms_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: content_types
+    type: json
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: content_types
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 适用语体
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_types
+      table: terms_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: enforcement
+    type: string
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      field: enforcement
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 约束级别
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: enforcement
+      table: terms_th_th
+      data_type: character varying
+      default_value: required
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: status
+    type: string
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 审批状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: terms_th_th
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: provenance
+    type: string
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: provenance
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: provenance
+      table: terms_th_th
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: note
+    type: text
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: note
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 备注
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: note
+      table: terms_th_th
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: date_created
+    type: timestamp
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: terms_th_th
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_th_th
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: terms_th_th
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: id
+    type: uuid
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: terms_zh_hant_tw
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: source
+    type: string
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: source
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文源词
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source
+      table: terms_zh_hant_tw
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: target
+    type: string
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: target
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 正式译法
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target
+      table: terms_zh_hant_tw
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: aliases
+    type: json
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: aliases
+      group: null
+      hidden: false
+      interface: tags
+      note: 只存中文源词的别名
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 中文别名
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: aliases
+      table: terms_zh_hant_tw
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: forbidden
+    type: json
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: forbidden
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 禁用译法
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: forbidden
+      table: terms_zh_hant_tw
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: domains
+    type: json
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: domains
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: domains
+      table: terms_zh_hant_tw
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: content_types
+    type: json
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: content_types
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 适用语体
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_types
+      table: terms_zh_hant_tw
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: enforcement
+    type: string
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      field: enforcement
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 约束级别
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: enforcement
+      table: terms_zh_hant_tw
+      data_type: character varying
+      default_value: required
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: status
+    type: string
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 草稿
+            value: draft
+          - text: 待审核
+            value: pending
+          - text: 已批准
+            value: approved
+          - text: 已废弃
+            value: deprecated
+          - text: 已归档
+            value: archived
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 审批状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: terms_zh_hant_tw
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: provenance
+    type: string
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: provenance
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: provenance
+      table: terms_zh_hant_tw
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: note
+    type: text
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: note
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 备注
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: note
+      table: terms_zh_hant_tw
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: date_created
+    type: timestamp
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: terms_zh_hant_tw
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: terms_zh_hant_tw
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+systemFields:
+  - collection: directus_activity
+    field: timestamp
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_clients
+    field: date_created
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_codes
+    field: expires_at
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_codes
+    field: used_at
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_consents
+    field: client
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_tokens
+    field: code_hash
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_tokens
+    field: expires_at
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_tokens
+    field: previous_session
+    schema:
+      is_indexed: true
+  - collection: directus_oauth_tokens
+    field: session
+    schema:
+      is_indexed: true
+  - collection: directus_revisions
+    field: activity
+    schema:
+      is_indexed: true
+  - collection: directus_revisions
+    field: parent
+    schema:
+      is_indexed: true
+  - collection: directus_sessions
+    field: oauth_client
+    schema:
+      is_indexed: true
+relations: []

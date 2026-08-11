@@ -1,0 +1,53 @@
+name: kami-localization
+
+services:
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - kami_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  directus:
+    image: directus/directus:12.2.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8055:8055"
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - kami_directus_uploads:/directus/uploads
+      - ./schema:/directus/schema
+    environment:
+      SECRET: ${DIRECTUS_SECRET}
+      DB_CLIENT: pg
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_DATABASE: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD}
+      ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN}
+      PUBLIC_URL: http://127.0.0.1:8055
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: http://127.0.0.1:4173
+      TELEMETRY: "false"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8055/server/ping').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  kami_postgres_data:
+  kami_directus_uploads:

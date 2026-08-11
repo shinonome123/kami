@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Kami 本地化工作台</title>
+    <link rel="icon" type="image/png" href="/assets/kami-logo-clean.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><img class="brand-logo" src="/assets/kami-logo-clean.png" alt="Kami 本地化语言工作台" /></div>
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-item active" data-view="workbench"><span class="nav-icon">译</span><span>翻译</span></button>
+          <button class="nav-item" data-view="import"><span class="nav-icon">筛</span><span>术语导入</span></button>
+          <button class="nav-item" data-view="assets"><span class="nav-icon">库</span><span>术语库</span></button>
+        </nav>
+        <div class="sidebar-status">
+          <span class="status-dot" id="serverDot"></span>
+          <div><strong id="serverStatus">正在连接</strong><span id="providerLabel">模型服务待检查</span></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="page-heading">
+            <p class="eyebrow" id="viewEyebrow">TRANSLATION</p>
+            <h1 id="viewTitle">翻译</h1>
+            <p class="page-description" id="viewDescription">按目标语言调用独立术语库，并自动识别语体。</p>
+          </div>
+          <div class="command-dock" aria-label="页面操作">
+            <div class="system-actions">
+              <a class="text-action" id="openAdmin" href="http://127.0.0.1:8055/admin/content/terms_ja_jp" target="_blank" rel="noreferrer">Directus 后台</a>
+              <button class="text-action" id="openProvider">模型设置</button>
+            </div>
+            <span class="command-divider"></span>
+            <button class="button ghost" id="tertiaryAction" hidden></button>
+            <button class="button secondary" id="secondaryAction" hidden></button>
+            <button class="button primary" id="primaryAction">开始翻译</button>
+          </div>
+        </header>
+
+        <section class="view active" id="view-workbench">
+          <div class="locale-strip" id="workbenchLocales" aria-label="目标语言"></div>
+          <div class="translation-mode-switch" aria-label="翻译模式">
+            <button class="translation-mode active" data-translation-mode="single"><span>单句翻译</span><small>快速粘贴处理</small></button>
+            <button class="translation-mode" data-translation-mode="batch"><span>批次 / 文件翻译</span><small>自动分段与合并导出</small></button>
+          </div>
+          <div class="control-row compact-controls">
+            <label><span>内容语体</span><select id="contentType"><option value="auto">自动识别</option></select></label>
+            <label><span>业务领域</span><select id="domain"><option value="game">游戏</option><option value="general">通用</option><option value="marketing">市场营销</option><option value="community">社区运营</option></select></label>
+            <label class="toggle-label"><input type="checkbox" id="reflect" checked /><span class="toggle"></span><span>译后反思</span></label>
+          </div>
+          <div id="singleWorkspace">
+          <div class="translation-grid">
+            <article class="editor-card source-card">
+              <div class="card-head"><div><span class="card-kicker">SOURCE · ZH-CN</span><h2>中文原文</h2></div><span class="count" id="sourceCount">0 字</span></div>
+              <textarea id="sourceText" placeholder="粘贴宣发文案、公告、道具说明或 UI 文本……">全新高级通行证现已登场！活动期间完成任务，即可领取限定奖励。维护将于8月15日 10:00开始，请提前退出游戏。</textarea>
+              <label class="context-field" for="neighborContext"><span>可选上下文</span><input id="neighborContext" placeholder="活动背景、角色关系或上一段内容" /></label>
+            </article>
+            <article class="editor-card target-card">
+              <div class="card-head"><div><span class="card-kicker" id="targetKicker">TARGET · JA-JP</span><h2 id="targetTitle">日本語译文</h2></div><div class="target-status"><span class="term-legends" id="targetLegend" hidden><span class="term-legend official" id="officialLegend"><i></i><span id="officialCount">0 处正式术语</span></span><span class="term-legend suggestion" id="suggestionLegend"><i></i><span id="suggestionCount">0 处疑似术语</span></span></span><span class="badge neutral" id="translationState">等待翻译</span></div></div>
+              <div class="target-output empty" id="targetOutput">译文将在这里显示</div>
+            </article>
+          </div>
+          <div class="workflow-status" id="classificationPreview"><span class="pulse-dot"></span><span>输入后自动识别语体，并从当前语言术语库匹配</span></div>
+          <div class="insight-grid">
+            <article class="insight-card"><div class="insight-head"><h3>术语命中</h3><span id="matchCount">0 条</span></div><div class="term-matches empty-list" id="termMatches">尚未匹配</div></article>
+            <article class="insight-card"><div class="insight-head"><h3>反思与 QA</h3><span id="issueCount">未运行</span></div><div class="qa-list empty-list" id="qaList">翻译后显示审校结果</div></article>
+          </div>
+          </div>
+
+          <div class="batch-workspace" id="batchWorkspace" hidden>
+            <div class="batch-setup-grid">
+              <article class="panel batch-source-panel">
+                <div class="panel-head"><div><span class="card-kicker">SOURCE DOCUMENT</span><h2>长文与文件</h2></div><span class="count" id="batchSourceMeta">尚未载入</span></div>
+                <label class="drop-zone batch-drop-zone" id="batchDropZone" for="batchFile">
+                  <input id="batchFile" type="file" accept=".txt,.md,.docx,.xlsx" hidden />
+                  <span class="upload-mark">↑</span><strong id="batchFilePrompt">拖入或点击选择文件</strong><small id="batchFileMeta">支持 TXT、Markdown、DOCX、XLSX，最大 10MB</small>
+                </label>
+                <div class="batch-or"><span>或直接粘贴长文</span></div>
+                <textarea id="batchPasteText" class="batch-paste" placeholder="粘贴公告、剧情、运营文案等长文本；解析时会按段落与句子自动切分。"></textarea>
+              </article>
+              <article class="panel batch-policy-panel">
+                <span class="card-kicker">SEGMENT POLICY</span><h2>分段与翻译策略</h2>
+                <label><span>翻译单元</span><select id="batchSegmentationMode"><option value="sentence" selected>逐句翻译 · 精细</option><option value="paragraph">自然段翻译 · 连贯</option></select></label>
+                <div class="batch-policy-list">
+                  <div><strong>01</strong><span>按完整句子或自然段切分，不再按固定字数机械截断。</span></div>
+                  <div><strong>02</strong><span>每个单元携带明确的上文、下文和文档位置。</span></div>
+                  <div><strong>03</strong><span>调用当前语言独立术语库，并统一使用批次语体与风格。</span></div>
+                  <div><strong>04</strong><span>逐单元执行 QA，完成后合并回原文件格式。</span></div>
+                </div>
+              </article>
+            </div>
+            <article class="panel batch-queue-panel">
+              <div class="panel-head">
+                <div><span class="card-kicker">TRANSLATION QUEUE</span><h2>分段队列</h2></div>
+                <div class="batch-progress-summary"><strong id="batchProgressText">等待解析</strong><span id="batchProgressMeta">0 / 0</span></div>
+              </div>
+              <div class="batch-progress-track"><i id="batchProgressBar"></i></div>
+              <div class="batch-segments" id="batchSegments"><div class="empty-list batch-empty">上传文件或粘贴长文后，点击页头“解析并分段”。</div></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-import">
+          <div class="step-banner">
+            <span class="step-badge">BETA</span>
+            <div><h2>上传中外文表格，自动筛出可入库术语</h2><p>识别列 → 规则去噪 → AI 二次清洗 → 人工确认 → 分语言写入独立术语库。</p></div>
+          </div>
+          <div class="import-setup-grid">
+            <article class="panel upload-panel">
+              <span class="card-kicker">01 · SOURCE FILE</span><h2>选择表格</h2>
+              <label class="drop-zone" id="dropZone" for="termFile">
+                <input id="termFile" type="file" accept=".xlsx,.csv" hidden />
+                <span class="upload-mark">↑</span><strong id="filePrompt">拖入或点击选择 .xlsx / .csv</strong><small id="fileMeta">最大 10MB；支持一张表内同时包含日、韩、繁中、泰列</small>
+              </label>
+            </article>
+            <article class="panel cleaning-panel">
+              <span class="card-kicker">02 · CLEANING POLICY</span><h2>清洗策略</h2>
+              <div class="form-grid">
+                <label><span>目标语言</span><select id="importLocale"><option value="auto">自动识别全部语言列</option></select></label>
+                <label><span>入库语体</span><select id="importContentType"></select></label>
+                <label><span>业务领域</span><select id="importDomain"><option value="game">游戏</option><option value="general">通用</option><option value="marketing">市场营销</option><option value="community">社区运营</option></select></label>
+                <label><span>约束级别</span><select id="importEnforcement"><option value="required">强制采用</option><option value="preferred">优先参考</option></select></label>
+              </div>
+              <label class="ai-option"><input type="checkbox" id="useAiCleaning" checked /><span><strong>AI 二次清洗</strong><small>模型不可用时自动使用本地规则结果，不会阻断上传。</small></span></label>
+            </article>
+          </div>
+          <article class="panel preview-panel">
+            <div class="panel-head">
+              <div><span class="card-kicker">03 · REVIEW</span><h2>候选审核</h2></div>
+              <div class="summary-chips" id="importSummary"><span>尚未清洗</span></div>
+            </div>
+            <div class="mapping-note" id="mappingNote">选择表格后，点击页头的“开始智能清洗”。</div>
+            <div class="candidate-table-wrap">
+              <table class="candidate-table">
+                <thead><tr><th class="check-cell"><input id="selectAllCandidates" type="checkbox" /></th><th>目标库</th><th>中文源词</th><th>正式译法</th><th>判断</th><th>依据</th></tr></thead>
+                <tbody id="importCandidates"><tr><td colspan="6" class="table-empty">还没有候选数据</td></tr></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="view-assets">
+          <div class="locale-strip" id="assetLocales" aria-label="资产语言"></div>
+          <article class="panel asset-list-panel">
+            <div class="panel-head"><div><span class="card-kicker">PHYSICALLY ISOLATED COLLECTION</span><h2 id="assetListTitle">日本語术语库</h2></div><div class="asset-count" id="assetRevision">0 条</div></div>
+            <div class="asset-search"><input id="assetSearch" placeholder="搜索中文源词、正式译法或别名" /></div>
+            <div class="asset-list" id="assetList"></div>
+            <p class="isolation-note">当前列表只读取所选目标语言的物理表；其他三套术语不会混入匹配或写入流程。</p>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="assetDialog">
+      <form class="dialog-card" id="assetForm">
+        <div class="dialog-head"><div><span class="card-kicker">SINGLE TERM</span><h2>新增单条术语</h2></div><button class="icon-button" type="button" data-close="assetDialog" aria-label="关闭">×</button></div>
+        <div class="form-grid">
+          <label><span>中文源词</span><input name="source" required /></label>
+          <label><span id="targetTermLabel">日本語正式译法</span><input name="target" required /></label>
+          <label><span>中文别名</span><input name="aliases" placeholder="用逗号分隔" /></label>
+          <label><span>禁用译法</span><input name="forbidden" placeholder="用逗号分隔" /></label>
+          <label><span>适用语体</span><select name="contentType"></select></label>
+          <label><span>约束级别</span><select name="enforcement"><option value="required">强制采用</option><option value="preferred">优先参考</option></select></label>
+        </div>
+        <label><span>备注</span><textarea name="note" placeholder="命名来源、使用边界或地区说明"></textarea></label>
+        <div class="dialog-actions"><button class="button ghost" type="button" data-close="assetDialog">取消</button><button class="button primary" type="submit">保存到当前语言库</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="providerDialog">
+      <form class="dialog-card" id="providerForm">
+        <div class="dialog-head"><div><span class="card-kicker">OPENAI-COMPATIBLE</span><h2>模型服务设置</h2></div><button class="icon-button" type="button" data-close="providerDialog" aria-label="关闭">×</button></div>
+        <label><span>Base URL</span><input name="baseUrl" placeholder="http://localhost:11434/v1" /></label>
+        <label><span>模型名称</span><input name="model" placeholder="qwen3:14b" /></label>
+        <label><span>API Key（留空保持现有 Key）</span><input name="apiKey" type="password" autocomplete="off" /></label>
+        <p class="provider-security-note" id="providerSecurityNote">保存后使用 Windows 当前用户级加密，不会以明文写入项目。</p>
+        <div class="dialog-actions"><button class="button ghost" type="button" data-close="providerDialog">取消</button><button class="button primary" type="submit">保存设置</button></div>
+      </form>
+    </dialog>
+    <dialog id="termSuggestionDialog">
+      <div class="dialog-card suggestion-dialog-card">
+        <div class="dialog-head"><div><span class="card-kicker">SMART TERM MATCH</span><h2>确认术语替换</h2></div><button class="icon-button" type="button" data-close="termSuggestionDialog" aria-label="关闭">×</button></div>
+        <div class="suggestion-source" id="suggestionSource"></div>
+        <div class="replacement-preview"><div><span>当前译文</span><del id="suggestionCurrent"></del></div><strong>→</strong><div><span>正式译法</span><ins id="suggestionReplacement"></ins></div></div>
+        <p class="suggestion-confidence" id="suggestionConfidence"></p>
+        <p class="suggestion-warning">确认后将替换译文中所有相同表达，并立即重新执行术语与 QA 检查。</p>
+        <div class="dialog-actions"><button class="button ghost" type="button" data-close="termSuggestionDialog">保留当前表达</button><button class="button primary" type="button" id="confirmTermReplace">采用正式译法</button></div>
+      </div>
+    </dialog>
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

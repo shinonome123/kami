@@ -1,0 +1,25 @@
+{
+  "name": "kami-localization-workbench",
+  "version": "0.5.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=directus/.env server.mjs",
+    "dev": "node --env-file=directus/.env --watch server.mjs",
+    "test": "node --test",
+    "directus:up": "docker compose --env-file directus/.env -f directus/docker-compose.yml up -d",
+    "directus:down": "docker compose --env-file directus/.env -f directus/docker-compose.yml down",
+    "directus:provision": "node --env-file=directus/.env scripts/provision-directus.mjs",
+    "directus:snapshot": "docker compose --env-file directus/.env -f directus/docker-compose.yml exec -T directus node /directus/cli.js schema snapshot --yes /directus/schema/snapshot.yaml"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.1"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

@@ -1,0 +1,7 @@
+.docx-review-*/
+data/corpora/*.json
+*.log
+node_modules/
+data/runtime/
+directus/.env
+tmp/
