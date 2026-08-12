@@ -69,7 +69,10 @@ function renderProviderSecurity(provider) {
 
 function renderLocaleStrip(container, selected, onSelect) {
   container.innerHTML = Object.entries(state.bootstrap.locales).map(([locale, details]) => `
-    <button class="locale-button ${selected === locale ? "active" : ""}" data-locale="${locale}"><strong>${details.shortLabel}</strong><span>${details.label}</span></button>
+    <button class="locale-button ${selected === locale ? "active" : ""}" data-locale="${locale}">
+      <img class="locale-flag" src="${escapeHtml(details.flagAsset)}" alt="" aria-hidden="true" />
+      <span>${details.label}</span>
+    </button>
   `).join("");
   container.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => onSelect(button.dataset.locale)));
 }

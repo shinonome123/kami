@@ -1,23 +1,27 @@
 export const LOCALES = Object.freeze({
   "ja-JP": {
+    flagAsset: "/assets/flag-jp.svg",
     label: "日本語",
     shortLabel: "日",
     language: "Japanese",
     defaultInstruction: "自然な日本語として成立させ、直訳調を避ける。用途に応じて敬体・常体を統一する。"
   },
   "ko-KR": {
+    flagAsset: "/assets/flag-kr.svg",
     label: "한국어",
     shortLabel: "韩",
     language: "Korean",
     defaultInstruction: "자연스러운 한국어 어순과 높임말을 사용하고 조사와 띄어쓰기를 정확히 유지한다."
   },
   "zh-Hant-TW": {
+    flagAsset: "/assets/flag-tw.svg",
     label: "繁體中文",
     shortLabel: "繁",
     language: "Traditional Chinese (Taiwan)",
     defaultInstruction: "使用臺灣繁體中文的自然用語，不做機械式簡繁轉換，避免中國大陸慣用詞直接照搬。"
   },
   "th-TH": {
+    flagAsset: "/assets/flag-th.svg",
     label: "ไทย",
     shortLabel: "泰",
     language: "Thai",

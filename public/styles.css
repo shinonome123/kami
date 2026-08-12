@@ -53,9 +53,9 @@ h3 { margin: 0; font-size: 13px; }
 @keyframes reveal { from { opacity: 0; transform: translateY(3px); } }
 .locale-strip { display: flex; gap: 8px; margin-bottom: 17px; padding-bottom: 12px; border-bottom: 1px solid var(--line); overflow-x: auto; }
 .locale-button { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; color: #69746e; background: rgba(255,255,255,.55); font-size: 11px; white-space: nowrap; }
-.locale-button strong { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #e8e9e4; color: #59645e; font-size: 9px; }
+.locale-flag { display: block; width: 21px; height: 21px; flex: 0 0 21px; border: 1px solid rgba(18,62,49,.13); border-radius: 50%; object-fit: cover; box-shadow: 0 1px 3px rgba(18,62,49,.12); }
 .locale-button.active { border-color: var(--forest); color: var(--forest); background: white; box-shadow: 0 5px 14px rgba(18,62,49,.07); font-weight: 800; }
-.locale-button.active strong { color: var(--forest); background: var(--lime); }
+.locale-button.active .locale-flag { border-color: var(--forest); box-shadow: 0 0 0 2px rgba(200,240,92,.72), 0 2px 5px rgba(18,62,49,.15); }
 
 .translation-mode-switch { width: fit-content; margin: -2px 0 15px; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.58); display: flex; gap: 4px; }
 .translation-mode { min-width: 150px; padding: 8px 12px; border: 0; border-radius: 8px; color: #68736d; background: transparent; text-align: left; }

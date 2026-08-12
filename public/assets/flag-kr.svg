@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600">
+  <rect width="900" height="600" fill="#fff"/>
+  <g transform="translate(450 300) rotate(-33.69)">
+    <path d="M-120 0a120 120 0 0 1 240 0c-33 55-87 55-120 0s-87-55-120 0" fill="#cd2e3a"/>
+    <path d="M120 0a120 120 0 0 1-240 0c33-55 87-55 120 0s87 55 120 0" fill="#0047a0"/>
+  </g>
+  <g fill="#111" transform="translate(230 150) rotate(-33.69)"><rect x="-60" y="-34" width="120" height="18"/><rect x="-60" y="-9" width="120" height="18"/><rect x="-60" y="16" width="120" height="18"/></g>
+  <g fill="#111" transform="translate(670 450) rotate(-33.69)"><rect x="-60" y="-34" width="50" height="18"/><rect x="10" y="-34" width="50" height="18"/><rect x="-60" y="-9" width="120" height="18"/><rect x="-60" y="16" width="50" height="18"/><rect x="10" y="16" width="50" height="18"/></g>
+  <g fill="#111" transform="translate(670 150) rotate(33.69)"><rect x="-60" y="-34" width="50" height="18"/><rect x="10" y="-34" width="50" height="18"/><rect x="-60" y="-9" width="50" height="18"/><rect x="10" y="-9" width="50" height="18"/><rect x="-60" y="16" width="120" height="18"/></g>
+  <g fill="#111" transform="translate(230 450) rotate(33.69)"><rect x="-60" y="-34" width="120" height="18"/><rect x="-60" y="-9" width="50" height="18"/><rect x="10" y="-9" width="50" height="18"/><rect x="-60" y="16" width="50" height="18"/><rect x="10" y="16" width="50" height="18"/></g>
+</svg>
