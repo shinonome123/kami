@@ -78,7 +78,7 @@
                 <div class="panel-head"><div><span class="card-kicker">SOURCE DOCUMENT</span><h2>长文与文件</h2></div><span class="count" id="batchSourceMeta">尚未载入</span></div>
                 <label class="drop-zone batch-drop-zone" id="batchDropZone" for="batchFile">
                   <input id="batchFile" type="file" accept=".txt,.md,.docx,.xlsx" hidden />
-                  <span class="upload-mark">↑</span><strong id="batchFilePrompt">拖入或点击选择文件</strong><small id="batchFileMeta">支持 TXT、Markdown、DOCX、XLSX，最大 10MB</small>
+                  <span class="upload-mark">↑</span><strong id="batchFilePrompt">拖入或点击选择文件</strong><small id="batchFileMeta">拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX，最大 10MB</small>
                 </label>
                 <div class="batch-or"><span>或直接粘贴长文</span></div>
                 <textarea id="batchPasteText" class="batch-paste" placeholder="粘贴公告、剧情、运营文案等长文本；解析时会按段落与句子自动切分。"></textarea>
@@ -92,6 +92,7 @@
                   <div><strong>03</strong><span>调用当前语言独立术语库，并统一使用批次语体与风格。</span></div>
                   <div><strong>04</strong><span>逐单元执行 QA，完成后合并回原文件格式。</span></div>
                 </div>
+                <div class="spreadsheet-analysis" id="spreadsheetAnalysis" hidden></div>
               </article>
             </div>
             <article class="panel batch-queue-panel">
@@ -100,7 +101,7 @@
                 <div class="batch-progress-summary"><strong id="batchProgressText">等待解析</strong><span id="batchProgressMeta">0 / 0</span></div>
               </div>
               <div class="batch-progress-track"><i id="batchProgressBar"></i></div>
-              <div class="batch-segments" id="batchSegments"><div class="empty-list batch-empty">上传文件或粘贴长文后，点击页头“解析并分段”。</div></div>
+              <div class="batch-segments" id="batchSegments"><div class="empty-list batch-empty">拖入文件后会自动识别正文、补充信息并生成翻译队列。</div></div>
             </article>
           </div>
         </section>

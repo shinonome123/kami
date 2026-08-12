@@ -28,9 +28,18 @@ function formatNeighborContext(context = {}) {
   if (typeof context === "string") return context || "无";
   const lines = [];
   if (context.document) lines.push(`文档：${context.document}`);
+  if (context.sheet) lines.push(`工作表：${context.sheet}${context.row ? ` · 第 ${context.row} 行` : ""}${context.sourceColumn ? ` · 正文列：${context.sourceColumn}` : ""}`);
   if (context.segmentIndex && context.segmentCount) lines.push(`位置：第 ${context.segmentIndex} / ${context.segmentCount} 段`);
   if (context.previous) lines.push(`上文：${context.previous}`);
   if (context.next) lines.push(`下文：${context.next}`);
+  if (Array.isArray(context.metadata) && context.metadata.length) {
+    lines.push("该行补充信息与约束（只用于理解和执行要求，不得作为正文翻译）：");
+    for (const item of context.metadata) lines.push(`- [${item.role === "constraint" ? "约束" : "上下文"}] ${item.label}：${item.value}`);
+  }
+  if (Array.isArray(context.referenceTranslations) && context.referenceTranslations.length) {
+    lines.push("该行已有参考译文（仅供语义参考，不得直接当作当前目标语言答案）：");
+    for (const item of context.referenceTranslations) lines.push(`- ${item.label}：${item.value}`);
+  }
   if (context.note) lines.push(`补充：${context.note}`);
   return lines.join("\n") || "无";
 }
@@ -88,6 +97,55 @@ export async function reviewTermCandidatesWithModel(locale, candidates) {
   const payload = JSON.parse(match[0]);
   if (!Array.isArray(payload.decisions)) throw new Error("术语清洗模型返回格式无效");
   return payload.decisions;
+}
+
+export async function analyzeSpreadsheetStructureWithModel(snapshot, ruleAnalysis, locale) {
+  const compactSnapshot = {
+    targetLocale: locale,
+    sheets: snapshot.sheets.map((sheet) => ({
+      sheet: sheet.sheet,
+      rowCount: sheet.rowCount,
+      columnCount: sheet.columnCount,
+      columns: sheet.columns.map((column) => ({
+        column: column.column,
+        letter: column.letter,
+        nonEmpty: column.nonEmpty,
+        averageLength: column.averageLength,
+        hanCharacters: column.hanCharacters,
+        latinCharacters: column.latinCharacters,
+        constraintCells: column.constraintCells,
+        sentenceCells: column.sentenceCells,
+        samples: column.samples.slice(0, 8)
+      })),
+      rows: sheet.rows.slice(0, 35)
+    })),
+    ruleSuggestion: ruleAnalysis.sheets
+  };
+  const content = await chat([
+    {
+      role: "system",
+      content: `你是本地化项目的 Excel 表格结构分析器。源语言固定为简体中文，目标语言是 ${locale}。你的任务只识别结构，不翻译、不改写任何单元格。
+
+请结合表头、列内样本、文字脚本、文本长度、行列分布和规则建议，为每张表识别表头行及每列角色。即使没有表头也必须根据数据分布推断，不能要求用户添加表头。
+
+列角色只能是：
+- source_text：真正需要翻译的简体中文正文、标题、按钮或文案。
+- context：位置、渠道、场景、用途、备注等只用于理解的补充信息。
+- constraint：DDL、字符限制、语种要求、平台规范等翻译约束。
+- existing_translation：英文或其他语言的已有译文/参考译文，不作为中文正文重复翻译。
+- ignore：序号、空辅助列或无关数据。
+
+特别注意：含中文不代表需要翻译。诸如“海外社媒”“80字符内”“8月3日”“中英”“游戏内语言”等通常是 context 或 constraint。正文往往是连续文案列，但短标题、按钮也可能是正文，需要结合整列分布判断。一张表允许多个 source_text 列。
+
+输出严格 JSON，不要 Markdown：{"sheets":[{"sheet":"原工作表名","headerRow":1或null,"confidence":0到1,"reason":"简短依据","columns":[{"column":1,"label":"位置","role":"context","confidence":0.95,"reason":"简短依据"}]}]}`
+    },
+    { role: "user", content: JSON.stringify(compactSnapshot) }
+  ]);
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("表格结构分析模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  if (!Array.isArray(payload.sheets)) throw new Error("表格结构分析模型返回格式无效");
+  return payload;
 }
 
 export async function alignTermSuggestionsWithModel(locale, translation, candidates) {

@@ -7,7 +7,7 @@ import { classifyContent } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { alignTermSuggestionsWithModel, classifyWithModel, getProviderConfig, reviewTermCandidatesWithModel, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, classifyWithModel, getProviderConfig, reviewTermCandidatesWithModel, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
 import { runQa } from "./src/qa.mjs";
 import { completeImport, deleteAsset, getAssets, getAssetStats, getStoreMetadata, initializeStore, saveAsset, saveCorpus, saveImportPreview } from "./src/store.mjs";
 import { applyModelDecisions, extractTermPairs } from "./src/table-term-extractor.mjs";
@@ -180,7 +180,7 @@ async function commitTermImport(body) {
 
 async function apiHandler(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
-    return json(res, 200, { ok: true, version: "0.5.2", locales: Object.keys(LOCALES), backend: getStoreMetadata() });
+    return json(res, 200, { ok: true, version: "0.6.0", locales: Object.keys(LOCALES), backend: getStoreMetadata() });
   }
   if (req.method === "GET" && url.pathname === "/api/bootstrap") {
     const assets = {};
@@ -240,7 +240,9 @@ async function apiHandler(req, res, url) {
     return json(res, 200, updateProviderConfig(await readJsonBody(req)));
   }
   if (req.method === "POST" && url.pathname === "/api/batch/prepare") {
-    return json(res, 200, await prepareBatchDocument(await readJsonBody(req)));
+    const body = await readJsonBody(req);
+    const analyzeSpreadsheet = body.useAiStructure === false ? undefined : (snapshot, ruleAnalysis) => analyzeSpreadsheetStructureWithModel(snapshot, ruleAnalysis, body.locale || "ja-JP");
+    return json(res, 200, await prepareBatchDocument(body, { analyzeSpreadsheet }));
   }
   if (req.method === "POST" && url.pathname === "/api/batch/export") {
     return json(res, 200, await exportBatchDocument(await readJsonBody(req)));

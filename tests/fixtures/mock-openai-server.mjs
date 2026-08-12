@@ -9,7 +9,16 @@ const server = http.createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   const prompt = body.messages?.map((message) => message.content).join("\n") || "";
-  const content = prompt.includes("术语对齐器")
+  const content = prompt.includes("Excel 表格结构分析器")
+    ? JSON.stringify({ sheets: [{ sheet: "Delivery", headerRow: 1, confidence: 0.98, reason: "表头和列内容分布明确", columns: [
+      { column: 1, label: "位置", role: "context", confidence: 0.99, reason: "投放位置" },
+      { column: 2, label: "描述", role: "constraint", confidence: 0.94, reason: "样本为字符限制" },
+      { column: 3, label: "DDL", role: "constraint", confidence: 0.99, reason: "交付日期" },
+      { column: 4, label: "语种要求", role: "constraint", confidence: 0.99, reason: "语言要求" },
+      { column: 5, label: "Chinese Simp.", role: "source_text", confidence: 0.99, reason: "简体中文正文" },
+      { column: 6, label: "English", role: "existing_translation", confidence: 0.99, reason: "已有英文译文" }
+    ] }] })
+    : prompt.includes("术语对齐器")
     ? JSON.stringify({ suggestions: [{ index: 0, currentText: "高級パス", confidence: 0.93, reason: "与疑似源术语语义对应" }] })
     : prompt.includes("双语本地化审校")
       ? "PASS"

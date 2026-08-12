@@ -84,3 +84,51 @@ test("XLSX 只抽取中文单元格并在原位置写回译文", async () => {
   assert.equal(result.getWorksheet("剧情").getCell("A2").value, "แปล2");
   assert.equal(result.getWorksheet("剧情").getCell("B2").value, "Keep");
 });
+
+test("XLSX 只把正文列做成翻译单元，行内字段作为上下文", async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("交付表");
+  sheet.addRow(["位置", "描述", "DDL", "语种要求", "Chinese Simp.", "English"]);
+  sheet.addRow(["海外社媒", "无字符限制", "8月3日", "中英", "八月已至，折扣活动即将开启！", "August is here and the sale is coming!"]);
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  const prepared = await prepareBatchDocument({ filename: "delivery.xlsx", base64: buffer.toString("base64"), segmentationMode: "paragraph" });
+  assert.equal(prepared.segments.length, 1);
+  assert.equal(prepared.segments[0].source, "八月已至，折扣活动即将开启！");
+  assert.deepEqual(prepared.segments[0].context.metadata.map((item) => item.value), ["海外社媒", "无字符限制", "8月3日", "中英"]);
+  assert.equal(prepared.segments[0].context.referenceTranslations[0].value, "August is here and the sale is coming!");
+  assert.equal(prepared.structure.cells[0].address, "E2");
+});
+
+test("无表头 XLSX 也能自动找到正文列且不翻译元数据", async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("无表头");
+  sheet.addRow(["海外社媒", "无字符限制", "八月已至，折扣活动即将开启！完成任务还可领取奖励。", "August is here and the sale is coming!"]);
+  sheet.addRow(["官网标题", "80字符内", "《黑神话：悟空》即将开启七折优惠。", "Black Myth sale soon"]);
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  const prepared = await prepareBatchDocument({ filename: "headerless.xlsx", base64: buffer.toString("base64"), segmentationMode: "paragraph" });
+  assert.equal(prepared.spreadsheetAnalysis.sheets[0].headerRow, null);
+  assert.deepEqual(prepared.segments.map((segment) => segment.locator.address), ["C1", "C2"]);
+  assert.equal(prepared.segments.some((segment) => segment.source === "海外社媒"), false);
+});
+
+test("XLSX 可采用 AI 返回的无表头列角色", async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("AI识别");
+  sheet.addRow(["官网标题", "80字符内", "限时折扣现已开启。"]);
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  let snapshotSeen = false;
+  const prepared = await prepareBatchDocument({ filename: "ai.xlsx", base64: buffer.toString("base64"), segmentationMode: "paragraph" }, {
+    analyzeSpreadsheet: async (snapshot) => {
+      snapshotSeen = snapshot.sheets[0].columns.length === 3;
+      return { sheets: [{ sheet: "AI识别", headerRow: null, confidence: 0.96, reason: "按列内容推断", columns: [
+        { column: 1, label: "位置", role: "context", confidence: 0.94 },
+        { column: 2, label: "字数限制", role: "constraint", confidence: 0.98 },
+        { column: 3, label: "中文正文", role: "source_text", confidence: 0.99 }
+      ] }] };
+    }
+  });
+  assert.equal(snapshotSeen, true);
+  assert.equal(prepared.spreadsheetAnalysis.usedModel, true);
+  assert.equal(prepared.segments.length, 1);
+  assert.deepEqual(prepared.segments[0].context.metadata.map((item) => item.value), ["官网标题", "80字符内"]);
+});

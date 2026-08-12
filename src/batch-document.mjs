@@ -1,6 +1,7 @@
 import { extname, basename } from "node:path";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import { buildSpreadsheetSnapshot, describeSpreadsheetAnalysis, inferSpreadsheetStructure, mergeSpreadsheetAnalysis } from "./spreadsheet-structure.mjs";
 
 const SUPPORTED_EXTENSIONS = new Set([".txt", ".md", ".docx", ".xlsx"]);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -42,12 +43,12 @@ export function segmentLongText(value, segmentationMode = "sentence") {
 
 function createCollector(segmentationMode) {
   const segments = [];
-  const add = (source, locator) => {
+  const add = (source, locator, context = {}) => {
     const split = segmentLongText(source, segmentationMode);
     const ids = split.map((text) => {
       if (segments.length >= MAX_SEGMENTS) fail(`分段超过 ${MAX_SEGMENTS} 段，请拆分文件后重试`, 413);
       const id = `seg-${segments.length + 1}`;
-      segments.push({ id, index: segments.length + 1, source: text, locator, selected: true });
+      segments.push({ id, index: segments.length + 1, source: text, locator, context, selected: true });
       return id;
     });
     return ids;
@@ -103,24 +104,74 @@ function excelCellText(cell) {
   return String(cell.text || "").trim();
 }
 
-async function prepareXlsx(buffer, segmentationMode) {
+async function prepareXlsx(buffer, segmentationMode, analyzeSpreadsheet) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
+  const snapshot = buildSpreadsheetSnapshot(workbook, excelCellText);
+  const ruleAnalysis = inferSpreadsheetStructure(snapshot);
+  let analysis = ruleAnalysis;
+  let fallbackReason = "";
+  if (analyzeSpreadsheet) {
+    try {
+      const modelAnalysis = await analyzeSpreadsheet(snapshot, ruleAnalysis);
+      analysis = mergeSpreadsheetAnalysis(snapshot, ruleAnalysis, modelAnalysis);
+      fallbackReason = analysis.usedModel ? "" : analysis.fallbackReason || "AI 未返回有效识别结果";
+    } catch (error) {
+      fallbackReason = error.message;
+      analysis = { ...ruleAnalysis, fallbackReason };
+    }
+  }
   const collector = createCollector(segmentationMode);
   const cells = [];
   workbook.eachSheet((worksheet) => {
-    worksheet.eachRow((row) => row.eachCell((cell) => {
-      const source = excelCellText(cell);
-      if (!source || !/[\p{Script=Han}]/u.test(source)) return;
-      if (/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(source)) return;
-      const segmentIds = collector.add(source, { type: "xlsx-cell", sheet: worksheet.name, address: cell.address });
-      cells.push({ sheet: worksheet.name, address: cell.address, segmentIds });
-    }));
+    const sheetAnalysis = analysis.sheets.find((sheet) => sheet.sheet === worksheet.name);
+    if (!sheetAnalysis) return;
+    const roles = new Map(sheetAnalysis.columns.map((column) => [column.column, column]));
+    const sourceColumns = sheetAnalysis.columns.filter((column) => column.role === "source_text").map((column) => column.column);
+    worksheet.eachRow((row) => {
+      if (sheetAnalysis.headerRow && row.number === sheetAnalysis.headerRow) return;
+      const metadata = [];
+      const references = [];
+      for (const column of sheetAnalysis.columns) {
+        if (column.role === "source_text" || column.role === "ignore") continue;
+        const value = excelCellText(row.getCell(column.column));
+        if (!value) continue;
+        const item = { label: column.label || `${column.letter}列`, value, role: column.role };
+        if (column.role === "existing_translation") references.push(item);
+        else metadata.push(item);
+      }
+      for (const columnNumber of sourceColumns) {
+        const cell = row.getCell(columnNumber);
+        const source = excelCellText(cell);
+        if (!source || !/[\p{Script=Han}]/u.test(source)) continue;
+        if (/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(source)) continue;
+        const column = roles.get(columnNumber);
+        const context = {
+          sheet: worksheet.name,
+          row: row.number,
+          sourceColumn: column?.label || `第 ${columnNumber} 列`,
+          metadata,
+          referenceTranslations: references
+        };
+        const segmentIds = collector.add(source, { type: "xlsx-cell", sheet: worksheet.name, address: cell.address }, context);
+        cells.push({ sheet: worksheet.name, address: cell.address, segmentIds });
+      }
+    });
   });
-  return { format: "xlsx", segments: collector.segments, structure: { cells } };
+  return {
+    format: "xlsx",
+    segments: collector.segments,
+    structure: { cells },
+    spreadsheetAnalysis: {
+      source: analysis.usedModel ? "model" : "rules",
+      usedModel: Boolean(analysis.usedModel),
+      fallbackReason,
+      sheets: describeSpreadsheetAnalysis(analysis)
+    }
+  };
 }
 
-export async function prepareBatchDocument(input = {}) {
+export async function prepareBatchDocument(input = {}, options = {}) {
   const filename = String(input.filename || (input.text ? "粘贴长文.txt" : "")).trim();
   const extension = extname(filename).toLowerCase();
   if (!filename || !SUPPORTED_EXTENSIONS.has(extension)) fail("仅支持 .txt、.md、.docx、.xlsx 文件");
@@ -130,7 +181,7 @@ export async function prepareBatchDocument(input = {}) {
     const text = input.text !== undefined ? String(input.text) : decodeBase64(input.base64).toString("utf8");
     prepared = preparePlainText(text, filename, segmentationMode);
   } else if (extension === ".docx") prepared = await prepareDocx(decodeBase64(input.base64), segmentationMode);
-  else prepared = await prepareXlsx(decodeBase64(input.base64), segmentationMode);
+  else prepared = await prepareXlsx(decodeBase64(input.base64), segmentationMode, options.analyzeSpreadsheet);
   if (!prepared.segments.length) fail("没有找到可翻译的中文内容");
   return {
     filename,

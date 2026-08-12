@@ -3,11 +3,21 @@ import { extractProtectedTokens } from "./text.mjs";
 
 function normalizeNeighborContext(neighborContext) {
   if (typeof neighborContext === "string") return { previous: "", next: "", note: neighborContext };
+  const normalizeItems = (items) => Array.isArray(items) ? items.slice(0, 20).map((item) => ({
+    label: String(item?.label || "补充信息"),
+    value: String(item?.value || ""),
+    role: String(item?.role || "context")
+  })).filter((item) => item.value) : [];
   return {
     previous: String(neighborContext?.previous || ""),
     next: String(neighborContext?.next || ""),
     note: String(neighborContext?.note || ""),
     document: String(neighborContext?.document || ""),
+    sheet: String(neighborContext?.sheet || ""),
+    row: Number(neighborContext?.row) || undefined,
+    sourceColumn: String(neighborContext?.sourceColumn || ""),
+    metadata: normalizeItems(neighborContext?.metadata),
+    referenceTranslations: normalizeItems(neighborContext?.referenceTranslations),
     segmentIndex: Number(neighborContext?.segmentIndex) || undefined,
     segmentCount: Number(neighborContext?.segmentCount) || undefined
   };

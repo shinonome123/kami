@@ -315,7 +315,7 @@ function clearTranslation() {
   updateWorkbenchLocale(state.workbenchLocale);
 }
 
-function setBatchFile(file) {
+async function setBatchFile(file) {
   if (!file) return;
   if (!/\.(txt|md|docx|xlsx)$/i.test(file.name)) return toast("请选择 TXT、Markdown、DOCX 或 XLSX 文件");
   if (file.size > 10 * 1024 * 1024) return toast("文件不能超过 10MB");
@@ -326,11 +326,13 @@ function setBatchFile(file) {
   state.batchStyleProfile = null;
   $("#batchPasteText").value = "";
   $("#batchFilePrompt").textContent = file.name;
-  $("#batchFileMeta").textContent = `${(file.size / 1024).toFixed(1)} KB · 等待解析`;
+  $("#batchFileMeta").textContent = `${(file.size / 1024).toFixed(1)} KB · 正在智能识别`;
   $("#batchDropZone").classList.add("has-file");
-  $("#batchSourceMeta").textContent = "等待分段";
+  $("#batchSourceMeta").textContent = "AI 结构识别中";
+  $("#spreadsheetAnalysis").hidden = true;
   renderBatchSegments();
   refreshActions();
+  await prepareBatch();
 }
 
 function resetBatch() {
@@ -344,9 +346,10 @@ function resetBatch() {
   $("#batchFile").value = "";
   $("#batchPasteText").value = "";
   $("#batchFilePrompt").textContent = "拖入或点击选择文件";
-  $("#batchFileMeta").textContent = "支持 TXT、Markdown、DOCX、XLSX，最大 10MB";
+  $("#batchFileMeta").textContent = "拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX，最大 10MB";
   $("#batchDropZone").classList.remove("has-file");
   $("#batchSourceMeta").textContent = "尚未载入";
+  $("#spreadsheetAnalysis").hidden = true;
   renderBatchSegments();
   refreshActions();
 }
@@ -365,11 +368,25 @@ function batchStatus(segment) {
   return ["pending", "待翻译", "等待队列"];
 }
 
+function renderSpreadsheetAnalysis(analysis) {
+  const element = $("#spreadsheetAnalysis");
+  if (!analysis?.sheets?.length) {
+    element.hidden = true;
+    return;
+  }
+  const roleLabels = { source_text: "正文", context: "补充信息", constraint: "约束", existing_translation: "已有译文", ignore: "忽略" };
+  const sourceLabel = analysis.usedModel ? "AI 已识别" : "规则降级识别";
+  element.hidden = false;
+  element.innerHTML = `<div class="analysis-head"><strong>Excel 结构识别</strong><span>${sourceLabel}${analysis.fallbackReason ? ` · ${escapeHtml(analysis.fallbackReason)}` : ""}</span></div>${analysis.sheets.map((sheet) => `
+    <div class="analysis-sheet"><strong>${escapeHtml(sheet.sheet)} · ${sheet.headerRow ? `表头第 ${sheet.headerRow} 行` : "无表头自动推断"} · ${Math.round((sheet.confidence || 0) * 100)}%</strong><div class="analysis-columns">${sheet.columns.map((column) => `<span class="analysis-column ${column.role}" title="${escapeHtml(column.reason)}">${escapeHtml(column.letter)} · ${escapeHtml(column.label)} → ${roleLabels[column.role] || column.role}</span>`).join("")}</div></div>
+  `).join("")}`;
+}
+
 function renderBatchSegments() {
   const container = $("#batchSegments");
   const segments = state.batchPreview?.segments || [];
   if (!segments.length) {
-    container.innerHTML = '<div class="empty-list batch-empty">上传文件或粘贴长文后，点击页头“解析并分段”。</div>';
+    container.innerHTML = '<div class="empty-list batch-empty">拖入文件后会自动识别正文、补充信息并生成翻译队列。</div>';
     $("#batchProgressText").textContent = "等待解析";
     $("#batchProgressMeta").textContent = "0 / 0";
     $("#batchProgressBar").style.width = "0%";
@@ -387,7 +404,7 @@ function renderBatchSegments() {
     const [className, label, meta] = batchStatus(segment);
     return `<div class="batch-segment ${segment.status === "running" ? "is-running" : ""} ${segment.status === "error" ? "has-error" : ""}" data-segment-id="${segment.id}">
       <div class="batch-segment-index"><input class="batch-segment-check" data-id="${segment.id}" type="checkbox" ${segment.selected ? "checked" : ""} ${state.batchRunning ? "disabled" : ""} aria-label="选择第 ${segment.index} 段" /><span class="row-ref">${segment.index}</span></div>
-      <div class="batch-segment-source">${escapeHtml(segment.source)}</div>
+      <div class="batch-segment-source"><div class="segment-source-text">${escapeHtml(segment.source)}</div>${segment.context?.metadata?.length || segment.context?.referenceTranslations?.length ? `<div class="segment-context">${(segment.context.metadata || []).map((item) => `<span class="${item.role === "constraint" ? "constraint" : ""}" title="${escapeHtml(item.value)}">${escapeHtml(item.label)}：${escapeHtml(item.value)}</span>`).join("")}${(segment.context.referenceTranslations || []).map((item) => `<span class="reference" title="${escapeHtml(item.value)}">参考 · ${escapeHtml(item.label)}：${escapeHtml(item.value)}</span>`).join("")}</div>` : ""}</div>
       <textarea class="batch-segment-target" data-id="${segment.id}" placeholder="${segment.status === "running" ? "正在翻译…" : "译文将在这里显示"}" ${segment.status === "running" ? "disabled" : ""}>${escapeHtml(segment.translation || "")}</textarea>
       <div class="segment-status ${className}"><strong>${label}</strong><small>${escapeHtml(meta)}</small></div>
     </div>`;
@@ -414,27 +431,30 @@ function renderBatchSegments() {
 async function prepareBatch() {
   const pasted = $("#batchPasteText").value.trim();
   if (!state.batchFile && !pasted) return toast("请先上传文件或粘贴长文");
-  setBusy(true, "解析与分段中…");
+  setBusy(true, state.batchFile?.name.toLowerCase().endsWith(".xlsx") ? "AI 识别表格结构中…" : "解析与分段中…");
   try {
     state.batchBase64 = state.batchFile ? await fileToBase64(state.batchFile) : "";
     const prepared = await api("/api/batch/prepare", { method: "POST", body: JSON.stringify({
       filename: state.batchFile?.name || "粘贴长文.txt",
       base64: state.batchBase64 || undefined,
       text: state.batchFile ? undefined : pasted,
-      segmentationMode: $("#batchSegmentationMode").value
+      segmentationMode: $("#batchSegmentationMode").value,
+      locale: state.workbenchLocale,
+      useAiStructure: true
     }) });
     prepared.segments.forEach((segment) => Object.assign(segment, { selected: true, status: "pending", translation: "", result: null, error: "" }));
     state.batchPreview = prepared;
     state.batchClassification = null;
     state.batchStyleProfile = null;
     $("#batchSourceMeta").textContent = `${prepared.statistics.characters} 字 · ${prepared.statistics.segments} 段`;
+    renderSpreadsheetAnalysis(prepared.spreadsheetAnalysis);
     if (!state.batchFile) {
       $("#batchFilePrompt").textContent = "已载入粘贴长文";
       $("#batchFileMeta").textContent = `${prepared.statistics.characters} 字 · ${prepared.format.toUpperCase()}`;
       $("#batchDropZone").classList.add("has-file");
-    } else $("#batchFileMeta").textContent = `${(state.batchFile.size / 1024).toFixed(1)} KB · 已完成分段`;
+    } else $("#batchFileMeta").textContent = `${(state.batchFile.size / 1024).toFixed(1)} KB · ${prepared.spreadsheetAnalysis?.usedModel ? "AI 已识别正文与补充信息" : prepared.format === "xlsx" ? "已按规则识别表格" : "已完成分段"}`;
     renderBatchSegments();
-    toast(`已自动拆分为 ${prepared.statistics.segments} 段，可取消不需要翻译的段落`);
+    toast(prepared.format === "xlsx" ? `已识别 ${prepared.statistics.segments} 个翻译单元，补充信息不会作为正文翻译` : `已自动拆分为 ${prepared.statistics.segments} 段，可取消不需要翻译的段落`);
   } catch (error) { toast(error.message); }
   finally { setBusy(false); }
 }
@@ -478,6 +498,7 @@ async function runBatch() {
     renderBatchSegments();
     const position = segments.indexOf(segment);
     const context = {
+      ...(segment.context || {}),
       previous: segments[position - 1]?.source || "",
       next: segments[position + 1]?.source || "",
       document: state.batchPreview.filename,
@@ -784,7 +805,7 @@ function bindEvents() {
     state.batchStyleProfile = null;
     renderBatchSegments();
     refreshActions();
-    toast("分段方式已改变，请重新解析");
+    if (state.batchFile || $("#batchPasteText").value.trim()) prepareBatch();
   });
   $("#batchDropZone").addEventListener("dragover", (event) => { event.preventDefault(); $("#batchDropZone").classList.add("dragging"); });
   $("#batchDropZone").addEventListener("dragleave", () => $("#batchDropZone").classList.remove("dragging"));
