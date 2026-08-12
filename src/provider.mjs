@@ -48,7 +48,9 @@ function packPrompt(contextPack) {
   return `你是专业的亚洲语言游戏本地化译者。请严格从简体中文翻译到 ${contextPack.targetLanguage}。\n\n` +
     `内容类型：${contextPack.contentTypeLabel}\n` +
     `语体要求：${contextPack.register}\n` +
-    `翻译风格：${contextPack.styleProfile?.name || contextPack.contentTypeLabel} · ${contextPack.styleProfile?.instruction || contextPack.register}\n` +
+    `翻译风格：${contextPack.styleProfile?.name || contextPack.contentTypeLabel} · 版本 ${contextPack.styleProfile?.version || 1} · ${contextPack.styleProfile?.instruction || contextPack.register}\n` +
+    `风格正反例：${JSON.stringify(contextPack.styleProfile?.examples || [])}\n` +
+    `历史 AIQA 反例与修订：${JSON.stringify(contextPack.qaGuidance || [])}\n` +
     `目标语言要求：${contextPack.localeInstruction}\n` +
     `领域：${contextPack.domain}\n` +
     `文档上下文（仅用于理解，不得翻译进结果）：\n${formatNeighborContext(contextPack.neighborContext)}\n\n` +
@@ -80,6 +82,7 @@ export async function reviewTermCandidatesWithModel(locale, candidates) {
   const language = LOCALE_NAMES[locale] || locale;
   const compactCandidates = candidates.slice(0, 160).map((candidate, index) => ({
     index,
+    assetType: candidate.assetType,
     source: candidate.source,
     target: candidate.target,
     ruleScore: candidate.score,
@@ -88,7 +91,7 @@ export async function reviewTermCandidatesWithModel(locale, candidates) {
   const content = await chat([
     {
       role: "system",
-      content: `你是游戏本地化术语库清洗员，审核简体中文到${language}的候选对照。只保留专名、系统名、功能名、道具名、角色名、地点名、技能名及稳定复用短语；排除完整句子、说明文、数字、占位符、网址、错列和明显误译。不要改写文本。输出严格 JSON：{"decisions":[{"index":0,"keep":true,"confidence":0.9,"reason":"简短理由"}]}`
+      content: `你是游戏本地化资产清洗员，审核简体中文到${language}的候选对照。assetType=term 时只保留专名、系统名、功能名、道具名、角色名、地点名、技能名及稳定复用短语；assetType=memory 时保留语义对齐的完整中外文句段，用于翻译记忆和风格证据。两类都必须排除数字、网址、错列、元数据和明显误译。不要改写文本。输出严格 JSON：{"decisions":[{"index":0,"keep":true,"confidence":0.9,"reason":"简短理由"}]}`
     },
     { role: "user", content: JSON.stringify(compactCandidates) }
   ]);
@@ -97,6 +100,84 @@ export async function reviewTermCandidatesWithModel(locale, candidates) {
   const payload = JSON.parse(match[0]);
   if (!Array.isArray(payload.decisions)) throw new Error("术语清洗模型返回格式无效");
   return payload.decisions;
+}
+
+export async function analyzeTermTableStructureWithModel(snapshot, requestedLocale) {
+  const allowedLocales = requestedLocale ? [requestedLocale] : Object.keys(LOCALE_NAMES);
+  const compactSnapshot = {
+    requestedLocale: requestedLocale || "auto",
+    allowedLocales,
+    sheets: snapshot.sheets.map((sheet) => ({
+      sheet: sheet.sheet,
+      rowCount: sheet.rowCount,
+      columnCount: sheet.columnCount,
+      rows: sheet.rows.slice(0, 45)
+    }))
+  };
+  const content = await chat([
+    {
+      role: "system",
+      content: `你是亚洲语言游戏本地化术语表结构分析器。源语言固定为简体中文，允许的目标语言 locale 只有 ${allowedLocales.join(", ")}。你只判断表格结构，绝对不能翻译、改写或补全单元格。
+
+表格可能完全没有表头，也可能前几行是标题、说明或元数据。请根据整列的文字脚本、成对行关系、长度和内容分布，找出一列简体中文源文以及一个或多个目标语言列。纯汉字日文和繁体中文也必须结合对应行语义与整列分布判断，不能因为缺少假名或表头就拒绝。
+
+不要把位置、描述、DDL、字符限制、语种要求、序号或日期列当成中外文对照。headerRow 只有确实存在列名行时才填写，否则必须为 null。输出严格 JSON，不要 Markdown：{"sheets":[{"sheet":"原工作表名","headerRow":null,"sourceColumn":1,"targetColumns":{"ja-JP":2},"confidence":0.9,"reason":"简短依据"}]}`
+    },
+    { role: "user", content: JSON.stringify(compactSnapshot) }
+  ]);
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("术语表结构分析模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  if (!Array.isArray(payload.sheets)) throw new Error("术语表结构分析模型返回格式无效");
+  return payload;
+}
+
+export async function distillStyleProfileWithModel({ locale, contentType, domain, examples, previousProfile = null }) {
+  const language = LOCALE_NAMES[locale] || locale;
+  const content = await chat([
+    {
+      role: "system",
+      content: `你是${language}游戏本地化风格资产编辑。请只根据给定的已对齐中外文证据，为“${contentType}”这一种内容语体提炼稳定、可执行的风格规范。不得混入其他语体，不得编造作品设定。规则应覆盖语气、句式、称谓、标点、信息顺序、长度倾向、禁用表达，并提供简短正反例。输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
+    },
+    { role: "user", content: JSON.stringify({ locale, contentType, domain, previousProfile, examples: examples.slice(0, 30) }) }
+  ]);
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("风格精炼模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  if (!payload.instructions || !Array.isArray(payload.examples)) throw new Error("风格精炼模型返回格式无效");
+  return { name: String(payload.name || `${language} ${contentType} 风格`), instruction: String(payload.instructions), examples: payload.examples.slice(0, 12) };
+}
+
+export async function evaluateTranslationWithModel({ contextPack, translation, references = [], qaCases = [] }) {
+  const content = await chat([
+    {
+      role: "system",
+      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式和约束。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
+    },
+    { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
+  ]);
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("AIQA 模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  if (!Array.isArray(payload.issues)) throw new Error("AIQA 模型返回格式无效");
+  return payload.issues.slice(0, 30).map((issue) => ({
+    severity: ["critical", "major", "minor"].includes(issue.severity) ? issue.severity : "major",
+    category: String(issue.category || "other"),
+    sourceSpan: String(issue.sourceSpan || ""),
+    targetSpan: String(issue.targetSpan || ""),
+    message: String(issue.message || "未说明问题"),
+    suggestion: String(issue.suggestion || ""),
+    evidenceMemoryId: String(issue.evidenceMemoryId || ""),
+    confidence: Math.max(0, Math.min(1, Number(issue.confidence) || 0.5)),
+    source: "aiqa"
+  }));
+}
+
+export async function reviseTranslationWithQa({ contextPack, translation, issues, references = [], qaCases = [] }) {
+  return chat([
+    { role: "system", content: "你是最终修订译者。只修复 QA 明确指出的问题，保留正确内容、数字、格式、占位符、强制术语和原有信息边界。只输出完整修订译文，不要解释。" },
+    { role: "user", content: JSON.stringify({ contextPack, currentTranslation: translation, issues, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
+  ]);
 }
 
 export async function analyzeSpreadsheetStructureWithModel(snapshot, ruleAnalysis, locale) {

@@ -117,7 +117,7 @@ function refreshActions() {
       }
     }
   } else if (state.view === "import") {
-    primary.textContent = state.importPreview && !state.importCompleted ? "导入已选术语" : "开始智能清洗";
+    primary.textContent = state.importPreview && !state.importCompleted ? "导入已选资产" : state.importFile ? "重新智能识别" : "拖入表格自动识别";
     primary.disabled = state.importCompleted || (!state.importPreview && !state.importFile);
     if (state.importFile || state.importPreview) {
       secondary.hidden = false;
@@ -175,7 +175,7 @@ function updateWorkbenchLocale(locale) {
   $("#targetLegend").hidden = true;
   $("#termMatches").textContent = "尚未匹配";
   $("#termMatches").className = "term-matches empty-list";
-  $("#qaList").textContent = "翻译后显示审校结果";
+  $("#qaList").textContent = "翻译后显示相似译例、评分与修订结果";
   $("#qaList").className = "qa-list empty-list";
   setTranslationStatus("neutral", "等待翻译");
   if (localeChanged && state.batchPreview) {
@@ -208,14 +208,19 @@ function renderMatches(matches) {
 
 function renderQa(result) {
   const errors = result.issues.filter((issue) => issue.severity === "error");
-  $("#issueCount").textContent = errors.length ? `${errors.length} 个阻断项` : result.issues.length ? `${result.issues.length} 条建议` : "硬校验通过";
+  $("#issueCount").textContent = result.aiQa?.fallbackReason ? "AIQA 未完成" : Number.isFinite(result.qaScore) ? `AIQA ${result.qaScore} 分 · ${result.aiQa?.iterations || 0} 次修订` : errors.length ? `${errors.length} 个阻断项` : result.issues.length ? `${result.issues.length} 条建议` : "硬校验通过";
   const reflection = result.reflection ? `<div class="reflection-box"><strong>模型反思</strong>\n${escapeHtml(result.reflection)}</div>` : "";
+  const retrieval = result.aiQa?.references?.length ? `<div class="reflection-box"><strong>相似译例检索</strong>\n${result.aiQa.references.map((item) => `${Math.round(item.similarity * 100)}% · ${item.source} → ${item.target}`).map(escapeHtml).join("\n")}</div>` : "";
+  const qaCases = result.aiQa?.qaCases?.length ? `<div class="reflection-box"><strong>历史 AIQA 反例</strong>\n${result.aiQa.qaCases.map((item) => `${Math.round(item.similarity * 100)}% · ${item.rejectedTranslation} → ${item.correctedTranslation}`).map(escapeHtml).join("\n")}</div>` : "";
   const issues = result.issues.map((issue) => `<div class="qa-item ${issue.severity}">${escapeHtml(issue.message)}</div>`).join("");
   $("#qaList").className = "qa-list";
-  $("#qaList").innerHTML = `${reflection}${issues || '<div class="qa-item">数字、占位符与强制术语检查通过</div>'}`;
+  const fallback = result.aiQa?.fallbackReason ? `<div class="qa-item warning">AIQA 暂未完成：${escapeHtml(result.aiQa.fallbackReason)}</div>` : "";
+  $("#qaList").innerHTML = `${reflection}${retrieval}${qaCases}${fallback}${issues || (!fallback ? '<div class="qa-item">硬规则与检索式 AIQA 均通过</div>' : '')}`;
 }
 
-function setResultStatus(issues = []) {
+function setResultStatus(issues = [], aiQa = null) {
+  if (aiQa?.fallbackReason) return setTranslationStatus("warning", "AIQA 未完成");
+  if (Number.isFinite(aiQa?.score) && aiQa.score < 90) return setTranslationStatus("error", "AIQA 待复核");
   if (issues.some((issue) => issue.severity === "error")) setTranslationStatus("error", "需要处理");
   else if (issues.length) setTranslationStatus("warning", "建议确认");
   else setTranslationStatus("success", "QA 通过");
@@ -259,15 +264,19 @@ async function applyTermSuggestion() {
       translation: state.lastResult.translation,
       locale: state.workbenchLocale,
       contentType: state.lastResult.classification.contentType,
-      domain: $("#domain").value
+      domain: $("#domain").value,
+      aiQa: true
     }) });
+    state.lastResult.translation = qa.translation;
     state.lastResult.matches = qa.matches;
     state.lastResult.issues = qa.issues;
+    state.lastResult.qaScore = qa.qaScore;
+    state.lastResult.aiQa = qa.aiQa;
   } catch (error) { toast(`替换成功，但 QA 刷新失败：${error.message}`); }
   renderTranslationOutput();
   renderMatches(state.lastResult.matches);
   renderQa(state.lastResult);
-  setResultStatus(state.lastResult.issues);
+  setResultStatus(state.lastResult.issues, state.lastResult.aiQa);
   toast(`已将“${suggestion.currentText}”替换为正式译法“${suggestion.replacement}”`);
 }
 
@@ -305,7 +314,7 @@ async function translate() {
     $("#classificationPreview").innerHTML = `<span class="pulse-dot"></span><span>语体：<strong>${state.bootstrap.contentTypes[result.classification.contentType].label}</strong> · ${result.classification.source === "model" ? "模型识别" : "规则识别"}</span>`;
     renderMatches(result.matches);
     renderQa(result);
-    setResultStatus(result.issues);
+    setResultStatus(result.issues, result.aiQa);
   } catch (error) {
     setTranslationStatus("error", "翻译失败");
     toast(error.message);
@@ -363,10 +372,12 @@ function batchStatus(segment) {
   if (segment.status === "error") return ["error", "翻译失败", segment.error || "可继续重试"];
   if (segment.status === "done") {
     const issues = segment.result?.issues || [];
+    if (segment.result?.aiQa?.fallbackReason) return ["warning", "AIQA 未完成", "需要重试或人工复核"];
+    if (Number.isFinite(segment.result?.qaScore) && segment.result.qaScore < 90) return ["warning", "需要复核", `AIQA ${segment.result.qaScore} 分`];
     const errors = issues.filter((issue) => issue.severity === "error").length;
     if (errors) return ["warning", "需要复核", `${errors} 个阻断项`];
     if (issues.length) return ["warning", "建议确认", `${issues.length} 条建议`];
-    return ["success", "QA 通过", `${segment.result?.matches?.length || 0} 条术语`];
+    return ["success", "QA 通过", `${Number.isFinite(segment.result?.qaScore) ? `${segment.result.qaScore} 分 · ` : ""}${segment.result?.matches?.length || 0} 条术语`];
   }
   return ["pending", "待翻译", "等待队列"];
 }
@@ -516,9 +527,11 @@ async function runBatch() {
         domain: $("#domain").value,
         neighborContext: context,
         styleProfile: state.batchStyleProfile,
+        batchId: state.batchPreview.batchId || state.batchPreview.filename,
         reflect: $("#reflect").checked,
         useModelClassification: false
       }) });
+      if (result.styleProfile?.source === "style-library") state.batchStyleProfile = result.styleProfile;
       segment.translation = result.translation;
       segment.result = result;
       segment.status = "done";
@@ -617,7 +630,7 @@ function renderAssets() {
   }));
 }
 
-function setImportFile(file) {
+async function setImportFile(file) {
   if (!file) return;
   if (!/\.(xlsx|csv)$/i.test(file.name)) return toast("请选择 .xlsx 或 .csv 表格");
   if (file.size > 10 * 1024 * 1024) return toast("表格不能超过 10MB");
@@ -625,12 +638,13 @@ function setImportFile(file) {
   state.importPreview = null;
   state.importCompleted = false;
   $("#filePrompt").textContent = file.name;
-  $("#fileMeta").textContent = `${(file.size / 1024).toFixed(1)} KB · 等待清洗`;
+  $("#fileMeta").textContent = `${(file.size / 1024).toFixed(1)} KB · AI 正在识别表格结构`;
   $("#dropZone").classList.add("has-file");
-  $("#mappingNote").textContent = "文件已就绪。点击页头的“开始智能清洗”。";
-  $("#importSummary").innerHTML = "<span>等待清洗</span>";
+  $("#mappingNote").textContent = "正在自动识别中文列、目标语言列和无表头数据结构……";
+  $("#importSummary").innerHTML = "<span>AI 结构识别中</span>";
   $("#importCandidates").innerHTML = '<tr><td colspan="6" class="table-empty">清洗后将在此处审核候选</td></tr>';
   refreshActions();
+  await cleanTable();
 }
 
 function resetImport() {
@@ -639,9 +653,9 @@ function resetImport() {
   state.importCompleted = false;
   $("#termFile").value = "";
   $("#filePrompt").textContent = "拖入或点击选择 .xlsx / .csv";
-  $("#fileMeta").textContent = "最大 10MB；支持一张表内同时包含日、韩、繁中、泰列";
+  $("#fileMeta").textContent = "拖入后自动识别；不要求表头，支持日、韩、繁中、泰列";
   $("#dropZone").classList.remove("has-file");
-  $("#mappingNote").textContent = "选择表格后，点击页头的“开始智能清洗”。";
+  $("#mappingNote").textContent = "拖入表格后会自动识别结构并生成审核队列。";
   $("#importSummary").innerHTML = "<span>尚未清洗</span>";
   $("#importCandidates").innerHTML = '<tr><td colspan="6" class="table-empty">还没有候选数据</td></tr>';
   refreshActions();
@@ -685,7 +699,7 @@ function renderImportCandidates() {
     const disabled = candidate.existing || candidate.decision === "excluded" || state.importCompleted;
     return `<tr class="candidate-${className}">
       <td class="check-cell"><input class="candidate-check" data-index="${index}" type="checkbox" ${candidate.selected ? "checked" : ""} ${disabled ? "disabled" : ""} /></td>
-      <td><span class="locale-tag">${state.bootstrap.locales[candidate.locale].shortLabel} · ${state.bootstrap.locales[candidate.locale].label}</span><small class="row-ref">第 ${candidate.rowNumber} 行</small></td>
+      <td><span class="locale-tag">${state.bootstrap.locales[candidate.locale].shortLabel} · ${state.bootstrap.locales[candidate.locale].label}</span><small class="row-ref">${candidate.assetType === "memory" ? "翻译记忆 / 风格证据" : "术语"} · 第 ${candidate.rowNumber} 行</small></td>
       <td><input class="table-input candidate-source" data-index="${index}" value="${escapeHtml(candidate.source)}" ${disabled ? "disabled" : ""} /></td>
       <td><input class="table-input candidate-target" data-index="${index}" value="${escapeHtml(candidate.target)}" ${disabled ? "disabled" : ""} /></td>
       <td><span class="decision-badge ${className}">${label}</span><small class="score">${Math.round(candidate.score * 100)} 分</small></td>
@@ -712,8 +726,11 @@ async function cleanTable() {
     state.importPreview = result;
     state.importCompleted = false;
     const mappings = result.sheets.map((sheet) => `${sheet.sheet}：中文列 ${sheet.sourceColumn}，目标列 ${Object.entries(sheet.targetColumns).map(([locale, column]) => `${state.bootstrap.locales[locale].shortLabel} ${column}`).join(" / ")}`).join("；");
-    const aiText = result.ai?.used ? `AI 已复核 ${result.ai.reviewed} 条` : result.ai?.requested ? `AI 不可用，已回退本地规则` : "使用本地规则清洗";
-    $("#mappingNote").textContent = `${mappings}。${aiText}。候选不会在确认前写入正式术语库。`;
+    const structureText = result.structureAnalysis?.used
+      ? "AI 已识别列结构（支持无表头）"
+      : result.structureAnalysis?.requested ? "AI 结构识别不可用，已回退本地整列推断" : "使用本地整列推断";
+    const aiText = result.ai?.used ? `AI 已复核 ${result.ai.reviewed} 条` : result.ai?.requested ? `AI 清洗不可用，已回退本地规则` : "使用本地规则清洗";
+    $("#mappingNote").textContent = `${mappings}。${structureText}；${aiText}。候选不会在确认前写入正式术语库。`;
     renderImportCandidates();
     toast(`已筛出 ${result.candidates.length} 组候选，请审核后导入`);
   } catch (error) { toast(error.message); }
@@ -722,7 +739,7 @@ async function cleanTable() {
 
 async function commitImport() {
   if (!state.importPreview) return;
-  if (!selectedCandidates().length) return toast("请至少选择一组候选术语");
+  if (!selectedCandidates().length) return toast("请至少选择一组候选资产");
   setBusy(true, "正在分库写入…");
   try {
     const result = await api("/api/term-import/commit", { method: "POST", body: JSON.stringify({
@@ -739,10 +756,10 @@ async function commitImport() {
       if (importedIds.has(`${candidate.locale}\u0000${candidate.source}\u0000${candidate.target}`)) candidate.existing = true;
       candidate.selected = false;
     });
-    $("#mappingNote").textContent = `批次已完成：成功写入 ${result.imported.length} 条，跳过 ${result.skipped.length} 条。每条术语只进入自己的目标语言物理表。`;
+    $("#mappingNote").textContent = `批次已完成：写入术语 ${result.summary.terms || 0} 条、翻译记忆 ${result.summary.memories || 0} 条、生成分类风格版本 ${result.summary.styleProfiles || 0} 个，跳过 ${result.skipped.length} 条。所有资产均按目标语言隔离。`;
     renderImportCandidates();
-    await Promise.all([...new Set(result.imported.map((item) => item.locale))].map((locale) => loadAssets(locale)));
-    toast(`已导入 ${result.imported.length} 条术语`);
+    await Promise.all([...new Set(result.imported.filter((item) => item.assetType === "term").map((item) => item.locale))].map((locale) => loadAssets(locale)));
+    toast(`已导入 ${result.summary.terms || 0} 条术语和 ${result.summary.memories || 0} 条翻译记忆`);
   } catch (error) { toast(error.message); }
   finally { setBusy(false); }
 }

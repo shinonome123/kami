@@ -23,7 +23,7 @@ function normalizeNeighborContext(neighborContext) {
   };
 }
 
-export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null }) {
+export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, qaGuidance = [] }) {
   const required = matches.filter((item) => item.mode === "exact" && item.term.enforcement === "required");
   const preferred = matches.filter((item) => item.mode !== "exact" || item.term.enforcement !== "required");
   const defaultRegister = CONTENT_TYPES[classification.contentType].register;
@@ -39,7 +39,9 @@ export function buildContextPack({ source, locale, classification, matches, doma
       id: String(styleProfile?.id || "content-type-default"),
       name: String(styleProfile?.name || CONTENT_TYPES[classification.contentType].label),
       source: String(styleProfile?.source || "content-type"),
-      instruction: String(styleProfile?.instruction || defaultRegister)
+      instruction: String(styleProfile?.instruction || defaultRegister),
+      version: Number(styleProfile?.version) || 1,
+      examples: Array.isArray(styleProfile?.examples) ? styleProfile.examples.slice(0, 8) : []
     },
     localeInstruction: LOCALES[locale].defaultInstruction,
     requiredTerms: required.map(({ term }) => ({ source: term.source, target: term.target, forbidden: term.forbidden, note: term.note })),
@@ -52,6 +54,14 @@ export function buildContextPack({ source, locale, classification, matches, doma
       note: mode === "exact" ? term.note : `疑似术语，仅供参考，不得未经判断强制替换。${term.note || ""}`
     })),
     protectedTokens: extractProtectedTokens(source),
+    qaGuidance: Array.isArray(qaGuidance) ? qaGuidance.slice(0, 3).map((item) => ({
+      id: item.id,
+      source: item.source,
+      rejectedTranslation: item.rejectedTranslation,
+      correctedTranslation: item.correctedTranslation,
+      issues: item.issues,
+      similarity: item.similarity
+    })) : [],
     neighborContext: normalizeNeighborContext(neighborContext),
     source
   };

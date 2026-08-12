@@ -26,3 +26,26 @@ export function runQa({ source, translation, matches = [] }) {
   }
   return issues;
 }
+
+export function calculateQaScore({ hardIssues = [], aiIssues = [] } = {}) {
+  let penalty = 0;
+  for (const issue of hardIssues) penalty += issue.severity === "error" ? 35 : 3;
+  for (const issue of aiIssues) {
+    if (issue.confidence < 0.55) continue;
+    penalty += issue.severity === "critical" ? 35 : issue.severity === "major" ? 12 : 3;
+  }
+  let score = Math.max(0, 100 - penalty);
+  if (hardIssues.some((issue) => issue.severity === "error")) score = Math.min(score, 60);
+  if (aiIssues.some((issue) => issue.severity === "critical" && issue.confidence >= 0.7)) score = Math.min(score, 65);
+  return Math.round(score);
+}
+
+export function presentAiQaIssues(aiIssues = []) {
+  return aiIssues.filter((issue) => issue.confidence >= 0.55).map((issue) => ({
+    ...issue,
+    mqmSeverity: issue.severity,
+    severity: issue.severity === "minor" ? "warning" : "error",
+    type: `aiqa_${issue.category}`,
+    message: `${issue.message}${issue.suggestion ? `；建议：${issue.suggestion}` : ""}`
+  }));
+}

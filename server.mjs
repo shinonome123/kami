@@ -7,11 +7,12 @@ import { classifyContent } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, classifyWithModel, getProviderConfig, reviewTermCandidatesWithModel, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
-import { runQa } from "./src/qa.mjs";
-import { completeImport, deleteAsset, getAssets, getAssetStats, getStoreMetadata, initializeStore, saveAsset, saveCorpus, saveImportPreview } from "./src/store.mjs";
+import { alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, distillStyleProfileWithModel, evaluateTranslationWithModel, getProviderConfig, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
+import { completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getStoreMetadata, getStyleProfile, initializeStore, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleProfile } from "./src/store.mjs";
 import { applyModelDecisions, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
+import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
@@ -71,6 +72,63 @@ async function classify(body) {
   }
 }
 
+async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, contentType, domain, batchId }) {
+  const memoryPool = await getMemories(locale, { contentType, domain, limit: 500 });
+  const references = rankTranslationMemories(contextPack.source, memoryPool, { limit: 5 });
+  const qaCases = contextPack.qaGuidance || [];
+  let translation = initialTranslation;
+  let hardIssues = runQa({ source: contextPack.source, translation, matches });
+  let aiIssues = [];
+  let score = calculateQaScore({ hardIssues, aiIssues });
+  let initialScore = score;
+  let iterations = 0;
+  let used = false;
+  let fallbackReason = "";
+
+  try {
+    aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references, qaCases });
+    used = true;
+    score = calculateQaScore({ hardIssues, aiIssues });
+    initialScore = score;
+    while (score < 90 && iterations < 2) {
+      const actionable = [...hardIssues.map((issue) => ({ severity: "critical", category: issue.type, message: issue.message })), ...aiIssues];
+      translation = await reviseTranslationWithQa({ contextPack, translation, issues: actionable, references, qaCases });
+      iterations += 1;
+      hardIssues = runQa({ source: contextPack.source, translation, matches });
+      aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references, qaCases });
+      score = calculateQaScore({ hardIssues, aiIssues });
+    }
+  } catch (error) {
+    fallbackReason = error.message;
+  }
+
+  if (!used) score = null;
+  const passed = used && score >= 90 && !hardIssues.some((issue) => issue.severity === "error");
+  const issues = [...hardIssues, ...presentAiQaIssues(aiIssues)];
+  const status = passed ? "passed" : "review";
+  const provider = getProviderConfig();
+  await saveQaRun({
+    locale, contentType, domain, source: contextPack.source, initialTranslation, finalTranslation: translation,
+    score, status, iterations, issues, references: [...references, ...qaCases.map((item) => ({ ...item, kind: "qa_case" }))], styleProfileId: contextPack.styleProfile?.id,
+    model: provider.model, batchId
+  });
+  if (iterations > 0 || !passed) {
+    await saveQaCase({
+      locale, contentType, domain, source: contextPack.source, rejectedTranslation: initialTranslation,
+      correctedTranslation: translation, issues, scoreBefore: initialScore, scoreAfter: score,
+      status: passed ? "machine_verified" : "review"
+    });
+  }
+  if (passed) {
+    await saveMemory(locale, {
+      source: contextPack.source, target: translation, domain, contentType,
+      styleProfileId: contextPack.styleProfile?.id, qualityStatus: "machine_verified", qaScore: score,
+      provenance: iterations ? "aiqa-corrected" : "aiqa-passed", batchId
+    });
+  }
+  return { translation, issues, score, status, iterations, used, fallbackReason, references, qaCases };
+}
+
 function importStatistics(candidates) {
   return {
     candidates: candidates.length,
@@ -83,13 +141,15 @@ function importStatistics(candidates) {
 }
 
 async function previewTermImport(body) {
-  const extracted = await extractTermPairs(body);
+  const analyzeStructure = body.useModel === false ? undefined : (snapshot, requestedLocale) => analyzeTermTableStructureWithModel(snapshot, requestedLocale);
+  const extracted = await extractTermPairs(body, { analyzeStructure });
   let candidates = extracted.candidates;
   const assetsByLocale = {};
   for (const locale of new Set(candidates.map((candidate) => candidate.locale))) {
     assetsByLocale[locale] = (await getAssets(locale)).terms;
   }
   candidates = candidates.map((candidate) => {
+    if (candidate.assetType === "memory") return candidate;
     const sameSource = assetsByLocale[candidate.locale].filter((term) => term.source.trim().toLocaleLowerCase() === candidate.source.toLocaleLowerCase());
     const exact = sameSource.find((term) => term.target.trim().toLocaleLowerCase() === candidate.target.toLocaleLowerCase());
     if (exact) return { ...candidate, existing: true, existingId: exact.id, decision: "excluded", reasons: [...candidate.reasons, "当前语言库已存在相同对照"] };
@@ -129,6 +189,7 @@ async function commitTermImport(body) {
   const imported = [];
   const skipped = [];
   const decisions = [];
+  const styleEvidenceByScope = new Map();
   for (const candidate of body.candidates) {
     const decision = { candidateId: candidate.candidateId, status: "rejected", decision: candidate.decision };
     if (!candidate.selected || candidate.existing || candidate.decision === "excluded") {
@@ -141,30 +202,41 @@ async function commitTermImport(body) {
       const source = String(candidate.source || "").trim();
       const target = String(candidate.target || "").trim();
       if (!source || !target) throw new Error("源词或译法为空");
-      const current = (await getAssets(locale)).terms.filter((term) => term.source.toLocaleLowerCase() === source.toLocaleLowerCase());
-      if (current.some((term) => term.target.toLocaleLowerCase() === target.toLocaleLowerCase())) {
-        skipped.push({ source, locale, reason: "已存在相同对照" });
-        decisions.push(decision);
-        continue;
+      if (candidate.assetType === "memory") {
+        const memory = await saveMemory(locale, {
+          source, target, domain: body.domain || "game", contentType: body.contentType || "general",
+          qualityStatus: "human_approved", qaScore: 100, provenance: "table-import", sourceFile: body.filename,
+          batchId: body.batchId, sourceRow: candidate.rowNumber
+        });
+        const evidence = await saveStyleEvidence({
+          locale, source, target, contentType: body.contentType || "general", domain: body.domain || "game",
+          sourceFile: body.filename, sourceRow: candidate.rowNumber, status: "accepted"
+        });
+        const scopeKey = `${locale}\u0000${body.contentType || "general"}\u0000${body.domain || "game"}`;
+        const evidenceGroup = styleEvidenceByScope.get(scopeKey) || [];
+        evidenceGroup.push({ ...candidate, evidenceId: evidence.id });
+        styleEvidenceByScope.set(scopeKey, evidenceGroup);
+        imported.push({ id: memory.id, source, target, locale, assetType: "memory" });
+      } else {
+        const current = (await getAssets(locale)).terms.filter((term) => term.source.toLocaleLowerCase() === source.toLocaleLowerCase());
+        if (current.some((term) => term.target.toLocaleLowerCase() === target.toLocaleLowerCase())) {
+          skipped.push({ source, locale, reason: "已存在相同对照" });
+          decisions.push(decision);
+          continue;
+        }
+        if (current.length) {
+          skipped.push({ source, locale, reason: `库内已有译法：${current[0].target}` });
+          decisions.push(decision);
+          continue;
+        }
+        const term = await saveAsset(locale, {
+          source, target, aliases: [], forbidden: [], domains: [body.domain || "game"], contentTypes: [body.contentType || "general"],
+          enforcement: body.enforcement || "required", status: "approved",
+          provenance: `table-import:${String(body.filename || "unknown").slice(0, 120)}`,
+          note: `批次 ${body.batchId} · 原表第 ${candidate.rowNumber || "?"} 行 · 清洗分 ${candidate.score ?? "-"}`
+        });
+        imported.push({ id: term.id, source, target, locale, assetType: "term" });
       }
-      if (current.length) {
-        skipped.push({ source, locale, reason: `库内已有译法：${current[0].target}` });
-        decisions.push(decision);
-        continue;
-      }
-      const term = await saveAsset(locale, {
-        source,
-        target,
-        aliases: [],
-        forbidden: [],
-        domains: [body.domain || "game"],
-        contentTypes: [body.contentType || "general"],
-        enforcement: body.enforcement || "required",
-        status: "approved",
-        provenance: `table-import:${String(body.filename || "unknown").slice(0, 120)}`,
-        note: `批次 ${body.batchId} · 原表第 ${candidate.rowNumber || "?"} 行 · 清洗分 ${candidate.score ?? "-"}`
-      });
-      imported.push({ id: term.id, source, target, locale });
       decision.status = "accepted";
       decision.decision = "ready";
       decisions.push(decision);
@@ -173,14 +245,40 @@ async function commitTermImport(body) {
       decisions.push(decision);
     }
   }
-  const summary = { imported: imported.length, skipped: skipped.length, completedAt: new Date().toISOString() };
+  const styleProfiles = [];
+  const styleFallbacks = [];
+  for (const [scopeKey, examples] of styleEvidenceByScope) {
+    const [locale, contentType, domain] = scopeKey.split("\u0000");
+    if (examples.length < 2) {
+      styleFallbacks.push({ locale, contentType, domain, reason: "风格证据不足 2 条，已保存证据但暂不生成固定规范" });
+      continue;
+    }
+    try {
+      const previousProfile = await getStyleProfile(locale, contentType, domain);
+      const distilled = await distillStyleProfileWithModel({ locale, contentType, domain, examples, previousProfile });
+      styleProfiles.push(await saveStyleProfile({
+        locale, contentType, domain, ...distilled, evidenceCount: examples.length,
+        evidenceIds: examples.map((item) => item.evidenceId), generatedBy: getProviderConfig().model, status: "active"
+      }));
+    } catch (error) {
+      styleFallbacks.push({ locale, contentType, domain, reason: error.message });
+    }
+  }
+  const summary = {
+    imported: imported.length,
+    terms: imported.filter((item) => item.assetType === "term").length,
+    memories: imported.filter((item) => item.assetType === "memory").length,
+    styleProfiles: styleProfiles.length,
+    skipped: skipped.length,
+    completedAt: new Date().toISOString()
+  };
   await completeImport(body.batchId, decisions, summary);
-  return { batchId: body.batchId, imported, skipped, summary };
+  return { batchId: body.batchId, imported, skipped, styleProfiles, styleFallbacks, summary };
 }
 
 async function apiHandler(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
-    return json(res, 200, { ok: true, version: "0.6.0", locales: Object.keys(LOCALES), backend: getStoreMetadata() });
+    return json(res, 200, { ok: true, version: "0.7.0", locales: Object.keys(LOCALES), backend: getStoreMetadata() });
   }
   if (req.method === "GET" && url.pathname === "/api/bootstrap") {
     const assets = {};
@@ -251,8 +349,16 @@ async function apiHandler(req, res, url) {
     const body = await readJsonBody(req);
     const locale = assertLocale(body.locale);
     const assets = await getAssets(locale);
-    const matches = matchTerms(body.source || "", assets, { contentType: body.contentType || "general", domain: body.domain || "general" });
-    return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches }) });
+    const contentType = body.contentType || "general";
+    const domain = body.domain || "general";
+    const matches = matchTerms(body.source || "", assets, { contentType, domain });
+    if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches }) });
+    const classification = await classify({ text: body.source || "", hint: contentType, useModel: false });
+    const styleProfile = await getStyleProfile(locale, contentType, domain);
+    const qaGuidance = rankQaCases(body.source || "", await getQaCases(locale, { contentType, domain }), { limit: 3 });
+    const contextPack = buildContextPack({ source: body.source || "", locale, classification, matches, domain, styleProfile, qaGuidance });
+    const aiQa = await runAiQaLoop({ contextPack, initialTranslation: body.translation || "", matches, locale, contentType, domain, batchId: body.batchId || "manual-recheck" });
+    return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, styleProfile: contextPack.styleProfile });
   }
   if (req.method === "POST" && url.pathname === "/api/translate") {
     const body = await readJsonBody(req);
@@ -268,6 +374,11 @@ async function apiHandler(req, res, url) {
       contentType: classification.contentType,
       domain: body.domain || "general"
     });
+    const storedStyleProfile = await getStyleProfile(locale, classification.contentType, body.domain || "general");
+    const qaGuidance = rankQaCases(body.source, await getQaCases(locale, {
+      contentType: classification.contentType,
+      domain: body.domain || "general"
+    }), { limit: 3 });
     const contextPack = buildContextPack({
       source: body.source,
       locale,
@@ -275,29 +386,40 @@ async function apiHandler(req, res, url) {
       matches,
       domain: body.domain || "general",
       neighborContext: body.neighborContext || "",
-      styleProfile: body.styleProfile || null
+      styleProfile: storedStyleProfile || body.styleProfile || null,
+      qaGuidance
     });
-    const result = await translateWithReflection(contextPack, { reflect: body.reflect !== false });
-    const issues = runQa({ source: body.source, translation: result.translation, matches });
-    const suggestionCandidates = buildSuggestionCandidates(result.translation, matches);
+    const aiQaEnabled = body.aiQa !== false;
+    const result = await translateWithReflection(contextPack, { reflect: !aiQaEnabled && body.reflect !== false });
+    const aiQa = aiQaEnabled
+      ? await runAiQaLoop({
+        contextPack, initialTranslation: result.translation, matches, locale,
+        contentType: classification.contentType, domain: body.domain || "general", batchId: body.batchId || ""
+      })
+      : { translation: result.translation, issues: runQa({ source: body.source, translation: result.translation, matches }), score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
+    const suggestionCandidates = buildSuggestionCandidates(aiQa.translation, matches);
     let alignment = { requested: suggestionCandidates.length > 0, used: false, fallbackReason: "" };
     let modelSuggestions = [];
     if (suggestionCandidates.length) {
       try {
-        modelSuggestions = await alignTermSuggestionsWithModel(locale, result.translation, suggestionCandidates);
+        modelSuggestions = await alignTermSuggestionsWithModel(locale, aiQa.translation, suggestionCandidates);
         alignment.used = true;
       } catch (error) {
         alignment.fallbackReason = error.message;
       }
     }
-    const termSuggestions = resolveTermSuggestions(result.translation, suggestionCandidates, modelSuggestions);
+    const termSuggestions = resolveTermSuggestions(aiQa.translation, suggestionCandidates, modelSuggestions);
     return json(res, 200, {
       locale,
       classification,
       matches,
       contextPack,
       ...result,
-      issues,
+      translation: aiQa.translation,
+      issues: aiQa.issues,
+      qaScore: aiQa.score,
+      aiQa,
+      styleProfile: contextPack.styleProfile,
       termSuggestions,
       suggestionAlignment: alignment
     });

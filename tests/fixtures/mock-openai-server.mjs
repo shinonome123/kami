@@ -18,6 +18,16 @@ const server = http.createServer(async (req, res) => {
       { column: 5, label: "Chinese Simp.", role: "source_text", confidence: 0.99, reason: "简体中文正文" },
       { column: 6, label: "English", role: "existing_translation", confidence: 0.99, reason: "已有英文译文" }
     ] }] })
+    : prompt.includes("术语表结构分析器")
+    ? JSON.stringify({ sheets: [{ sheet: "Terms", headerRow: null, sourceColumn: 1, targetColumns: { "ja-JP": 2 }, confidence: 0.96, reason: "两列逐行中日对照" }] })
+    : prompt.includes("风格资产编辑")
+    ? JSON.stringify({ name: "日语宣发风格", instructions: "使用自然、克制且具有期待感的敬体；保留事实、日期和 CTA。", examples: [{ type: "positive", source: "活动现已开启。", target: "イベントが開始しました。", reason: "自然敬体" }] })
+    : prompt.includes("独立于翻译器")
+    ? JSON.stringify({ issues: [] })
+    : prompt.includes("最终修订译者")
+    ? "高級パスが新登場しました。"
+    : prompt.includes("游戏本地化资产清洗员")
+    ? JSON.stringify({ decisions: [{ index: 0, keep: true, confidence: 0.96, reason: "中日句段对齐" }, { index: 1, keep: true, confidence: 0.95, reason: "中日句段对齐" }] })
     : prompt.includes("术语对齐器")
     ? JSON.stringify({ suggestions: [{ index: 0, currentText: "高級パス", confidence: 0.93, reason: "与疑似源术语语义对应" }] })
     : prompt.includes("双语本地化审校")

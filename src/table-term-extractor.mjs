@@ -126,6 +126,7 @@ function quality(source, target, locale) {
   let score = 0.42;
   const sourceLength = [...source].length;
   const targetLength = [...target].length;
+  const sentenceLike = sourceLength > 22 || targetLength > 36 || /[。！？!?；;]/u.test(source) || /[。！？!?；;]/u.test(target);
   if (sourceLength >= 2 && sourceLength <= 18) score += 0.22;
   else if (sourceLength <= 32) score += 0.08;
   else reasons.push("中文较长，可能是完整句子");
@@ -150,17 +151,46 @@ function quality(source, target, locale) {
     score -= 0.25;
     reasons.push("中外文内容相同");
   }
+  if (sentenceLike && score > 0.2 && source !== target) {
+    const targetScriptValid = scriptScore(target, locale) >= 0.5 || (locale === "zh-Hant-TW" && containsHan(target));
+    if (targetScriptValid) {
+      score = Math.max(score, 0.78);
+      reasons.push("完整双语句段，将沉淀为翻译记忆与风格证据");
+    }
+  }
   score = Math.max(0, Math.min(0.99, score));
   return {
+    assetType: sentenceLike ? "memory" : "term",
     score: Number(score.toFixed(2)),
     decision: score >= 0.74 ? "ready" : score >= 0.48 ? "review" : "excluded",
     reasons
   };
 }
 
-function extractWorksheet(worksheet, requestedLocale) {
+function analysisMapping(worksheet, analysis, requestedLocale) {
+  if (!analysis || String(analysis.sheet || "") !== worksheet.name) return null;
+  const sourceColumn = Number(analysis.sourceColumn);
+  if (!Number.isInteger(sourceColumn) || sourceColumn < 1 || sourceColumn > worksheet.columnCount) return null;
+  const targetColumns = {};
+  for (const [locale, rawColumn] of Object.entries(analysis.targetColumns || {})) {
+    if (!Object.hasOwn(LOCALES, locale) || (requestedLocale && locale !== requestedLocale)) continue;
+    const column = Number(rawColumn);
+    if (Number.isInteger(column) && column >= 1 && column <= worksheet.columnCount && column !== sourceColumn) targetColumns[locale] = column;
+  }
+  if (!Object.keys(targetColumns).length) return null;
+  const headerRow = Number(analysis.headerRow);
+  return {
+    startRow: Number.isInteger(headerRow) && headerRow > 0 ? headerRow + 1 : 1,
+    sourceColumn,
+    targetColumns
+  };
+}
+
+function extractWorksheet(worksheet, requestedLocale, modelAnalysis) {
   const header = findHeader(worksheet, requestedLocale);
-  const mapping = inferColumns(worksheet, header, requestedLocale);
+  const ruleMapping = inferColumns(worksheet, header, requestedLocale);
+  const modelMapping = analysisMapping(worksheet, modelAnalysis, requestedLocale);
+  const mapping = modelMapping || ruleMapping;
   if (!mapping.sourceColumn || !Object.keys(mapping.targetColumns).length) return null;
   const raw = [];
   for (let rowNumber = mapping.startRow; rowNumber <= Math.min(worksheet.rowCount, MAX_ROWS); rowNumber += 1) {
@@ -201,11 +231,31 @@ function extractWorksheet(worksheet, requestedLocale) {
     headerRow: mapping.startRow - 1 || null,
     sourceColumn: mapping.sourceColumn,
     targetColumns: mapping.targetColumns,
-    candidates
+    candidates,
+    structureSource: modelMapping ? "model" : "rules"
   };
 }
 
-export async function extractTermPairs({ filename, base64, locale = "auto" }) {
+function buildStructureSnapshot(workbook) {
+  return {
+    sheets: workbook.worksheets.map((worksheet) => ({
+      sheet: worksheet.name,
+      rowCount: worksheet.rowCount,
+      columnCount: worksheet.columnCount,
+      rows: Array.from({ length: Math.min(60, worksheet.rowCount) }, (_, index) => {
+        const row = index + 1;
+        return {
+          row,
+          cells: rowValues(worksheet, row)
+            .map((value, column) => ({ column: column + 1, value: compact(value).slice(0, 500) }))
+            .filter((cell) => cell.value)
+        };
+      }).filter((row) => row.cells.length)
+    }))
+  };
+}
+
+export async function extractTermPairs({ filename, base64, locale = "auto" }, { analyzeStructure } = {}) {
   const extension = extname(String(filename || "")).toLowerCase();
   if (![".xlsx", ".csv"].includes(extension)) {
     const error = new Error("仅支持 .xlsx 和 .csv 表格；旧版 .xls 请先另存为 .xlsx");
@@ -227,10 +277,23 @@ export async function extractTermPairs({ filename, base64, locale = "auto" }) {
   const workbook = new ExcelJS.Workbook();
   if (extension === ".csv") await workbook.csv.read(Readable.from([buffer]));
   else await workbook.xlsx.load(buffer);
-  const sheets = workbook.worksheets.map((worksheet) => extractWorksheet(worksheet, requestedLocale)).filter(Boolean);
+  const snapshot = buildStructureSnapshot(workbook);
+  let structureAnalysis = null;
+  let structureFallbackReason = "";
+  if (typeof analyzeStructure === "function") {
+    try {
+      structureAnalysis = await analyzeStructure(snapshot, requestedLocale);
+    } catch (error) {
+      structureFallbackReason = error.message;
+    }
+  }
+  const analysisBySheet = new Map((structureAnalysis?.sheets || []).map((sheet) => [String(sheet.sheet), sheet]));
+  const sheets = workbook.worksheets
+    .map((worksheet) => extractWorksheet(worksheet, requestedLocale, analysisBySheet.get(worksheet.name)))
+    .filter(Boolean);
   const candidates = sheets.flatMap((sheet) => sheet.candidates);
   if (!candidates.length) {
-    const error = new Error("没有识别到中外文对照列；请使用带“中文/日语/韩语/繁中/泰语”表头的表格，或指定目标语言");
+    const error = new Error("没有识别到可用的中外文对照行；请确认表格中至少有一列中文和一列目标语言内容");
     error.statusCode = 422;
     throw error;
   }
@@ -239,6 +302,11 @@ export async function extractTermPairs({ filename, base64, locale = "auto" }) {
     fileType: extension.slice(1),
     requestedLocale: requestedLocale || "auto",
     sheets: sheets.map(({ candidates: ignored, ...sheet }) => ({ ...sheet, candidateCount: ignored.length })),
+    structureAnalysis: {
+      requested: typeof analyzeStructure === "function",
+      used: sheets.some((sheet) => sheet.structureSource === "model"),
+      fallbackReason: structureFallbackReason
+    },
     candidates,
     statistics: {
       rowsScanned: sheets.reduce((sum, sheet) => sum + sheet.rowsScanned, 0),

@@ -68,7 +68,7 @@
           <div class="workflow-status" id="classificationPreview"><span class="pulse-dot"></span><span>输入后自动识别语体，并从当前语言术语库匹配</span></div>
           <div class="insight-grid">
             <article class="insight-card"><div class="insight-head"><h3>术语命中</h3><span id="matchCount">0 条</span></div><div class="term-matches empty-list" id="termMatches">尚未匹配</div></article>
-            <article class="insight-card"><div class="insight-head"><h3>反思与 QA</h3><span id="issueCount">未运行</span></div><div class="qa-list empty-list" id="qaList">翻译后显示审校结果</div></article>
+            <article class="insight-card"><div class="insight-head"><h3>检索式 AIQA</h3><span id="issueCount">未运行</span></div><div class="qa-list empty-list" id="qaList">翻译后显示相似译例、评分与修订结果</div></article>
           </div>
           </div>
 
@@ -108,15 +108,15 @@
 
         <section class="view" id="view-import">
           <div class="step-banner">
-            <span class="step-badge">BETA</span>
-            <div><h2>上传中外文表格，自动筛出可入库术语</h2><p>识别列 → 规则去噪 → AI 二次清洗 → 人工确认 → 分语言写入独立术语库。</p></div>
+            <span class="step-badge">SMART INGEST</span>
+            <div><h2>拖入中外文表格，自动拆分术语、译例与风格证据</h2><p>无需表头：AI 识别列 → 资产分流 → 人工确认 → 分语言沉淀 → 生成分类风格版本。</p></div>
           </div>
           <div class="import-setup-grid">
             <article class="panel upload-panel">
               <span class="card-kicker">01 · SOURCE FILE</span><h2>选择表格</h2>
               <label class="drop-zone" id="dropZone" for="termFile">
                 <input id="termFile" type="file" accept=".xlsx,.csv" hidden />
-                <span class="upload-mark">↑</span><strong id="filePrompt">拖入或点击选择 .xlsx / .csv</strong><small id="fileMeta">最大 10MB；支持一张表内同时包含日、韩、繁中、泰列</small>
+                <span class="upload-mark">↑</span><strong id="filePrompt">拖入或点击选择 .xlsx / .csv</strong><small id="fileMeta">拖入后自动识别；不要求表头，支持日、韩、繁中、泰列</small>
               </label>
             </article>
             <article class="panel cleaning-panel">
@@ -135,7 +135,7 @@
               <div><span class="card-kicker">03 · REVIEW</span><h2>候选审核</h2></div>
               <div class="summary-chips" id="importSummary"><span>尚未清洗</span></div>
             </div>
-            <div class="mapping-note" id="mappingNote">选择表格后，点击页头的“开始智能清洗”。</div>
+            <div class="mapping-note" id="mappingNote">拖入表格后会自动识别结构并生成审核队列。</div>
             <div class="candidate-table-wrap">
               <table class="candidate-table">
                 <thead><tr><th class="check-cell"><input id="selectAllCandidates" type="checkbox" /></th><th>目标库</th><th>中文源词</th><th>正式译法</th><th>判断</th><th>依据</th></tr></thead>

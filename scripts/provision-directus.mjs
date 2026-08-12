@@ -13,6 +13,13 @@ const localeCollections = {
   "th-TH": { key: "terms_th_th", label: "泰语术语库", icon: "translate" }
 };
 
+const memoryCollections = {
+  "ja-JP": { key: "translation_memory_ja_jp", label: "日语翻译记忆" },
+  "ko-KR": { key: "translation_memory_ko_kr", label: "韩语翻译记忆" },
+  "zh-Hant-TW": { key: "translation_memory_zh_hant_tw", label: "繁体中文（台湾）翻译记忆" },
+  "th-TH": { key: "translation_memory_th_th", label: "泰语翻译记忆" }
+};
+
 const label = (translation) => [{ language: "zh-CN", translation }];
 const choices = (values) => values.map(([text, value]) => ({ text, value }));
 
@@ -94,6 +101,26 @@ function termFields() {
     textField("note", "备注", { multiline: true, sort: 11 }),
     dateField("date_created", "创建时间", "date-created", 12),
     dateField("date_updated", "更新时间", "date-updated", 13)
+  ];
+}
+
+function memoryFields() {
+  return [
+    uuidField(),
+    textField("source", "简体中文原文", { required: true, multiline: true, sort: 2 }),
+    textField("target", "目标语言译文", { required: true, multiline: true, sort: 3 }),
+    textField("domain", "业务领域", { width: "half", sort: 4 }),
+    selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 5 }),
+    textField("channel", "使用渠道", { width: "half", sort: 6 }),
+    textField("style_profile_id", "风格版本 ID", { width: "half", sort: 7 }),
+    selectField("quality_status", "质量状态", [["人工批准", "human_approved"], ["机器验证", "machine_verified"], ["临时", "provisional"], ["已拒绝", "rejected"]], { defaultValue: "provisional", sort: 8 }),
+    { field: "qa_score", type: "float", meta: { interface: "input", width: "half", sort: 9, translations: label("QA 分数") }, schema: { is_nullable: true } },
+    textField("provenance", "来源", { width: "half", sort: 10 }),
+    textField("source_file", "来源文件", { width: "half", sort: 11 }),
+    textField("batch_id", "批次 ID", { width: "half", sort: 12 }),
+    { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 13, translations: label("来源行号") }, schema: { is_nullable: true } },
+    dateField("date_created", "创建时间", "date-created", 14),
+    dateField("date_updated", "更新时间", "date-updated", 15)
   ];
 }
 
@@ -184,7 +211,8 @@ const definitions = [
       textField("source", "候选中文词", { required: true, sort: 2 }),
       textField("target", "候选译法", { width: "half", sort: 3 }),
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { defaultValue: "ja-JP", sort: 4 }),
-      { field: "frequency", type: "integer", meta: { interface: "input", width: "half", sort: 5, translations: label("出现频次") }, schema: { is_nullable: false, default_value: 1 } },
+      selectField("asset_type", "资产类型", [["术语", "term"], ["翻译记忆", "memory"]], { defaultValue: "term", sort: 5 }),
+      { field: "frequency", type: "integer", meta: { interface: "input", width: "half", sort: 6, translations: label("出现频次") }, schema: { is_nullable: false, default_value: 1 } },
       { field: "score", type: "float", meta: { interface: "input", width: "half", sort: 6, translations: label("候选分数") }, schema: { is_nullable: true } },
       textField("batch_id", "导入批次 ID", { width: "half", sort: 7 }),
       textField("corpus_id", "来源语料 ID", { width: "half", sort: 8 }),
@@ -216,8 +244,86 @@ const definitions = [
       textField("domain", "业务领域", { width: "half", sort: 5 }),
       textField("instructions", "翻译规则", { required: true, multiline: true, sort: 6 }),
       jsonField("examples", "正反例", { sort: 7 }),
-      selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 8 }),
-      dateField("date_updated", "更新时间", "date-updated", 9)
+      { field: "version", type: "integer", meta: { interface: "input", width: "half", sort: 8, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
+      textField("parent_id", "上一版本 ID", { width: "half", sort: 9 }),
+      { field: "evidence_count", type: "integer", meta: { interface: "input", width: "half", sort: 10, translations: label("证据数量") }, schema: { is_nullable: false, default_value: 0 } },
+      jsonField("evidence_ids", "证据 ID", { sort: 11 }),
+      textField("generated_by", "生成模型", { width: "half", sort: 12 }),
+      selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 13 }),
+      dateField("date_updated", "更新时间", "date-updated", 14)
+    ]
+  },
+  ...Object.values(memoryCollections).map(({ key, label: collectionLabel }, index) => ({
+    collection: key,
+    meta: {
+      icon: "history_edu",
+      note: `${collectionLabel}。只存该目标语言的已对齐句段，与其他语言物理隔离。`,
+      display_template: "{{source}} → {{target}}",
+      group: "localization_pipeline",
+      sort: 5 + index,
+      accountability: "all",
+      translations: label(collectionLabel)
+    },
+    schema: {},
+    fields: memoryFields()
+  })),
+  {
+    collection: "style_evidence",
+    meta: { icon: "format_quote", note: "从上传表格提取的双语风格证据。", display_template: "{{source}}", group: "localization_pipeline", sort: 9, accountability: "all", translations: label("风格证据") },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("source", "简体中文原文", { required: true, multiline: true, sort: 5 }),
+      textField("target", "目标语言译文", { required: true, multiline: true, sort: 6 }),
+      textField("source_file", "来源文件", { width: "half", sort: 7 }),
+      { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 8, translations: label("来源行号") }, schema: { is_nullable: true } },
+      selectField("status", "状态", [["可用", "accepted"], ["待复核", "pending"], ["已拒绝", "rejected"]], { defaultValue: "pending", sort: 9 }),
+      dateField("date_created", "创建时间", "date-created", 10)
+    ]
+  },
+  {
+    collection: "qa_runs",
+    meta: { icon: "fact_check", note: "每次翻译的检索证据、质量评分与修订轨迹。", display_template: "{{target_locale}} · {{score}}", group: "localization_pipeline", sort: 10, accountability: "all", translations: label("AIQA 运行记录") },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("source", "简体中文原文", { required: true, multiline: true, sort: 5 }),
+      textField("initial_translation", "初始译文", { required: true, multiline: true, sort: 6 }),
+      textField("final_translation", "最终译文", { required: true, multiline: true, sort: 7 }),
+      { field: "score", type: "float", meta: { interface: "input", width: "half", sort: 8, translations: label("最终分数") }, schema: { is_nullable: true } },
+      selectField("status", "结论", [["通过", "passed"], ["待人工复核", "review"], ["失败", "failed"]], { defaultValue: "review", sort: 9 }),
+      { field: "iterations", type: "integer", meta: { interface: "input", width: "half", sort: 10, translations: label("修订轮数") }, schema: { is_nullable: false, default_value: 0 } },
+      jsonField("issues", "问题清单", { sort: 11 }),
+      jsonField("references", "检索译例", { sort: 12 }),
+      textField("style_profile_id", "风格版本 ID", { width: "half", sort: 13 }),
+      textField("model", "审校模型", { width: "half", sort: 14 }),
+      textField("batch_id", "批次 ID", { width: "half", sort: 15 }),
+      dateField("date_created", "创建时间", "date-created", 16)
+    ]
+  },
+  {
+    collection: "qa_cases",
+    meta: { icon: "model_training", note: "低分译文、修订结果和问题类型，作为后续 QA 反例资产。", display_template: "{{target_locale}} · {{score_before}} → {{score_after}}", group: "localization_pipeline", sort: 11, accountability: "all", translations: label("AIQA 问题库") },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("source", "简体中文原文", { required: true, multiline: true, sort: 5 }),
+      textField("rejected_translation", "问题译文", { required: true, multiline: true, sort: 6 }),
+      textField("corrected_translation", "修订译文", { multiline: true, sort: 7 }),
+      jsonField("issues", "问题类型与意见", { sort: 8 }),
+      { field: "score_before", type: "float", meta: { interface: "input", width: "half", sort: 9, translations: label("修订前分数") }, schema: { is_nullable: true } },
+      { field: "score_after", type: "float", meta: { interface: "input", width: "half", sort: 10, translations: label("修订后分数") }, schema: { is_nullable: true } },
+      selectField("status", "状态", [["机器验证", "machine_verified"], ["人工批准", "human_approved"], ["待复核", "review"]], { defaultValue: "review", sort: 11 }),
+      dateField("date_created", "创建时间", "date-created", 12)
     ]
   }
 ];
@@ -317,10 +423,14 @@ async function ensureServiceAccount() {
 
   const permissionPlan = [
     ...Object.values(localeCollections).flatMap(({ key }) => ["create", "read", "update", "delete"].map((action) => [key, action])),
+    ...Object.values(memoryCollections).flatMap(({ key }) => ["create", "read", "update"].map((action) => [key, action])),
     ...["create", "read"].map((action) => ["corpus_documents", action]),
     ...["create", "read", "update"].map((action) => ["term_candidates", action]),
     ...["create", "read", "update"].map((action) => ["term_import_batches", action]),
-    ["style_profiles", "read"]
+    ...["create", "read", "update"].map((action) => ["style_profiles", action]),
+    ...["create", "read", "update"].map((action) => ["style_evidence", action]),
+    ...["create", "read"].map((action) => ["qa_runs", action]),
+    ...["create", "read", "update"].map((action) => ["qa_cases", action])
   ];
   const currentPermissions = await api(`/permissions?filter[policy][_eq]=${policy.id}&limit=-1`);
   const existingPermissionKeys = new Set(currentPermissions.map((permission) => `${permission.collection}:${permission.action}`));

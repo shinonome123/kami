@@ -8,11 +8,19 @@ import {
   getDirectusAssets,
   getDirectusAssetStats,
   getDirectusMetadata,
+  getDirectusMemories,
+  getDirectusQaCases,
+  getDirectusStyleProfile,
   initializeDirectusStore,
   completeDirectusImport,
+  saveDirectusMemory,
+  saveDirectusQaCase,
+  saveDirectusQaRun,
   saveDirectusAsset,
   saveDirectusCorpus,
-  saveDirectusImportPreview
+  saveDirectusImportPreview,
+  saveDirectusStyleEvidence,
+  saveDirectusStyleProfile
 } from "./directus-store.mjs";
 
 const ROOT = fileURLToPath(new URL("../data", import.meta.url));
@@ -41,6 +49,9 @@ function assetPath(locale) {
 async function initializeJsonStore() {
   await mkdir(join(ROOT, "assets"), { recursive: true });
   await mkdir(join(ROOT, "corpora"), { recursive: true });
+  await mkdir(join(ROOT, "memories"), { recursive: true });
+  await mkdir(join(ROOT, "styles"), { recursive: true });
+  await mkdir(join(ROOT, "qa"), { recursive: true });
   for (const locale of Object.keys(LOCALES)) {
     const path = assetPath(locale);
     const current = await readJson(path, null);
@@ -48,6 +59,64 @@ async function initializeJsonStore() {
       await writeJsonAtomic(path, { locale, revision: 1, terms: [], memories: [], styleExamples: [] });
     }
   }
+}
+
+async function getJsonMemories(locale, options = {}) {
+  assertLocale(locale);
+  const items = await readJson(join(ROOT, "memories", `${locale}.json`), []);
+  return items.filter((item) => (!options.contentType || item.contentType === options.contentType) && (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general"));
+}
+
+async function saveJsonMemory(locale, input) {
+  const path = join(ROOT, "memories", `${assertLocale(locale)}.json`);
+  const items = await readJson(path, []);
+  const source = String(input.source || "").trim();
+  const target = String(input.target || "").trim();
+  const existing = items.find((item) => item.source === source && item.target === target);
+  const item = { id: existing?.id || randomUUID(), ...existing, ...input, locale, source, target, updatedAt: new Date().toISOString(), createdAt: existing?.createdAt || new Date().toISOString() };
+  if (existing) items[items.indexOf(existing)] = item;
+  else items.unshift(item);
+  await writeJsonAtomic(path, items);
+  return item;
+}
+
+async function getJsonStyleProfile(locale, contentType, domain = "general") {
+  const profiles = await readJson(join(ROOT, "styles", `${assertLocale(locale)}.json`), []);
+  return profiles.filter((item) => item.status === "active" && item.contentType === contentType).sort((a, b) => b.version - a.version).find((item) => item.domain === domain) || null;
+}
+
+async function saveJsonStyleEvidence(input) {
+  const path = join(ROOT, "styles", "evidence.json");
+  const items = await readJson(path, []);
+  const item = { id: randomUUID(), ...input, createdAt: new Date().toISOString() };
+  items.push(item);
+  await writeJsonAtomic(path, items);
+  return item;
+}
+
+async function saveJsonStyleProfile(input) {
+  const path = join(ROOT, "styles", `${assertLocale(input.locale)}.json`);
+  const profiles = await readJson(path, []);
+  const previous = profiles.filter((item) => item.contentType === input.contentType && item.domain === input.domain).sort((a, b) => b.version - a.version)[0];
+  if (previous && input.status !== "draft") previous.status = "inactive";
+  const profile = { id: randomUUID(), ...input, source: "style-library", version: (previous?.version || 0) + 1, parentId: previous?.id || null, status: input.status || "active", updatedAt: new Date().toISOString() };
+  profiles.unshift(profile);
+  await writeJsonAtomic(path, profiles);
+  return profile;
+}
+
+async function appendJsonQa(kind, input) {
+  const path = join(ROOT, "qa", `${kind}.json`);
+  const items = await readJson(path, []);
+  const item = { id: randomUUID(), ...input, createdAt: new Date().toISOString() };
+  items.unshift(item);
+  await writeJsonAtomic(path, items);
+  return item;
+}
+
+async function getJsonQaCases(locale, options = {}) {
+  const items = await readJson(join(ROOT, "qa", "cases.json"), []);
+  return items.filter((item) => item.locale === assertLocale(locale) && ["machine_verified", "human_approved"].includes(item.status) && (!options.contentType || item.contentType === options.contentType) && (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general"));
 }
 
 async function getJsonAssets(locale) {
@@ -176,6 +245,38 @@ export async function saveImportPreview(input) {
 
 export async function completeImport(batchId, decisions, summary) {
   return usesDirectus() ? completeDirectusImport(batchId, decisions, summary) : completeJsonImport(batchId, decisions, summary);
+}
+
+export async function getMemories(locale, options) {
+  return usesDirectus() ? getDirectusMemories(locale, options) : getJsonMemories(locale, options);
+}
+
+export async function saveMemory(locale, input) {
+  return usesDirectus() ? saveDirectusMemory(locale, input) : saveJsonMemory(locale, input);
+}
+
+export async function getStyleProfile(locale, contentType, domain) {
+  return usesDirectus() ? getDirectusStyleProfile(locale, contentType, domain) : getJsonStyleProfile(locale, contentType, domain);
+}
+
+export async function saveStyleEvidence(input) {
+  return usesDirectus() ? saveDirectusStyleEvidence(input) : saveJsonStyleEvidence(input);
+}
+
+export async function saveStyleProfile(input) {
+  return usesDirectus() ? saveDirectusStyleProfile(input) : saveJsonStyleProfile(input);
+}
+
+export async function saveQaRun(input) {
+  return usesDirectus() ? saveDirectusQaRun(input) : appendJsonQa("runs", input);
+}
+
+export async function saveQaCase(input) {
+  return usesDirectus() ? saveDirectusQaCase(input) : appendJsonQa("cases", input);
+}
+
+export async function getQaCases(locale, options) {
+  return usesDirectus() ? getDirectusQaCases(locale, options) : getJsonQaCases(locale, options);
 }
 
 export function getStoreMetadata() {
