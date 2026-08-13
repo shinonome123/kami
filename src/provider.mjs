@@ -1,23 +1,38 @@
 import { loadProviderConfig, saveProviderConfig } from "./provider-store.mjs";
+import { CONTENT_TYPES } from "./config.mjs";
 
 const loadedProvider = loadProviderConfig();
 let persistence = loadedProvider.persistence;
 let runtimeConfig = {
   baseUrl: process.env.LLM_BASE_URL || loadedProvider.config.baseUrl || "http://localhost:11434/v1",
   apiKey: process.env.LLM_API_KEY || loadedProvider.config.apiKey || "",
-  model: process.env.LLM_MODEL || loadedProvider.config.model || "qwen3:14b"
+  model: process.env.LLM_MODEL || loadedProvider.config.model || "qwen3:14b",
+  embeddingModel: process.env.LLM_EMBEDDING_MODEL || loadedProvider.config.embeddingModel || "",
+  embeddingBaseUrl: process.env.LLM_EMBEDDING_BASE_URL || loadedProvider.config.embeddingBaseUrl || "",
+  embeddingApiKey: process.env.LLM_EMBEDDING_API_KEY || loadedProvider.config.embeddingApiKey || ""
 };
 
 export function getProviderConfig() {
-  return { ...runtimeConfig, apiKeyConfigured: Boolean(runtimeConfig.apiKey), apiKey: undefined, persistence };
+  return {
+    ...runtimeConfig,
+    apiKeyConfigured: Boolean(runtimeConfig.apiKey),
+    apiKey: undefined,
+    embeddingApiKeyConfigured: Boolean(runtimeConfig.embeddingApiKey),
+    embeddingApiKey: undefined,
+    persistence
+  };
 }
 
 export function updateProviderConfig(input = {}) {
   const submittedApiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
+  const submittedEmbeddingApiKey = typeof input.embeddingApiKey === "string" ? input.embeddingApiKey.trim() : "";
   const nextConfig = {
     baseUrl: String(input.baseUrl || runtimeConfig.baseUrl).replace(/\/$/, ""),
     apiKey: input.clearApiKey === true ? "" : (submittedApiKey || runtimeConfig.apiKey),
-    model: String(input.model || runtimeConfig.model)
+    model: String(input.model || runtimeConfig.model),
+    embeddingModel: Object.hasOwn(input, "embeddingModel") ? String(input.embeddingModel || "").trim() : runtimeConfig.embeddingModel,
+    embeddingBaseUrl: Object.hasOwn(input, "embeddingBaseUrl") ? String(input.embeddingBaseUrl || "").replace(/\/$/, "") : runtimeConfig.embeddingBaseUrl,
+    embeddingApiKey: input.clearEmbeddingApiKey === true ? "" : (submittedEmbeddingApiKey || runtimeConfig.embeddingApiKey)
   };
   if (input.persist !== false) persistence = saveProviderConfig(nextConfig);
   runtimeConfig = nextConfig;
@@ -45,11 +60,16 @@ function formatNeighborContext(context = {}) {
 }
 
 function packPrompt(contextPack) {
+  const translationSkill = contextPack.translationSkill;
   return `你是专业的亚洲语言游戏本地化译者。请严格从简体中文翻译到 ${contextPack.targetLanguage}。\n\n` +
     `内容类型：${contextPack.contentTypeLabel}\n` +
     `语体要求：${contextPack.register}\n` +
     `翻译风格：${contextPack.styleProfile?.name || contextPack.contentTypeLabel} · 版本 ${contextPack.styleProfile?.version || 1} · ${contextPack.styleProfile?.instruction || contextPack.register}\n` +
     `风格正反例：${JSON.stringify(contextPack.styleProfile?.examples || [])}\n` +
+    `翻译技能：${translationSkill ? `${translationSkill.name} · v${translationSkill.version} · ${translationSkill.instruction || "沿用当前稳定流程"}` : "默认稳定流程"}\n` +
+    `技能增量规则：${JSON.stringify(translationSkill?.additionalRules || [])}\n` +
+    `译者长期偏好画像（跨语体全局习惯，版本 ${contextPack.userProfile?.version || "无"}）：${contextPack.userProfile ? JSON.stringify({ instruction: contextPack.userProfile.instruction, examples: contextPack.userProfile.examples }) : "无"}\n` +
+    `历史译例（同语言、相似度与人工可信度排序）：${JSON.stringify(contextPack.translationReferences || [])}\n` +
     `历史 AIQA 反例与修订：${JSON.stringify(contextPack.qaGuidance || [])}\n` +
     `目标语言要求：${contextPack.localeInstruction}\n` +
     `领域：${contextPack.domain}\n` +
@@ -57,19 +77,37 @@ function packPrompt(contextPack) {
     `强制术语：${JSON.stringify(contextPack.requiredTerms, null, 2)}\n` +
     `参考术语：${JSON.stringify(contextPack.preferredTerms, null, 2)}\n` +
     `必须原样保留：${JSON.stringify(contextPack.protectedTokens)}\n\n` +
-    `规则：\n1. 不得使用其他目标语言的表达。\n2. 不漏译、不增译、不改变数值与事实。\n3. 强制术语必须逐字采用指定目标译法。\n4. 上下文只用于消歧和保持连贯，不得把上文或下文混入译文。\n5. 只翻译“当前原文”，只输出译文，不解释。\n\n当前原文：\n${contextPack.source}`;
+    `规则：\n1. 不得使用其他目标语言的表达。\n2. 不漏译、不增译、不改变数值与事实。\n3. 强制术语必须逐字采用指定目标译法。\n4. 上下文只用于消歧和保持连贯，不得把上文或下文混入译文。\n5. 标有 contextualFallback 或 contentType 不同的历史译例只用于稳定术语与基础表达，不得覆盖当前语体要求。\n6. 只翻译“当前原文”，只输出译文，不解释。\n\n当前原文：\n${contextPack.source}`;
 }
 
-async function chat(messages, config = runtimeConfig) {
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {})
-    },
-    body: JSON.stringify({ model: config.model, messages, temperature: 0.25 }),
-    signal: AbortSignal.timeout(30_000)
-  });
+async function chat(messages, config = runtimeConfig, options = {}) {
+  const normalizedOptions = typeof options === "number" ? { temperature: options } : options;
+  const temperature = normalizedOptions.temperature ?? 0.25;
+  const timeoutMs = normalizedOptions.timeoutMs ?? 60_000;
+  const requestLabel = normalizedOptions.requestLabel || "模型";
+  let response;
+  try {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {})
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        temperature,
+        ...(normalizedOptions.maxTokens ? { max_tokens: normalizedOptions.maxTokens } : {}),
+        ...(normalizedOptions.responseFormat ? { response_format: normalizedOptions.responseFormat } : {})
+      }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error(`${requestLabel}请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+    }
+    throw error;
+  }
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`模型请求失败 (${response.status})：${detail.slice(0, 500)}`);
@@ -78,27 +116,91 @@ async function chat(messages, config = runtimeConfig) {
   return payload.choices?.[0]?.message?.content?.trim() || "";
 }
 
+export function isEmbeddingConfigured() {
+  return Boolean(runtimeConfig.embeddingModel);
+}
+
+export async function embed(text, { model: modelOverride } = {}) {
+  const model = modelOverride || runtimeConfig.embeddingModel;
+  if (!model) throw new Error("未配置 embedding 模型，向量检索保持禁用");
+  const baseUrl = runtimeConfig.embeddingBaseUrl || runtimeConfig.baseUrl;
+  const apiKey = runtimeConfig.embeddingApiKey || runtimeConfig.apiKey;
+  const response = await fetch(`${baseUrl}/embeddings`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
+    },
+    body: JSON.stringify({ model, input: String(text).slice(0, 16_000) }),
+    signal: AbortSignal.timeout(30_000)
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`embedding 请求失败 (${response.status})：${detail.slice(0, 500)}`);
+  }
+  const payload = await response.json();
+  let vector = payload.data?.[0]?.embedding ?? payload.embedding;
+  if (!Array.isArray(vector) || !vector.length || !vector.every((value) => Number.isFinite(value))) {
+    throw new Error("embedding 响应缺少有效向量");
+  }
+  vector = vector.map(Number);
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  if (!norm) throw new Error("embedding 返回零向量");
+  return { vector: vector.map((value) => value / norm), model, dimensions: vector.length };
+}
+
 export async function reviewTermCandidatesWithModel(locale, candidates) {
   const language = LOCALE_NAMES[locale] || locale;
   const compactCandidates = candidates.slice(0, 160).map((candidate, index) => ({
     index,
+    candidateKey: candidate.candidateKey || "",
+    sheet: candidate.sheet || "",
+    sheetMode: candidate.sheetMode || "mixed",
+    rowNumber: candidate.rowNumber || null,
     assetType: candidate.assetType,
     source: candidate.source,
     target: candidate.target,
+    contentTypeHint: candidate.contentType || "general",
+    domainHint: candidate.domain || "general",
+    enforcementHint: candidate.enforcement || "preferred",
     ruleScore: candidate.score,
     ruleReasons: candidate.reasons
   }));
   const content = await chat([
     {
       role: "system",
-      content: `你是游戏本地化资产清洗员，审核简体中文到${language}的候选对照。assetType=term 时只保留专名、系统名、功能名、道具名、角色名、地点名、技能名及稳定复用短语；assetType=memory 时保留语义对齐的完整中外文句段，用于翻译记忆和风格证据。两类都必须排除数字、网址、错列、元数据和明显误译。不要改写文本。输出严格 JSON：{"decisions":[{"index":0,"keep":true,"confidence":0.9,"reason":"简短理由"}]}`
+      content: `你是游戏本地化资产清洗员。用户只负责上传文件，你必须逐条完成资产归类，不要求用户设置任何参数。审核简体中文到${language}的候选对照。每一个输入 index 都必须且只能返回一次 decision，不能遗漏。
+
+rowKind 只能为 term 或 memory。sheetMode=dialogue 时整行必须保持 memory；不得因为译文长短或目标语言不同将同一句中文改成 term。term 是独立词条中的专名、系统名、功能名、道具名、角色名、地点名、技能名；memory 是语义对齐的台词、句子、UI 文本或完整文案。memory 的 contentType 必须从 ${Object.keys(CONTENT_TYPES).join(", ")} 中选择，term 固定 general。domain 只能为 game、marketing、community、general。
+
+对 keep=true 且 rowKind=memory 的完整句段，同时检查句内术语，放入 nestedTerms，不得用 nestedTerms 替换父 memory。nestedTerms.category 只能是 proper_name、character_name、place_name、item_name、skill_name、system_name、organization_name、species_name、currency_name、lore_concept、fixed_ui_label。必须是专名、官方命名或能稳定复用的固定标签；严禁抽取代词、动词/形容词短语、普通搭配、礼貌套话、一次性修辞和整分句。nestedTerms.source 必须逐字存在于 source，target 必须逐字存在于 target；不得补译、改写或猜测目标词。专名和官方命名 enforcement=required，其他固定标签 preferred。
+
+排除数字、网址、DDL、字符限制、位置说明、语种要求、错列、元数据和明显误译。不要改写父 source 或 target。输出严格 JSON：{"decisions":[{"index":0,"keep":true,"confidence":0.95,"rowKind":"memory","contentType":"dialogue","domain":"game","enforcement":"preferred","reason":"完整对白且语义对齐","nestedTerms":[{"source":"孙悟空","target":"孫悟空","category":"character_name","enforcement":"required","confidence":0.98,"reason":"角色专名"}]}]}`
     },
     { role: "user", content: JSON.stringify(compactCandidates) }
-  ]);
+  ], runtimeConfig, {
+    temperature: 0,
+    timeoutMs: 90_000,
+    maxTokens: 8_000,
+    requestLabel: "术语与译例清洗",
+    responseFormat: { type: "json_object" }
+  });
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("术语清洗模型未返回 JSON");
   const payload = JSON.parse(match[0]);
   if (!Array.isArray(payload.decisions)) throw new Error("术语清洗模型返回格式无效");
+  const validIndexes = new Set();
+  const duplicateIndexes = [];
+  for (const decision of payload.decisions) {
+    const index = Number(decision?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= compactCandidates.length) continue;
+    if (validIndexes.has(index)) duplicateIndexes.push(index);
+    validIndexes.add(index);
+  }
+  const missing = compactCandidates.map((_, index) => index).filter((index) => !validIndexes.has(index));
+  if (missing.length || duplicateIndexes.length) {
+    throw new Error(`术语清洗模型返回不完整：已覆盖 ${validIndexes.size}/${compactCandidates.length} 条${missing.length ? `，缺少 index ${missing.slice(0, 12).join(",")}` : ""}${duplicateIndexes.length ? `，重复 index ${duplicateIndexes.slice(0, 12).join(",")}` : ""}`);
+  }
   return payload.decisions;
 }
 
@@ -121,7 +223,7 @@ export async function analyzeTermTableStructureWithModel(snapshot, requestedLoca
 
 表格可能完全没有表头，也可能前几行是标题、说明或元数据。请根据整列的文字脚本、成对行关系、长度和内容分布，找出一列简体中文源文以及一个或多个目标语言列。纯汉字日文和繁体中文也必须结合对应行语义与整列分布判断，不能因为缺少假名或表头就拒绝。
 
-不要把位置、描述、DDL、字符限制、语种要求、序号或日期列当成中外文对照。headerRow 只有确实存在列名行时才填写，否则必须为 null。输出严格 JSON，不要 Markdown：{"sheets":[{"sheet":"原工作表名","headerRow":null,"sourceColumn":1,"targetColumns":{"ja-JP":2},"confidence":0.9,"reason":"简短依据"}]}`
+不要把位置、描述、DDL、字符限制、语种要求、序号或日期列当成中外文对照。headerRow 只有确实存在列名行时才填写，否则必须为 null。还要只根据工作表名称、表头和中文源列整体分布判断 sheetMode：dialogue=对白/字幕/剧情句段为主，glossary=独立命名词条为主，mixed=两类明显混合。目标语言译文长度不得影响 sheetMode。输出严格 JSON，不要 Markdown：{"sheets":[{"sheet":"原工作表名","headerRow":null,"sourceColumn":1,"targetColumns":{"ja-JP":2},"sheetMode":"dialogue","confidence":0.9,"reason":"简短依据"}]}`
     },
     { role: "user", content: JSON.stringify(compactSnapshot) }
   ]);
@@ -148,18 +250,201 @@ export async function distillStyleProfileWithModel({ locale, contentType, domain
   return { name: String(payload.name || `${language} ${contentType} 风格`), instruction: String(payload.instructions), examples: payload.examples.slice(0, 12) };
 }
 
-export async function evaluateTranslationWithModel({ contextPack, translation, references = [], qaCases = [] }) {
+export async function distillBatchStyleLearningWithModel({ batchId, filename, locale, contentType, domain, examples = [] }) {
+  const language = LOCALE_NAMES[locale] || locale;
+  const evidence = examples.slice(0, 40).map((item) => ({
+    source: String(item?.source || "").trim(),
+    target: String(item?.target || "").trim(),
+    rowNumber: Number(item?.rowNumber || item?.sourceRow) || null
+  })).filter((item) => item.source && item.target);
+  if (!evidence.length) throw new Error("批次风格学习缺少有效中外文证据");
+  const messages = [
+    {
+      role: "system",
+      content: `你是${language}游戏本地化风格观察员。请只根据当前这一批已对齐双语句段，说明 AI 从本批“观察到了什么”。这不是已批准的正式风格规范：少量证据只能描述倾向，不能夸大为固定规则。单条证据也可以输出观察，但 caveat 必须明确证据不足，任何 confidence 不得高于 0.65。请归纳语气、句式与节奏、称谓、句尾、标点、信息顺序和长度倾向，并给出可读例子及适用边界。examples 只能逐字引用输入中的真实 source/target，不得改写。输出严格 JSON：{"summary":"本批学习摘要","rules":[{"category":"语气|句式|称谓|句尾|标点|长度|其他","observation":"从证据观察到的现象","guidance":"可供后续审核的建议","confidence":0.8}],"examples":[{"type":"positive","source":"原文","target":"译文","reason":"为何能代表本批风格"}],"caveat":"适用边界","confidence":0.8}`
+    },
+    { role: "user", content: JSON.stringify({ batchId, filename, locale, contentType, domain, examples: evidence }) }
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0, timeoutMs: 90_000, maxTokens: 3200, requestLabel: "本批风格浓缩", responseFormat: { type: "json_object" } });
+  let payload;
+  let formatError = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("未返回 JSON 对象");
+      const parsed = JSON.parse(match[0]);
+      if (!parsed.summary || !Array.isArray(parsed.rules) || !Array.isArray(parsed.examples)) throw new Error("缺少 summary、rules 或 examples");
+      payload = parsed;
+      break;
+    } catch (error) {
+      formatError = error.message;
+      if (attempt === 1) break;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: content.slice(0, 4_000) },
+        { role: "user", content: "上一个回答不是可解析的严格 JSON。请重新输出一个更紧凑的 JSON 对象：最多 6 条 rules、3 条 examples；所有字符串使用合法 JSON 转义；不要 Markdown、代码围栏、注释或尾随逗号。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 75_000, maxTokens: 2200, requestLabel: "本批风格浓缩格式重试", responseFormat: { type: "json_object" } });
+    }
+  }
+  if (!payload) throw new Error(`本批风格浓缩模型返回格式无效：${formatError || "未知格式错误"}`);
+  const confidenceCap = evidence.length === 1 ? 0.65 : 1;
+  const evidenceKeys = new Set(evidence.map((item) => `${item.source}\u0000${item.target}`));
+  const defaultCaveat = evidence.length === 1
+    ? "当前只有一条对齐证据，只能作为本批次观察，尚不能形成正式风格规范。"
+    : "当前结论仅代表本批次证据，需结合后续批次与人工审核后再决定是否纳入正式风格规范。";
+  return {
+    summary: String(payload.summary).trim(),
+    rules: payload.rules.slice(0, 12).map((rule) => ({
+      category: String(rule.category || "其他").trim(),
+      observation: String(rule.observation || "").trim(),
+      guidance: String(rule.guidance || "").trim(),
+      confidence: Number(Math.min(confidenceCap, Math.max(0, Math.min(1, Number(rule.confidence) || 0))).toFixed(2))
+    })).filter((rule) => rule.observation && rule.guidance),
+    examples: payload.examples.slice(0, 8).map((item) => ({
+      ...(item?.type ? { type: String(item.type) } : {}),
+      source: String(item?.source || "").trim(),
+      target: String(item?.target || "").trim(),
+      reason: String(item?.reason || "支持本批次风格观察").trim()
+    })).filter((item) => evidenceKeys.has(`${item.source}\u0000${item.target}`)),
+    caveat: String(payload.caveat || defaultCaveat).trim() || defaultCaveat,
+    confidence: Number(Math.min(confidenceCap, Math.max(0, Math.min(1, Number(payload.confidence) || 0))).toFixed(2))
+  };
+}
+
+export async function distillUserProfileWithModel({ locale, examples }) {
+  const language = LOCALE_NAMES[locale] || locale;
   const content = await chat([
+    {
+      role: "system",
+      content: `你是${language}游戏本地化译者画像编辑。请只根据人工采纳的中外文证据，提炼该团队/译者对${language}的全局翻译偏好。只提炼跨语体稳定的习惯：称谓与敬体选择、句尾语气、长度倾向、标点习惯、数字与格式处理、禁用表达，并提供简短正反例。不得把某个语体的临时风格当成全局偏好。输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
+    },
+    { role: "user", content: JSON.stringify({ locale, examples: examples.slice(0, 30) }) }
+  ]);
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("译者画像模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  if (!payload.instructions || !Array.isArray(payload.examples)) throw new Error("译者画像模型返回格式无效");
+  return { name: String(payload.name || `${language} 译者画像`), instruction: String(payload.instructions), examples: payload.examples.slice(0, 8) };
+}
+
+export async function reviewEvolutionWithModel({ locale, contentType, domain, qaRuns = [], evidence = [], previousProfile = null }) {
+  const language = LOCALE_NAMES[locale] || locale;
+  const compactRuns = qaRuns.slice(0, 20).map((run) => ({
+    source: run.source,
+    initialTranslation: run.initialTranslation,
+    finalTranslation: run.finalTranslation,
+    score: run.score,
+    status: run.status,
+    iterations: run.iterations,
+    issues: (run.issues || []).slice(0, 6)
+  }));
+  const compactEvidence = evidence.slice(0, 20).map((item) => ({ source: item.source, target: item.target, provenance: item.provenance }));
+  const content = await chat([
+    {
+      role: "system",
+      content: `你是${language}游戏本地化演进复盘员。复盘最近的翻译轨迹与人工采纳证据，判断：(1) 是否存在反复出现的同类风格/术语问题（trend）；(2) 现有风格规范是否需要增量补充（stylePatch，只输出补充规则，不要重写全文）；(3) 人工采纳证据与现有规范是否有冲突。没有发现就不输出对应字段。输出严格 JSON：{"stylePatch":null|{"instructions":"增量规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]},"trend":[{"category":"风格|术语|准确性|格式","observation":"简短说明","count":3}],"reason":"复盘结论"}`
+    },
+    { role: "user", content: JSON.stringify({ locale, contentType, domain, previousProfile, qaRuns: compactRuns, evidence: compactEvidence }) }
+  ]);
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("演进复盘模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  return {
+    stylePatch: payload.stylePatch && payload.stylePatch.instructions ? { instruction: String(payload.stylePatch.instructions), examples: Array.isArray(payload.stylePatch.examples) ? payload.stylePatch.examples.slice(0, 8) : [] } : null,
+    trend: Array.isArray(payload.trend) ? payload.trend.slice(0, 8).map((item) => ({ category: String(item.category || "其他"), observation: String(item.observation || ""), count: Number(item.count) || 1 })) : [],
+    reason: String(payload.reason || "")
+  };
+}
+
+export async function proposeTranslationSkillWithModel({ locale, contentType, domain, project = "default", champion, trajectories = [] }) {
+  const compact = trajectories.slice(0, 40).map((item) => ({
+    id: item.id,
+    source: item.source,
+    initialTranslation: item.initialTranslation,
+    finalTranslation: item.finalTranslation,
+    qaBefore: item.qaBefore,
+    qaAfter: item.qaAfter,
+    humanDecision: item.humanDecision,
+    error: item.error || ""
+  }));
+  if (!compact.length) throw new Error("尚无可用于生成候选技能的翻译轨迹");
+  const messages = [
+    {
+      role: "system",
+      content: `你是本地化翻译流程改进员。你要根据同一目标语言、语体、领域和项目的真实执行轨迹，只提出一份保守、可评测的“候选翻译技能补丁”。不得更改目标语言或把其他语种规则混入；不得发明轨迹中不存在的问题；术语译法仍由术语库负责，不要把个别术语硬编码进技能。重点分析反复出现的准确性、语体、上下文、检索和 QA 修订模式。输出严格 JSON：{"name":"候选技能名","reason":"为什么提出该补丁","strategyPatch":{"prompting":{"additionalInstruction":"整体执行指导","additionalRules":["可执行规则"]},"retrieval":{"translationMemory":{"limit":5},"qaCases":{"limit":3}},"qa":{"minimumScore":90,"maximumRevisionAttempts":2},"context":{"includePreviousSegments":2,"includeNextSegments":1}},"evidenceIds":["轨迹ID"]}`
+    },
+    { role: "user", content: JSON.stringify({ locale, contentType, domain, project, champion, trajectories: compact }) }
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 90_000, maxTokens: 2200, requestLabel: "翻译技能复盘", responseFormat: { type: "json_object" } });
+  let payload;
+  let formatError = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("未返回 JSON 对象");
+      const parsed = JSON.parse(match[0]);
+      if (!parsed.strategyPatch || typeof parsed.strategyPatch !== "object") throw new Error("缺少 strategyPatch");
+      payload = parsed;
+      break;
+    } catch (error) {
+      formatError = error.message;
+      if (attempt === 1) break;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: content.slice(0, 4_000) },
+        { role: "user", content: "上一个回答不是可解析的严格 JSON。请只重新输出一个紧凑 JSON 对象，必须包含 name、reason、strategyPatch、evidenceIds；不要 Markdown、代码围栏、思考过程、注释或尾随逗号。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "翻译技能复盘格式重试", responseFormat: { type: "json_object" } });
+    }
+  }
+  if (!payload) throw new Error(`翻译技能复盘模型返回格式无效：${formatError || "未知格式错误"}`);
+  const validIds = new Set(compact.map((item) => item.id));
+  return {
+    name: String(payload.name || `${LOCALE_NAMES[locale] || locale} ${contentType} 候选技能`).slice(0, 120),
+    reason: String(payload.reason || "根据近期翻译轨迹提出的增量改进").slice(0, 2_000),
+    strategyPatch: payload.strategyPatch,
+    evidenceIds: [...new Set((Array.isArray(payload.evidenceIds) ? payload.evidenceIds : []).filter((id) => validIds.has(id)))].slice(0, 100)
+  };
+}
+
+export async function evaluateTranslationWithModel({ contextPack, translation, references = [], qaCases = [] }) {
+  const messages = [
     {
       role: "system",
       content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式和约束。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
-  ]);
-  const match = content.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("AIQA 模型未返回 JSON");
-  const payload = JSON.parse(match[0]);
-  if (!Array.isArray(payload.issues)) throw new Error("AIQA 模型返回格式无效");
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "AIQA", responseFormat: { type: "json_object" } });
+  let payload;
+  let lastFormatError = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      payload = parseAiQaResponse(content);
+      break;
+    } catch (error) {
+      lastFormatError = error.message;
+      if (attempt === 1) break;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: content.slice(0, 4000) },
+        { role: "user", content: "上一个回答不是可解析的严格 JSON。请只重新输出一个紧凑 JSON 对象，根字段必须是 issues 数组，不要 Markdown、解释或代码围栏。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1800, requestLabel: "AIQA 格式重试", responseFormat: { type: "json_object" } });
+    }
+  }
+  if (!payload) {
+    const lineContent = await chat([
+      {
+        role: "system",
+        content: "你是本地化 QA。不要输出 JSON。若没有问题只输出 PASS；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|类别|原文片段|译文片段|问题原因|修订建议。不得输出其他内容。"
+      },
+      { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 3), qaCases: qaCases.slice(0, 2) }) }
+    ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "AIQA 行式降级" });
+    try {
+      payload = { issues: parseAiQaLineResponse(lineContent) };
+    } catch (error) {
+      throw new Error(`AIQA 返回无法解析（JSON：${lastFormatError || "未知"}；行式：${error.message}）`);
+    }
+  }
   return payload.issues.slice(0, 30).map((issue) => ({
     severity: ["critical", "major", "minor"].includes(issue.severity) ? issue.severity : "major",
     category: String(issue.category || "other"),
@@ -173,11 +458,89 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
   }));
 }
 
+function noIssueResponse(content) {
+  const trimmed = String(content || "").trim();
+  if (/^(?:PASS|OK|无问题|問題なし|問題ありません)[。.!！\s]*$/iu.test(trimmed)) return true;
+  return trimmed.length <= 240 && /(?:未发现|没有发现|不存在).{0,12}(?:明显|实质性|需要修订的)?问题|无需(?:进行)?修改|符合(?:全部)?要求|問題は(?:見つかり|あり)ません/iu.test(trimmed);
+}
+
+export function parseAiQaResponse(content) {
+  const trimmed = String(content || "").trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "").trim();
+  if (!trimmed) throw new Error("模型返回空内容");
+  if (noIssueResponse(trimmed)) return { issues: [] };
+  const candidates = [trimmed];
+  const objectStart = trimmed.indexOf("{");
+  const objectEnd = trimmed.lastIndexOf("}");
+  if (objectStart >= 0 && objectEnd > objectStart) candidates.push(trimmed.slice(objectStart, objectEnd + 1));
+  const arrayStart = trimmed.indexOf("[");
+  const arrayEnd = trimmed.lastIndexOf("]");
+  if (arrayStart >= 0 && arrayEnd > arrayStart) candidates.push(trimmed.slice(arrayStart, arrayEnd + 1));
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return { issues: parsed };
+      if (Array.isArray(parsed?.issues)) return parsed;
+    } catch {}
+  }
+  throw new Error("缺少有效 issues JSON");
+}
+
+export function parseAiQaLineResponse(content) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed) throw new Error("模型返回空内容");
+  if (noIssueResponse(trimmed)) return [];
+  const issues = trimmed.split(/\r?\n/u).map((line) => line.trim().replace(/^[-*•\d.)、\s]+/u, "")).filter((line) => /^ISSUE\s*[|｜]/iu.test(line)).map((line) => {
+    const [, severity = "major", category = "other", sourceSpan = "", targetSpan = "", message = "", suggestion = ""] = line.split(/[|｜]/u).map((item) => item.trim());
+    return { severity, category, sourceSpan, targetSpan, message, suggestion, confidence: 0.8 };
+  }).filter((issue) => issue.message);
+  if (issues.length) return issues;
+  return [{
+    severity: "major",
+    category: "unstructured_review",
+    sourceSpan: "",
+    targetSpan: "",
+    message: trimmed.slice(0, 800),
+    suggestion: "根据该审校意见进行修订，并再次执行 QA。",
+    confidence: 0.65
+  }];
+}
+
 export async function reviseTranslationWithQa({ contextPack, translation, issues, references = [], qaCases = [] }) {
   return chat([
     { role: "system", content: "你是最终修订译者。只修复 QA 明确指出的问题，保留正确内容、数字、格式、占位符、强制术语和原有信息边界。只输出完整修订译文，不要解释。" },
     { role: "user", content: JSON.stringify({ contextPack, currentTranslation: translation, issues, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
-  ]);
+  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "AIQA 修订" });
+}
+
+export async function adjudicatePotentialTermsWithModel({ contextPack, translation, issues }) {
+  const candidates = issues.slice(0, 12).map((issue) => ({
+    matchedSource: issue.matchedSource || "",
+    officialSource: issue.sourceTerm || "",
+    officialTarget: issue.targetTerm || "",
+    currentTranslation: translation
+  }));
+  const content = await chat([
+    {
+      role: "system",
+      content: "你是游戏本地化术语裁决译者。逐项判断当前原文中的疑似表达是否与术语库正式源词表示同一概念。若是，必须在完整译文中自然地采用 officialTarget；若不是，不得强行替换。保留全部事实、格式、数字和其他正确内容。reason 必须使用简体中文，便于中文项目成员审核。输出严格 JSON：{\"translation\":\"裁决后的完整译文\",\"decisions\":[{\"officialSource\":\"正式源词\",\"matchedSource\":\"当前表达\",\"officialTarget\":\"正式译法\",\"decision\":\"apply|not_applicable\",\"reason\":\"简体中文简短理由\"}]}"
+    },
+    { role: "user", content: JSON.stringify({ contextPack, currentTranslation: translation, candidates }) }
+  ], runtimeConfig, { temperature: 0.05, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "术语自动裁决", responseFormat: { type: "json_object" } });
+  const start = content.indexOf("{");
+  const end = content.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("术语裁决模型未返回 JSON");
+  const payload = JSON.parse(content.slice(start, end + 1));
+  if (!String(payload.translation || "").trim() || !Array.isArray(payload.decisions)) throw new Error("术语裁决模型返回格式无效");
+  return {
+    translation: String(payload.translation).trim(),
+    decisions: payload.decisions.slice(0, candidates.length).map((decision) => ({
+      officialSource: String(decision.officialSource || ""),
+      matchedSource: String(decision.matchedSource || ""),
+      officialTarget: String(decision.officialTarget || ""),
+      decision: decision.decision === "not_applicable" ? "not_applicable" : "apply",
+      reason: String(decision.reason || "模型未补充理由")
+    }))
+  };
 }
 
 export async function analyzeSpreadsheetStructureWithModel(snapshot, ruleAnalysis, locale) {
@@ -274,16 +637,16 @@ export async function classifyWithModel(text) {
 }
 
 export async function translateWithReflection(contextPack, { reflect = true } = {}) {
-  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }]);
+  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译" });
   if (!reflect) return { initial, translation: initial, reflection: "" };
   const reflection = await chat([
     { role: "system", content: "你是严格的双语本地化审校。只指出漏译、误译、术语、事实、语体和目标语言自然度问题；没有问题则回答 PASS。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：\n${initial}` }
-  ]);
+  ], runtimeConfig, { temperature: 0.35, timeoutMs: 60_000, requestLabel: "翻译自检" });
   if (/^PASS[。.!]?$/i.test(reflection)) return { initial, translation: initial, reflection };
   const translation = await chat([
     { role: "system", content: "你是最终修订译者。根据审校意见做最小必要修改，严格保留事实、格式和指定术语。只输出最终译文。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：${initial}\n\n审校意见：${reflection}` }
-  ]);
+  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "翻译修订" });
   return { initial, translation, reflection };
 }

@@ -23,7 +23,7 @@ function normalizeNeighborContext(neighborContext) {
   };
 }
 
-export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, qaGuidance = [] }) {
+export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, translationSkill = null, qaGuidance = [], userProfile = null, translationReferences = [] }) {
   const required = matches.filter((item) => item.mode === "exact" && item.term.enforcement === "required");
   const preferred = matches.filter((item) => item.mode !== "exact" || item.term.enforcement !== "required");
   const defaultRegister = CONTENT_TYPES[classification.contentType].register;
@@ -35,6 +35,19 @@ export function buildContextPack({ source, locale, classification, matches, doma
     contentType: classification.contentType,
     contentTypeLabel: CONTENT_TYPES[classification.contentType].label,
     register: defaultRegister,
+    translationReferences: Array.isArray(translationReferences) ? translationReferences.slice(0, 5).map((item) => ({
+      source: item.source,
+      target: item.target,
+      similarity: Number(item.similarity) || 0,
+      qualityStatus: item.qualityStatus || ""
+    })) : [],
+    userProfile: userProfile ? {
+      id: String(userProfile.id || ""),
+      name: String(userProfile.name || "译者画像"),
+      instruction: String(userProfile.instruction || ""),
+      version: Number(userProfile.version) || 1,
+      examples: Array.isArray(userProfile.examples) ? userProfile.examples.slice(0, 4) : []
+    } : null,
     styleProfile: {
       id: String(styleProfile?.id || "content-type-default"),
       name: String(styleProfile?.name || CONTENT_TYPES[classification.contentType].label),
@@ -43,6 +56,17 @@ export function buildContextPack({ source, locale, classification, matches, doma
       version: Number(styleProfile?.version) || 1,
       examples: Array.isArray(styleProfile?.examples) ? styleProfile.examples.slice(0, 8) : []
     },
+    translationSkill: translationSkill ? {
+      id: String(translationSkill.id || ""),
+      name: String(translationSkill.name || "翻译技能"),
+      version: Number(translationSkill.version) || 1,
+      promptVersion: String(translationSkill.promptVersion || ""),
+      instruction: String(translationSkill.strategy?.prompting?.additionalInstruction || translationSkill.strategy?.instruction || ""),
+      additionalRules: Array.isArray(translationSkill.strategy?.prompting?.additionalRules || translationSkill.strategy?.additionalRules)
+        ? (translationSkill.strategy.prompting?.additionalRules || translationSkill.strategy.additionalRules).slice(0, 12).map(String)
+        : [],
+      strategy: translationSkill.strategy || {}
+    } : null,
     localeInstruction: LOCALES[locale].defaultInstruction,
     requiredTerms: required.map(({ term }) => ({ source: term.source, target: term.target, forbidden: term.forbidden, note: term.note })),
     preferredTerms: preferred.map(({ term, mode, matchPhrase, score }) => ({

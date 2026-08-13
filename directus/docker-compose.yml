@@ -39,6 +39,10 @@ services:
       ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD}
       ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN}
       PUBLIC_URL: http://127.0.0.1:8055
+      # The workbench is localhost-only and can expand one spreadsheet row into
+      # four language candidates. Keep the API comfortably above the 10 MB
+      # upload ceiling so candidate previews are not rejected at 1 MB.
+      MAX_PAYLOAD_SIZE: "128mb"
       CORS_ENABLED: "true"
       CORS_ORIGIN: http://127.0.0.1:4173
       TELEMETRY: "false"

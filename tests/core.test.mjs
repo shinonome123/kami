@@ -107,12 +107,50 @@ test("批次 Context Pack 同时携带结构化上下文、术语和风格配置
   assert.equal(pack.requiredTerms[0].target, "プレミアムパス");
 });
 
+test("Context Pack 注入当前范围的翻译技能版本与增量规则", () => {
+  const source = "别怕，我在这儿。";
+  const pack = buildContextPack({
+    source,
+    locale: "ja-JP",
+    classification: classifyContent(source, "dialogue"),
+    matches: [],
+    domain: "game",
+    translationSkill: {
+      id: "skill-ja-dialogue-v2",
+      name: "日语对白技能",
+      version: 2,
+      promptVersion: "kami-translation-v1",
+      strategy: {
+        prompting: {
+          additionalInstruction: "保持角色口语节奏，避免说明文腔。",
+          additionalRules: ["称谓必须结合说话人关系判断。"]
+        }
+      }
+    }
+  });
+  assert.equal(pack.translationSkill.id, "skill-ja-dialogue-v2");
+  assert.equal(pack.translationSkill.version, 2);
+  assert.deepEqual(pack.translationSkill.additionalRules, ["称谓必须结合说话人关系判断。"]);
+});
+
 test("QA 检出缺失强制术语、数字和禁用译法", () => {
   const matches = matchTerms("高级通行证提升20%攻击力", jaAssets, { contentType: "marketing", domain: "game" });
   const issues = runQa({ source: "高级通行证提升20%攻击力", translation: "高級パスで攻撃力が上昇します。", matches });
   assert.ok(issues.some((issue) => issue.type === "required_term"));
   assert.ok(issues.some((issue) => issue.type === "forbidden_term"));
   assert.ok(issues.some((issue) => issue.type === "protected_token"));
+});
+
+test("疑似术语 QA 保留自动裁决所需的源词和正式译法", () => {
+  const issues = runQa({
+    source: "追加豪华内容",
+    translation: "デラックスコンテンツを追加する",
+    matches: [{ mode: "smart", matchPhrase: "豪华内容", term: { source: "数字豪华版", target: "デジタルデラックス版", enforcement: "required", forbidden: [] } }]
+  });
+  const issue = issues.find((item) => item.type === "potential_term");
+  assert.equal(issue.matchedSource, "豪华内容");
+  assert.equal(issue.sourceTerm, "数字豪华版");
+  assert.equal(issue.targetTerm, "デジタルデラックス版");
 });
 
 test("语料炼化保留分段并产生重复短语候选", () => {

@@ -7,17 +7,26 @@ import { classifyContent } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, distillStyleProfileWithModel, evaluateTranslationWithModel, getProviderConfig, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { adjudicatePotentialTermsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, evaluateTranslationWithModel, getProviderConfig, proposeTranslationSkillWithModel, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
-import { completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getStoreMetadata, getStyleProfile, initializeStore, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleProfile } from "./src/store.mjs";
-import { applyModelDecisions, extractTermPairs } from "./src/table-term-extractor.mjs";
+import { completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations } from "./src/store.mjs";
+import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
+import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
+import { runTaskPool } from "./src/task-pool.mjs";
+import { collectTrainingEvidenceIds, createDefaultTranslationSkill, evaluateSkillPromotion, mergeTranslationSkillPatch, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
+import { runPairedSkillBenchmarks } from "./src/learning-benchmark.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
 const MAX_BODY_BYTES = 15 * 1024 * 1024;
+const TERM_AI_CONCURRENCY = 5;
+const TERM_AI_BATCH_SIZE = 24;
+const TRANSLATION_PROMPT_VERSION = "kami-translation-v1";
+const importProgress = new Map();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -36,6 +45,159 @@ function json(res, status, payload) {
     "cache-control": "no-store"
   });
   res.end(body);
+}
+
+function learningScope({ locale, contentType = "general", domain = "general", project = "default" }) {
+  return { locale: assertLocale(locale), contentType: String(contentType || "general"), domain: String(domain || "general"), project: String(project || "default") };
+}
+
+async function ensureChampionTranslationSkill(scope) {
+  const template = createDefaultTranslationSkill({ scope });
+  const runtimeDefault = {
+    ...scope,
+    id: template.id,
+    name: template.name,
+    description: template.description,
+    changeReason: template.changeReason,
+    version: template.version,
+    status: "champion",
+    strategy: template.strategy,
+    promptVersion: TRANSLATION_PROMPT_VERSION,
+    evidenceIds: [],
+    metrics: {}
+  };
+  try {
+    const [champion] = await listTranslationSkills({ ...scope, status: "champion", limit: 1 });
+    if (champion) return champion;
+    const { id: _runtimeId, ...persistableDefault } = runtimeDefault;
+    return await saveTranslationSkill(persistableDefault);
+  } catch (error) {
+    // Learning storage is observational infrastructure. A temporary Directus
+    // failure must never take the production translation path down with it.
+    return { ...runtimeDefault, persistenceStatus: "unavailable", persistenceError: error.message };
+  }
+}
+
+function assertTrajectoryBinding(existing, { locale, source, contentType, domain, project = "default", batchId = "" }) {
+  if (!existing) {
+    const error = new Error("未找到对应的学习轨迹");
+    error.statusCode = 404;
+    throw error;
+  }
+  const sameScope = existing.locale === locale
+    && String(existing.contentType || "general") === String(contentType || "general")
+    && String(existing.domain || "general") === String(domain || "general")
+    && String(existing.project || "default") === String(project || "default");
+  const sameSource = String(existing.source || "").trim() === String(source || "").trim();
+  const sameBatch = !batchId || !existing.batchId || String(existing.batchId) === String(batchId);
+  if (!sameScope || !sameSource || !sameBatch) {
+    const error = new Error("学习轨迹与当前原文、语种或业务范围不一致，已拒绝写入");
+    error.statusCode = 409;
+    throw error;
+  }
+  return existing;
+}
+
+function trajectoryMetricsFromIssues(issues = [], score = null, matches = []) {
+  const required = matches.filter((item) => item.mode === "exact" && item.term?.enforcement === "required");
+  const missing = new Set(issues.filter((item) => item.type === "required_term").map((item) => item.message));
+  return {
+    qaScore: Number.isFinite(score) ? score : null,
+    hardErrorCount: issues.filter((item) => item.severity === "error").length,
+    requiredTermTotal: required.length,
+    requiredTermHits: Math.max(0, required.length - missing.size)
+  };
+}
+
+function trajectoryToEvaluationSample(trajectory, { variant = "champion" } = {}) {
+  const metrics = variant === "challenger" ? (trajectory.qaAfter || {}) : (trajectory.qaBefore || trajectory.qaAfter || {});
+  const human = trajectory.humanDecision || {};
+  const latency = (trajectory.events || []).findLast?.((item) => Number.isFinite(Number(item.latencyMs)))?.latencyMs;
+  return {
+    caseId: trajectory.id,
+    scope: learningScope(trajectory),
+    requiredTermHits: Number(metrics.requiredTermHits) || 0,
+    requiredTermTotal: Number(metrics.requiredTermTotal) || 0,
+    hardErrorCount: Number(metrics.hardErrorCount) || 0,
+    qaScore: Number.isFinite(Number(metrics.qaScore)) ? Number(metrics.qaScore) : 0,
+    humanEditDistance: Number.isFinite(Number(human.editDistance)) ? Number(human.editDistance) : 0,
+    humanAccepted: human.accepted === true || trajectory.status === "completed",
+    cost: Number(trajectory.costUsd || 0),
+    latencyMs: Number(latency || 0)
+  };
+}
+
+function learningEvaluationUiReport(result) {
+  return {
+    promotable: result.promotable,
+    status: result.status,
+    conclusion: result.reportZh,
+    gates: result.gates,
+    evaluationBasis: "同一人工批准留出集上的 Champion / Challenger 隔离重跑；人工采纳率为相对人工终稿的自动近似指标，不冒充新增人工投票。",
+    metrics: [
+      { key: "termAccuracy", label: "强制术语正确率", unit: "%", higherIsBetter: true, champion: result.championMetrics.mandatoryTermAccuracy, candidate: result.challengerMetrics.mandatoryTermAccuracy, delta: result.deltas.mandatoryTermAccuracy },
+      { key: "hardErrors", label: "硬错误数", unit: "", higherIsBetter: false, champion: result.championMetrics.hardErrorCount, candidate: result.challengerMetrics.hardErrorCount, delta: result.deltas.hardErrorCount },
+      { key: "qaScore", label: "AIQA 平均分", unit: "分", higherIsBetter: true, champion: result.championMetrics.qaScore, candidate: result.challengerMetrics.qaScore, delta: result.deltas.qaScore },
+      { key: "editDistance", label: "人工编辑距离", unit: "%", higherIsBetter: false, champion: result.championMetrics.humanEditDistance, candidate: result.challengerMetrics.humanEditDistance, delta: result.deltas.humanEditDistance },
+      { key: "acceptanceRate", label: "人工采纳率", unit: "%", higherIsBetter: true, champion: result.championMetrics.humanAcceptanceRate, candidate: result.challengerMetrics.humanAcceptanceRate, delta: result.deltas.humanAcceptanceRate }
+    ]
+  };
+}
+
+function assertCurrentCandidate(candidate, currentChampion, evaluation = null, { requireEvaluation = false } = {}) {
+  const state = validateCandidatePromotionState({ candidate, currentChampion, evaluation, requireEvaluation });
+  if (!state.valid) {
+    const error = new Error(state.reasons.join("；"));
+    error.statusCode = 409;
+    throw error;
+  }
+  return state;
+}
+
+async function benchmarkTranslationSkill(skill, trajectory) {
+  const scope = learningScope(skill);
+  const source = String(trajectory.source || "");
+  const classification = await classify({ text: source, hint: scope.contentType, useModel: false });
+  classification.contentType = scope.contentType;
+  const assets = await getAssets(scope.locale);
+  const matches = matchTerms(source, assets, { contentType: scope.contentType, domain: scope.domain });
+  const queryEmbedding = await embedSource(source);
+  const [styleProfile, qaCases, memories, userProfile] = await Promise.all([
+    getStyleProfile(scope.locale, scope.contentType, scope.domain),
+    getQaCases(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
+    getMemories(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
+    getUserProfile(scope.locale)
+  ]);
+  const memoryLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.translationMemory?.limit) || 5));
+  const qaCaseLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.qaCases?.limit) || 3));
+  const translationReferences = rankTranslationMemories(source, memories, { limit: memoryLimit, queryEmbedding });
+  const qaGuidance = rankQaCases(source, qaCases, { limit: qaCaseLimit, queryEmbedding });
+  const contextPack = buildContextPack({
+    source, locale: scope.locale, classification, matches, domain: scope.domain,
+    neighborContext: trajectory.contextPack?.neighborContext || "",
+    styleProfile, translationSkill: skill, qaGuidance, userProfile, translationReferences
+  });
+  const startedAt = Date.now();
+  const translated = await translateWithReflection(contextPack, { reflect: false });
+  const hardIssues = runQa({ source, translation: translated.translation, matches });
+  const aiIssues = await evaluateTranslationWithModel({ contextPack, translation: translated.translation, references: translationReferences, qaCases: qaGuidance });
+  const score = calculateQaScore({ hardIssues, aiIssues });
+  const required = matches.filter((item) => item.mode === "exact" && item.term?.enforcement === "required");
+  const requiredTermHits = required.filter(({ term }) => String(translated.translation).includes(String(term.target || ""))).length;
+  const gold = String(trajectory.humanDecision?.finalTranslation || trajectory.finalTranslation || "");
+  const editDistance = normalizedEditDistance(translated.translation, gold);
+  return {
+    caseId: trajectory.id,
+    scope,
+    translation: translated.translation,
+    requiredTermHits,
+    requiredTermTotal: required.length,
+    hardErrorCount: hardIssues.filter((issue) => issue.severity === "error").length,
+    qaScore: score,
+    humanEditDistance: editDistance,
+    humanAccepted: editDistance <= 0.12 && score >= 90 && !hardIssues.some((issue) => issue.severity === "error"),
+    latencyMs: Date.now() - startedAt
+  };
 }
 
 async function readJsonBody(req) {
@@ -72,9 +234,9 @@ async function classify(body) {
   }
 }
 
-async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, contentType, domain, batchId }) {
-  const memoryPool = await getMemories(locale, { contentType, domain, limit: 500 });
-  const references = rankTranslationMemories(contextPack.source, memoryPool, { limit: 5 });
+async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, contentType, domain, batchId, providedReferences = null, humanDecisions = [], passScore = 90, maxRevisions = 2 }) {
+  const queryEmbedding = await embedSource(contextPack.source);
+  const references = providedReferences || rankTranslationMemories(contextPack.source, await getMemories(locale, { contentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
   const qaCases = contextPack.qaGuidance || [];
   let translation = initialTranslation;
   let hardIssues = runQa({ source: contextPack.source, translation, matches });
@@ -84,13 +246,53 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
   let iterations = 0;
   let used = false;
   let fallbackReason = "";
+  let termDecisions = [];
 
   try {
+    const potentialIssues = hardIssues.filter((issue) => issue.type === "potential_term");
+    if (potentialIssues.length) {
+      try {
+        const adjudication = await adjudicatePotentialTermsWithModel({ contextPack, translation, issues: potentialIssues });
+        translation = adjudication.translation;
+        termDecisions = adjudication.decisions;
+      } catch {
+        translation = await reviseTranslationWithQa({
+          contextPack,
+          translation,
+          issues: potentialIssues.map((issue) => ({
+            severity: "major",
+            category: "terminology",
+            message: `${issue.message}。请结合原文语义判断：若为同一概念则自然采用正式译法；若不是同一概念则保持原译，不得强行替换。`
+          })),
+          references,
+          qaCases
+        });
+        termDecisions = potentialIssues.map((issue) => ({
+          officialSource: issue.sourceTerm,
+          matchedSource: issue.matchedSource,
+          officialTarget: issue.targetTerm,
+          decision: translation.includes(issue.targetTerm) ? "apply" : "not_applicable",
+          reason: translation.includes(issue.targetTerm) ? "模型已在完整译文中采用正式术语" : "模型判断当前表达不应强制替换"
+        }));
+      }
+      iterations += 1;
+      hardIssues = runQa({ source: contextPack.source, translation, matches });
+      const notApplicable = new Set(termDecisions.filter((item) => item.decision === "not_applicable").map((item) => `${item.officialSource}\u0000${item.officialTarget}`));
+      hardIssues = hardIssues.filter((issue) => issue.type !== "potential_term" || !notApplicable.has(`${issue.sourceTerm}\u0000${issue.targetTerm}`));
+      for (const issue of hardIssues) {
+        if (issue.type !== "potential_term") continue;
+        const decision = termDecisions.find((item) => item.officialSource === issue.sourceTerm && item.officialTarget === issue.targetTerm);
+        if (decision?.decision === "apply") {
+          issue.severity = "error";
+          issue.message = `术语裁决要求采用正式译法，但修订结果仍未生效：${issue.sourceTerm} → ${issue.targetTerm}`;
+        }
+      }
+    }
     aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references, qaCases });
     used = true;
     score = calculateQaScore({ hardIssues, aiIssues });
     initialScore = score;
-    while (score < 90 && iterations < 2) {
+    while (score < passScore && iterations < maxRevisions) {
       const actionable = [...hardIssues.map((issue) => ({ severity: "critical", category: issue.type, message: issue.message })), ...aiIssues];
       translation = await reviseTranslationWithQa({ contextPack, translation, issues: actionable, references, qaCases });
       iterations += 1;
@@ -103,16 +305,17 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
   }
 
   if (!used) score = null;
-  const passed = used && score >= 90 && !hardIssues.some((issue) => issue.severity === "error");
+  const passed = used && score >= passScore && !hardIssues.some((issue) => issue.severity === "error");
   const issues = [...hardIssues, ...presentAiQaIssues(aiIssues)];
   const status = passed ? "passed" : "review";
   const provider = getProviderConfig();
   await saveQaRun({
     locale, contentType, domain, source: contextPack.source, initialTranslation, finalTranslation: translation,
     score, status, iterations, issues, references: [...references, ...qaCases.map((item) => ({ ...item, kind: "qa_case" }))], styleProfileId: contextPack.styleProfile?.id,
-    model: provider.model, batchId
+    model: provider.model, batchId, fallbackReason, termDecisions, humanDecisions
   });
-  if (iterations > 0 || !passed) {
+  const translationChanged = translation !== initialTranslation;
+  if (used && (translationChanged || !passed)) {
     await saveQaCase({
       locale, contentType, domain, source: contextPack.source, rejectedTranslation: initialTranslation,
       correctedTranslation: translation, issues, scoreBefore: initialScore, scoreAfter: score,
@@ -126,7 +329,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
       provenance: iterations ? "aiqa-corrected" : "aiqa-passed", batchId
     });
   }
-  return { translation, issues, score, status, iterations, used, fallbackReason, references, qaCases };
+  return { translation, issues, score, status, iterations, used, fallbackReason, references, qaCases, termDecisions, humanDecisions };
 }
 
 function importStatistics(candidates) {
@@ -140,43 +343,139 @@ function importStatistics(candidates) {
   };
 }
 
-async function previewTermImport(body) {
-  const analyzeStructure = body.useModel === false ? undefined : (snapshot, requestedLocale) => analyzeTermTableStructureWithModel(snapshot, requestedLocale);
-  const extracted = await extractTermPairs(body, { analyzeStructure });
-  let candidates = extracted.candidates;
-  const assetsByLocale = {};
-  for (const locale of new Set(candidates.map((candidate) => candidate.locale))) {
-    assetsByLocale[locale] = (await getAssets(locale)).terms;
+function reportImportProgress(id, update) {
+  if (!id) return;
+  const previous = importProgress.get(id) || {};
+  importProgress.set(id, { ...previous, ...update, id, updatedAt: new Date().toISOString() });
+}
+
+function scheduleImportProgressCleanup(id) {
+  if (!id) return;
+  const timer = setTimeout(() => importProgress.delete(id), 5 * 60_000);
+  timer.unref?.();
+}
+
+function validModelDecisionCount(decisions, expected) {
+  if (!Array.isArray(decisions)) return 0;
+  return new Set(decisions
+    .map((item) => Number(item?.index))
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < expected)).size;
+}
+
+async function reviewCandidateGroup(locale, candidates) {
+  let decisions;
+  try {
+    decisions = await reviewTermCandidatesWithModel(locale, candidates);
+  } catch (error) {
+    if (candidates.length === 1) {
+      return {
+        candidates,
+        reviewed: 0,
+        missing: 1,
+        retries: 0,
+        failures: [error.message]
+      };
+    }
+    const middle = Math.ceil(candidates.length / 2);
+    const left = await reviewCandidateGroup(locale, candidates.slice(0, middle));
+    const right = await reviewCandidateGroup(locale, candidates.slice(middle));
+    return {
+      candidates: [...left.candidates, ...right.candidates],
+      reviewed: left.reviewed + right.reviewed,
+      missing: left.missing + right.missing,
+      retries: left.retries + right.retries + 1,
+      failures: [...(left.failures || []), ...(right.failures || [])]
+    };
   }
-  candidates = candidates.map((candidate) => {
-    if (candidate.assetType === "memory") return candidate;
-    const sameSource = assetsByLocale[candidate.locale].filter((term) => term.source.trim().toLocaleLowerCase() === candidate.source.toLocaleLowerCase());
+  const applied = validModelDecisionCount(decisions, candidates.length);
+  if (applied < candidates.length && candidates.length > 1) {
+    const middle = Math.ceil(candidates.length / 2);
+    const left = await reviewCandidateGroup(locale, candidates.slice(0, middle));
+    const right = await reviewCandidateGroup(locale, candidates.slice(middle));
+    return {
+      candidates: [...left.candidates, ...right.candidates],
+      reviewed: left.reviewed + right.reviewed,
+      missing: left.missing + right.missing,
+      retries: left.retries + right.retries + 1,
+      failures: [...(left.failures || []), ...(right.failures || [])]
+    };
+  }
+  return {
+    candidates: applyModelDecisions(candidates, decisions),
+    reviewed: applied,
+    missing: Math.max(0, candidates.length - applied),
+    retries: 0,
+    failures: []
+  };
+}
+
+function markExistingTermCandidates(candidates, assetsByLocale) {
+  return candidates.map((candidate) => {
+    if (candidate.assetType !== "term") return candidate;
+    const sameSource = (assetsByLocale[candidate.locale] || []).filter((term) => term.source.trim().toLocaleLowerCase() === candidate.source.toLocaleLowerCase());
     const exact = sameSource.find((term) => term.target.trim().toLocaleLowerCase() === candidate.target.toLocaleLowerCase());
-    if (exact) return { ...candidate, existing: true, existingId: exact.id, decision: "excluded", reasons: [...candidate.reasons, "当前语言库已存在相同对照"] };
-    if (sameSource.length) return { ...candidate, conflict: true, existingTarget: sameSource[0].target, decision: "review", score: Math.min(candidate.score, 0.67), reasons: [...candidate.reasons, `当前语言库已有译法：${sameSource[0].target}`] };
+    if (exact) return { ...candidate, existing: true, existingId: exact.id, decision: "excluded", reasons: [...(candidate.reasons || []), "当前语言库已存在相同对照"] };
+    if (sameSource.length) return { ...candidate, conflict: true, existingTarget: sameSource[0].target, decision: "review", score: Math.min(candidate.score, 0.67), reasons: [...(candidate.reasons || []), `当前语言库已有译法：${sameSource[0].target}`] };
     return candidate;
   });
+}
 
-  const ai = { requested: Boolean(body.useModel), used: false, reviewed: 0, fallbackReason: "" };
-  if (body.useModel) {
-    try {
-      for (const locale of new Set(candidates.map((candidate) => candidate.locale))) {
-        const indexes = candidates.map((candidate, index) => ({ candidate, index })).filter(({ candidate }) => candidate.locale === locale && !candidate.existing);
-        if (!indexes.length) continue;
-        const decisions = await reviewTermCandidatesWithModel(locale, indexes.map(({ candidate }) => candidate));
-        const reviewed = applyModelDecisions(indexes.map(({ candidate }) => candidate), decisions);
-        indexes.forEach(({ index }, localIndex) => { candidates[index] = reviewed[localIndex]; });
-        ai.reviewed += indexes.length;
+async function previewTermImport(body, onProgress = () => {}) {
+  onProgress({ phase: "structure", message: "正在解析表格并识别中外文列", percent: 5, completed: 0, total: 1 });
+  const useModel = body.useModel !== false;
+  const analyzeStructure = useModel ? (snapshot, requestedLocale) => analyzeTermTableStructureWithModel(snapshot, requestedLocale) : undefined;
+  const extracted = await extractTermPairs(body, { analyzeStructure });
+  onProgress({ phase: "assets", message: "正在读取四个独立术语库", percent: 24, completed: 1, total: 1 });
+  let candidates = extracted.candidates.map(classifyImportCandidate);
+  const assetsByLocale = {};
+  const locales = [...new Set(candidates.map((candidate) => candidate.locale))];
+  await Promise.all(locales.map(async (locale) => { assetsByLocale[locale] = (await getAssets(locale)).terms; }));
+
+  const ai = { requested: useModel, used: false, reviewed: 0, total: candidates.length, missing: candidates.length, retries: 0, fallbackReason: "" };
+  if (useModel) {
+    const groups = locales.flatMap((locale) => {
+      const indexes = candidates.map((candidate, index) => ({ candidate, index })).filter(({ candidate }) => candidate.locale === locale && !candidate.existing);
+      const batches = [];
+      for (let offset = 0; offset < indexes.length; offset += TERM_AI_BATCH_SIZE) {
+        batches.push({ locale, indexes: indexes.slice(offset, offset + TERM_AI_BATCH_SIZE) });
       }
-      ai.used = ai.reviewed > 0;
-    } catch (error) {
-      ai.fallbackReason = error.message;
-    }
+      return batches;
+    });
+    let completed = 0;
+    onProgress({ phase: "ai-cleaning", message: `AI 五路并发清洗：0 / ${groups.length} 批`, percent: groups.length ? 30 : 86, completed, total: groups.length, concurrency: TERM_AI_CONCURRENCY });
+    const results = await runTaskPool(groups, async ({ locale, indexes }) => {
+      const result = await reviewCandidateGroup(locale, indexes.map(({ candidate }) => candidate));
+      indexes.forEach(({ index }, localIndex) => { candidates[index] = result.candidates[localIndex]; });
+      return { reviewed: result.reviewed, missing: result.missing, retries: result.retries, failures: result.failures };
+    }, {
+      concurrency: TERM_AI_CONCURRENCY,
+      onSettled: () => {
+        completed += 1;
+        const percent = groups.length ? 30 + Math.round((completed / groups.length) * 56) : 86;
+        onProgress({ phase: "ai-cleaning", message: `AI 五路并发清洗：${completed} / ${groups.length} 批`, percent, completed, total: groups.length, concurrency: TERM_AI_CONCURRENCY });
+      }
+    });
+    const failures = [
+      ...results.filter((result) => result.status === "rejected").map((result) => result.reason?.message || String(result.reason)),
+      ...results.filter((result) => result.status === "fulfilled").flatMap((result) => result.value.failures || [])
+    ];
+    ai.reviewed = results.filter((result) => result.status === "fulfilled").reduce((sum, result) => sum + result.value.reviewed, 0);
+    ai.missing = candidates.length - ai.reviewed;
+    ai.retries = results.filter((result) => result.status === "fulfilled").reduce((sum, result) => sum + result.value.retries, 0);
+    ai.used = ai.reviewed > 0;
+    const incomplete = ai.missing ? `模型仅返回 ${ai.reviewed}/${candidates.length} 条有效判断，缺失项保留安全规则并标记未覆盖` : "";
+    ai.fallbackReason = [...new Set([...failures, incomplete].filter(Boolean))].join("；");
   }
+  const nestedTerms = expandNestedTermCandidates(candidates);
+  candidates = markExistingTermCandidates([...candidates, ...nestedTerms], assetsByLocale);
+  ai.nestedTerms = nestedTerms.length;
+  ai.candidateTotal = candidates.length;
   extracted.candidates = candidates;
   extracted.statistics = { ...extracted.statistics, ...importStatistics(candidates) };
   extracted.ai = ai;
+  onProgress({ phase: "saving", message: "正在写入 Directus 审核队列", percent: 92, completed: 0, total: 1 });
   const saved = await saveImportPreview(extracted);
+  onProgress({ phase: "completed", message: "识别与清洗完成", percent: 100, completed: 1, total: 1 });
   return { ...extracted, ...saved };
 }
 
@@ -202,21 +501,32 @@ async function commitTermImport(body) {
       const source = String(candidate.source || "").trim();
       const target = String(candidate.target || "").trim();
       if (!source || !target) throw new Error("源词或译法为空");
+      const fallback = classifyImportCandidate({ ...candidate, source, target });
+      const requestedContentType = String(body.contentType || "auto");
+      const contentType = requestedContentType !== "auto" && Object.hasOwn(CONTENT_TYPES, requestedContentType)
+        ? requestedContentType
+        : (Object.hasOwn(CONTENT_TYPES, candidate.contentType) ? candidate.contentType : fallback.contentType);
+      const domain = ["game", "marketing", "community", "general"].includes(String(body.domain || ""))
+        ? String(body.domain)
+        : (["game", "marketing", "community", "general"].includes(candidate.domain) ? candidate.domain : fallback.domain);
+      const enforcement = ["required", "preferred"].includes(String(body.enforcement || ""))
+        ? String(body.enforcement)
+        : (["required", "preferred"].includes(candidate.enforcement) ? candidate.enforcement : fallback.enforcement);
       if (candidate.assetType === "memory") {
         const memory = await saveMemory(locale, {
-          source, target, domain: body.domain || "game", contentType: body.contentType || "general",
+          source, target, domain, contentType,
           qualityStatus: "human_approved", qaScore: 100, provenance: "table-import", sourceFile: body.filename,
           batchId: body.batchId, sourceRow: candidate.rowNumber
         });
         const evidence = await saveStyleEvidence({
-          locale, source, target, contentType: body.contentType || "general", domain: body.domain || "game",
-          sourceFile: body.filename, sourceRow: candidate.rowNumber, status: "accepted"
+          locale, source, target, contentType, domain,
+          batchId: body.batchId, sourceFile: body.filename, sourceRow: candidate.rowNumber, status: "accepted", provenance: "table-import"
         });
-        const scopeKey = `${locale}\u0000${body.contentType || "general"}\u0000${body.domain || "game"}`;
+        const scopeKey = `${locale}\u0000${contentType}\u0000${domain}`;
         const evidenceGroup = styleEvidenceByScope.get(scopeKey) || [];
         evidenceGroup.push({ ...candidate, evidenceId: evidence.id });
         styleEvidenceByScope.set(scopeKey, evidenceGroup);
-        imported.push({ id: memory.id, source, target, locale, assetType: "memory" });
+        imported.push({ id: memory.id, source, target, locale, assetType: "memory", contentType, domain });
       } else {
         const current = (await getAssets(locale)).terms.filter((term) => term.source.toLocaleLowerCase() === source.toLocaleLowerCase());
         if (current.some((term) => term.target.toLocaleLowerCase() === target.toLocaleLowerCase())) {
@@ -230,12 +540,12 @@ async function commitTermImport(body) {
           continue;
         }
         const term = await saveAsset(locale, {
-          source, target, aliases: [], forbidden: [], domains: [body.domain || "game"], contentTypes: [body.contentType || "general"],
-          enforcement: body.enforcement || "required", status: "approved",
+          source, target, aliases: [], forbidden: [], domains: [domain], contentTypes: ["general"],
+          enforcement, status: "approved",
           provenance: `table-import:${String(body.filename || "unknown").slice(0, 120)}`,
           note: `批次 ${body.batchId} · 原表第 ${candidate.rowNumber || "?"} 行 · 清洗分 ${candidate.score ?? "-"}`
         });
-        imported.push({ id: term.id, source, target, locale, assetType: "term" });
+        imported.push({ id: term.id, source, target, locale, assetType: "term", domain, enforcement });
       }
       decision.status = "accepted";
       decision.decision = "ready";
@@ -246,20 +556,41 @@ async function commitTermImport(body) {
     }
   }
   const styleProfiles = [];
+  const batchLearning = [];
   const styleFallbacks = [];
-  for (const [scopeKey, examples] of styleEvidenceByScope) {
+  for (const [scopeKey, currentEvidence] of styleEvidenceByScope.entries()) {
     const [locale, contentType, domain] = scopeKey.split("\u0000");
-    if (examples.length < 2) {
-      styleFallbacks.push({ locale, contentType, domain, reason: "风格证据不足 2 条，已保存证据但暂不生成固定规范" });
-      continue;
+    let learning = null;
+    try {
+      learning = await distillBatchStyleLearning({
+        batchId: body.batchId,
+        filename: body.filename,
+        locale,
+        contentType,
+        domain,
+        evidence: currentEvidence
+      });
+      if (learning) batchLearning.push(learning);
+    } catch (error) {
+      styleFallbacks.push({ locale, contentType, domain, stage: "batch-learning", reason: `本批风格浓缩失败：${error.message}` });
     }
     try {
-      const previousProfile = await getStyleProfile(locale, contentType, domain);
-      const distilled = await distillStyleProfileWithModel({ locale, contentType, domain, examples, previousProfile });
-      styleProfiles.push(await saveStyleProfile({
-        locale, contentType, domain, ...distilled, evidenceCount: examples.length,
-        evidenceIds: examples.map((item) => item.evidenceId), generatedBy: getProviderConfig().model, status: "active"
-      }));
+      const { distilled, evidenceCount, threshold } = await distillStyleProfileIfReady({
+        locale,
+        contentType,
+        domain,
+        sourceBatchId: body.batchId,
+        learningRunId: learning?.id || ""
+      });
+      if (distilled) {
+        styleProfiles.push(distilled);
+        if (learning?.id) {
+          const promoted = await saveStyleLearningRun({ ...learning, id: learning.id, status: "promoted", promotedProfileId: distilled.id });
+          const index = batchLearning.findIndex((item) => item.id === learning.id);
+          if (index >= 0) batchLearning[index] = promoted;
+        }
+      }
+      else styleFallbacks.push({ locale, contentType, domain, evidenceCount, threshold, reason: `风格证据累计 ${evidenceCount} 条，未达 ${threshold} 条蒸馏阈值，继续累积` });
     } catch (error) {
       styleFallbacks.push({ locale, contentType, domain, reason: error.message });
     }
@@ -268,12 +599,13 @@ async function commitTermImport(body) {
     imported: imported.length,
     terms: imported.filter((item) => item.assetType === "term").length,
     memories: imported.filter((item) => item.assetType === "memory").length,
+    styleLearningRuns: batchLearning.length,
     styleProfiles: styleProfiles.length,
     skipped: skipped.length,
     completedAt: new Date().toISOString()
   };
   await completeImport(body.batchId, decisions, summary);
-  return { batchId: body.batchId, imported, skipped, styleProfiles, styleFallbacks, summary };
+  return { batchId: body.batchId, imported, skipped, batchLearning, styleProfiles, styleFallbacks, summary };
 }
 
 async function apiHandler(req, res, url) {
@@ -326,7 +658,24 @@ async function apiHandler(req, res, url) {
     return json(res, 201, await saveCorpus({ ...body, ...refined }));
   }
   if (req.method === "POST" && url.pathname === "/api/term-import/preview") {
-    return json(res, 200, await previewTermImport(await readJsonBody(req)));
+    const body = await readJsonBody(req);
+    const progressId = String(body.progressId || "").trim();
+    const progress = (update) => reportImportProgress(progressId, { status: "running", ...update });
+    try {
+      const result = await previewTermImport(body, progress);
+      reportImportProgress(progressId, { status: "completed", phase: "completed", message: "识别与清洗完成", percent: 100 });
+      return json(res, 200, result);
+    } catch (error) {
+      reportImportProgress(progressId, { status: "failed", phase: "failed", message: error.message, error: error.message });
+      throw error;
+    } finally {
+      scheduleImportProgressCleanup(progressId);
+    }
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/term-import/progress/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/term-import/progress/".length));
+    const progress = importProgress.get(id);
+    return json(res, progress ? 200 : 404, progress || { error: "识别任务尚未开始" });
   }
   if (req.method === "POST" && url.pathname === "/api/term-import/commit") {
     return json(res, 201, await commitTermImport(await readJsonBody(req)));
@@ -337,26 +686,541 @@ async function apiHandler(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/provider") {
     return json(res, 200, updateProviderConfig(await readJsonBody(req)));
   }
+  if (req.method === "POST" && url.pathname === "/api/embedding/rebuild") {
+    const body = await readJsonBody(req);
+    const locale = body.locale ? assertLocale(body.locale) : null;
+    const locales = locale ? [locale] : Object.keys(LOCALES);
+    const results = {};
+    for (const target of locales) {
+      results[target] = await rebuildEmbeddings(target);
+    }
+    return json(res, 200, { embeddingModel: getProviderConfig().embeddingModel || null, results });
+  }
+  if (req.method === "POST" && url.pathname === "/api/feedback/accept") {
+    const body = await readJsonBody(req);
+    const locale = assertLocale(body.locale);
+    const source = String(body.source || "").trim();
+    const translation = String(body.translation || "").trim();
+    if (!source || !translation) {
+      const error = new Error("原文与采纳译文不能为空");
+      error.statusCode = 400;
+      throw error;
+    }
+    const contentType = body.contentType || "general";
+    const domain = body.domain || "game";
+    const project = body.project || "default";
+    let linkedTrajectory = null;
+    if (body.trajectoryId) {
+      linkedTrajectory = assertTrajectoryBinding(
+        await getLearningTrajectory(String(body.trajectoryId)),
+        { locale, source, contentType, domain, project, batchId: body.batchId || "" }
+      );
+    }
+    const memory = await saveMemory(locale, {
+      source, target: translation, domain, contentType,
+      qualityStatus: "human_approved", qaScore: 100, provenance: "human-accept",
+      styleProfileId: body.styleProfileId || "", batchId: body.batchId || "",
+      sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
+    });
+    const demoted = await demoteMemories(locale, source, memory.id);
+    const evidence = await saveStyleEvidence({
+      locale, source, target: translation, contentType, domain,
+      status: "accepted", provenance: "human-accept",
+      sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
+    });
+    const qaCaseApproved = body.qaCaseId ? await approveQaCase(String(body.qaCaseId)) : false;
+    let trajectory = null;
+    if (linkedTrajectory) {
+        const humanDecision = {
+          accepted: true,
+          finalTranslation: translation,
+          editDistance: normalizedEditDistance(linkedTrajectory.finalTranslation || linkedTrajectory.initialTranslation || "", translation),
+          decidedAt: new Date().toISOString(),
+          source: "human-accept"
+        };
+        trajectory = await updateLearningTrajectory(linkedTrajectory.id, {
+          finalTranslation: translation,
+          humanDecision,
+          status: "completed",
+          events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "human_accepted", at: humanDecision.decidedAt, editDistance: humanDecision.editDistance }]
+        });
+    }
+    return json(res, 201, { memory, demoted, evidence, qaCaseApproved, trajectory });
+  }
+  if (req.method === "GET" && url.pathname === "/api/style-profiles") {
+    const locale = assertLocale(url.searchParams.get("locale"));
+    const status = String(url.searchParams.get("status") || "").trim() || null;
+    const [profiles, evidence, qaRuns, learningRuns] = await Promise.all([
+      listStyleProfiles(locale, status),
+      getStyleEvidence(locale, { limit: 1_000 }),
+      getQaRuns(locale, { limit: 500 }),
+      getStyleLearningRuns(locale, { limit: 30 })
+    ]);
+    const pools = new Map();
+    const ensurePool = (contentType, domain) => {
+      const key = `${contentType || "general"}\u0000${domain || "general"}`;
+      if (!pools.has(key)) pools.set(key, {
+        contentType: contentType || "general", domain: domain || "general", evidenceCount: 0,
+        threshold: DISTILL_THRESHOLD, sources: { tableImport: 0, humanAccept: 0, qaReview: 0, other: 0 }
+      });
+      return pools.get(key);
+    };
+    for (const item of evidence) {
+      const pool = ensurePool(item.contentType, item.domain);
+      pool.evidenceCount += 1;
+      if (item.provenance === "table-import" || (!item.provenance && item.sourceFile)) pool.sources.tableImport += 1;
+      else if (item.provenance === "human-accept") pool.sources.humanAccept += 1;
+      else pool.sources.other += 1;
+    }
+    for (const item of qaRuns) ensurePool(item.contentType, item.domain).sources.qaReview += 1;
+    return json(res, 200, {
+      ...profiles,
+      learningRuns,
+      evidencePools: [...pools.values()].sort((a, b) => b.evidenceCount - a.evidenceCount)
+    });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/style-profiles/") && url.pathname.endsWith("/activate")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/style-profiles/".length, -"/activate".length));
+    const activated = await activateStyleProfile(id);
+    if (!activated) {
+      const error = new Error("未找到该风格规范");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, activated);
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/style-profiles/") && url.pathname.endsWith("/reject")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/style-profiles/".length, -"/reject".length));
+    const rejected = await rejectStyleProfile(id);
+    if (!rejected) {
+      const error = new Error("无法拒绝该风格规范（可能已激活或不存在）");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, rejected);
+  }
+  if (req.method === "GET" && url.pathname === "/api/qa-cases/pending") {
+    const locale = assertLocale(url.searchParams.get("locale"));
+    return json(res, 200, await listPendingQaCases(locale));
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/qa-cases/") && url.pathname.endsWith("/approve")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/qa-cases/".length, -"/approve".length));
+    const approved = await approveQaCase(id);
+    if (!approved) {
+      const error = new Error("未找到该 QA 案例");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { id, status: "human_approved" });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/qa-cases/") && url.pathname.endsWith("/dispose")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/qa-cases/".length, -"/dispose".length));
+    const disposed = await disposeQaCase(id);
+    if (!disposed) {
+      const error = new Error("未找到该 QA 案例");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { id, disposed });
+  }
+  if (req.method === "POST" && url.pathname === "/api/evolution/review") {
+    const body = await readJsonBody(req);
+    const locale = assertLocale(body.locale);
+    const result = await runEvolutionReview({
+      locale,
+      contentType: body.contentType || "general",
+      domain: body.domain || "general",
+      batchId: body.batchId || ""
+    });
+    return json(res, 200, result);
+  }
+  if (req.method === "GET" && url.pathname === "/api/learning") {
+    const locale = assertLocale(url.searchParams.get("locale"));
+    const requestedScope = learningScope({
+      locale,
+      contentType: url.searchParams.get("contentType") || "general",
+      domain: url.searchParams.get("domain") || "game",
+      project: url.searchParams.get("project") || "default"
+    });
+    await ensureChampionTranslationSkill(requestedScope);
+    const [skills, trajectories, evaluations] = await Promise.all([
+      listTranslationSkills({ ...requestedScope, limit: 500 }),
+      listLearningTrajectories({ ...requestedScope, limit: 500 }),
+      listSkillEvaluations({ ...requestedScope, limit: 500 })
+    ]);
+    const champion = skills.find((item) => item.status === "champion"
+      && item.contentType === requestedScope.contentType
+      && item.domain === requestedScope.domain
+      && item.project === requestedScope.project) || null;
+    const candidates = skills.filter((item) => ["challenger", "draft"].includes(item.status));
+    const evidence = trajectories.map((item) => ({
+      ...item,
+      attribution: (() => {
+        try {
+          return summarizeTrajectoryAttribution({
+            id: item.id,
+            scope: learningScope(item),
+            initial: item.qaBefore || {},
+            final: item.qaAfter || {},
+            context: item.contextPack || {},
+            revisions: (item.events || []).filter((event) => /revision/u.test(event.type || "")),
+            humanFeedback: item.humanDecision || {}
+          });
+        } catch { return null; }
+      })()
+    }));
+    return json(res, 200, {
+      overview: { trajectoryCount: trajectories.length, skillCount: skills.length, pendingCount: candidates.filter((item) => !evaluations.some((evaluation) => evaluation.challengerSkillId === item.id)).length },
+      champion,
+      skills,
+      candidates,
+      evaluations: evaluations.map((item) => ({ ...item, result: item.report || {} })),
+      evidence,
+      trajectories
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/learning/skills/generate") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const champion = await ensureChampionTranslationSkill(scope);
+    const trajectories = await listLearningTrajectories({ ...scope, limit: 100 });
+    const usable = trajectories.filter((item) => ["completed", "review"].includes(item.status) && item.finalTranslation).slice(0, 40);
+    if (!usable.length) {
+      const error = new Error("当前语言和范围还没有可复盘的完成轨迹，请先完成几条翻译或人工采纳");
+      error.statusCode = 409;
+      throw error;
+    }
+    const trainingEvidenceIds = collectTrainingEvidenceIds(usable);
+    const proposed = await proposeTranslationSkillWithModel({ ...scope, champion, trajectories: usable });
+    const merged = mergeTranslationSkillPatch({
+      id: champion.id,
+      version: champion.version,
+      status: champion.status,
+      scope,
+      name: champion.name,
+      description: champion.description,
+      strategy: champion.strategy,
+      metadata: {}
+    }, {
+      name: proposed.name,
+      description: proposed.reason,
+      changeReason: proposed.reason,
+      strategy: proposed.strategyPatch,
+      metadata: { generatedBy: getProviderConfig().model }
+    });
+    const skill = await saveTranslationSkill({
+      ...scope,
+      name: merged.name,
+      description: merged.description,
+      changeReason: merged.changeReason,
+      version: merged.version,
+      parentId: champion.id,
+      status: "challenger",
+      strategy: merged.strategy,
+      // Every trajectory sent to the proposal model is training evidence. Keep
+      // the complete set so none of it can later leak into the holdout pool.
+      evidenceIds: trainingEvidenceIds,
+      promptVersion: TRANSLATION_PROMPT_VERSION,
+      metrics: {}
+    });
+    return json(res, 201, { skill, candidate: skill });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/evaluate")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/evaluate".length));
+    const challenger = await getTranslationSkill(id);
+    if (!challenger || !["challenger", "draft"].includes(challenger.status)) {
+      const error = new Error("未找到可评测的候选技能");
+      error.statusCode = 404;
+      throw error;
+    }
+    const scope = learningScope(challenger);
+    const champion = await ensureChampionTranslationSkill(scope);
+    assertCurrentCandidate(challenger, champion);
+    const trajectories = await listLearningTrajectories({ ...scope, limit: 500 });
+    const evaluationPool = selectSkillHoldout(trajectories, { scope, trainingEvidenceIds: challenger.evidenceIds || [], limit: 60 });
+    let championSamples;
+    let challengerSamples;
+    let benchmarkFailures = [];
+    if (evaluationPool.length >= 20) {
+      const paired = await runPairedSkillBenchmarks({
+        trajectories: evaluationPool,
+        champion,
+        challenger,
+        benchmark: benchmarkTranslationSkill,
+        concurrency: 5
+      });
+      benchmarkFailures = paired.failures;
+      championSamples = paired.championSamples;
+      challengerSamples = paired.challengerSamples;
+    } else {
+      // Keep an auditable insufficient result without spending model calls or
+      // pretending that historical post-QA output came from the challenger.
+      championSamples = evaluationPool.map((item) => trajectoryToEvaluationSample(item, { variant: "champion" }));
+      challengerSamples = evaluationPool.map((item) => trajectoryToEvaluationSample(item, { variant: "champion" }));
+    }
+    const result = evaluateSkillPromotion({
+      scope,
+      champion: { id: champion.id, scope, samples: championSamples },
+      challenger: { id: challenger.id, scope, samples: challengerSamples },
+      // Once a real benchmark starts, every paired case must complete. A single
+      // translation or independent AIQA failure therefore makes it insufficient.
+      minSamples: evaluationPool.length >= 20 ? evaluationPool.length : 20,
+      minimumCoverage: 0.8,
+      guardrails: { requireCost: false }
+    });
+    const report = learningEvaluationUiReport(result);
+    if (evaluationPool.length < 20) {
+      report.conclusion = `证据不足：当前只有 ${evaluationPool.length} 条未参与本候选学习的人工批准终稿，至少需要 20 条才会真正重跑 Champion / Challenger 并开放晋升。`;
+    }
+    report.benchmark = {
+      requestedPairs: evaluationPool.length,
+      completedPairs: championSamples.length,
+      failedPairs: benchmarkFailures.length,
+      failures: benchmarkFailures.slice(0, 10)
+    };
+    if (benchmarkFailures.length) {
+      report.promotable = false;
+      report.status = "insufficient";
+      report.conclusion = `评测未完成：${benchmarkFailures.length} 组 Champion / Challenger 对照在翻译或独立 AIQA 阶段失败。失败样本不会按“零问题”计分，本次结果禁止晋升。`;
+    }
+
+    // Revalidate after the potentially long benchmark. Another candidate may
+    // have become champion while model calls were in flight.
+    const refreshedCandidate = await getTranslationSkill(challenger.id);
+    const [refreshedChampion] = await listTranslationSkills({ ...scope, status: "champion", limit: 1 });
+    assertCurrentCandidate(refreshedCandidate, refreshedChampion);
+    const evaluation = await saveSkillEvaluation({
+      ...scope,
+      championSkillId: refreshedChampion.id,
+      challengerSkillId: refreshedCandidate.id,
+      sampleCount: championSamples.length,
+      championMetrics: result.championMetrics,
+      challengerMetrics: result.challengerMetrics,
+      metricDeltas: result.deltas,
+      decision: result.status === "promote" ? "promote" : result.status === "reject" ? "reject" : "needs_review",
+      report,
+      evaluator: "kami-learning-engine-v1"
+    });
+    await updateTranslationSkill(refreshedCandidate.id, { metrics: result.challengerMetrics });
+    return json(res, 200, { evaluation: { ...evaluation, result: report }, result: report });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/activate")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/activate".length));
+    const skill = await getTranslationSkill(id);
+    if (!skill) {
+      const error = new Error("未找到候选技能");
+      error.statusCode = 404;
+      throw error;
+    }
+    const scope = learningScope(skill);
+    const [currentChampion] = await listTranslationSkills({ ...scope, status: "champion", limit: 1 });
+    const [latest] = await listSkillEvaluations({ challengerSkillId: id, limit: 1 });
+    assertCurrentCandidate(skill, currentChampion, latest, { requireEvaluation: true });
+    return json(res, 200, { skill: await activateTranslationSkill(id) });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/reject")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/reject".length));
+    const skill = await updateTranslationSkill(id, { status: "rejected" });
+    if (!skill) {
+      const error = new Error("未找到候选技能");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { skill });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/rollback")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/rollback".length));
+    return json(res, 200, await rollbackTranslationSkill(id));
+  }
   if (req.method === "POST" && url.pathname === "/api/batch/prepare") {
     const body = await readJsonBody(req);
     const analyzeSpreadsheet = body.useAiStructure === false ? undefined : (snapshot, ruleAnalysis) => analyzeSpreadsheetStructureWithModel(snapshot, ruleAnalysis, body.locale || "ja-JP");
-    return json(res, 200, await prepareBatchDocument(body, { analyzeSpreadsheet }));
+    const prepared = await prepareBatchDocument(body, { analyzeSpreadsheet });
+    const { batchId } = await saveBatchRun({ ...prepared, locale: assertLocale(body.locale || "ja-JP"), contentType: body.contentType || "general", domain: body.domain || "game", segments: prepared.segments });
+    return json(res, 200, { ...prepared, batchId });
+  }
+  if (req.method === "POST" && url.pathname === "/api/batch/run") {
+    const body = await readJsonBody(req);
+    const saved = await saveBatchRun(body);
+    return json(res, 200, saved);
+  }
+  if (req.method === "GET" && url.pathname === "/api/tasks") {
+    return json(res, 200, await listBatchRuns({
+      locale: url.searchParams.get("locale") || "",
+      status: url.searchParams.get("status") || "",
+      search: url.searchParams.get("search") || "",
+      limit: Number(url.searchParams.get("limit")) || 200
+    }));
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/tasks/") && url.pathname.endsWith("/export")) {
+    const batchId = decodeURIComponent(url.pathname.slice("/api/tasks/".length, -"/export".length));
+    const run = await getBatchRun(batchId);
+    if (!run) {
+      const error = new Error("未找到该翻译任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, await exportBatchDocument({ filename: run.filename, locale: run.locale, format: "task-xlsx", segments: run.segments }));
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/batch/run/")) {
+    const batchId = decodeURIComponent(url.pathname.slice("/api/batch/run/".length));
+    const run = await getBatchRun(batchId);
+    if (!run) {
+      const error = new Error("未找到该批次的保存进度");
+      error.statusCode = 404;
+      throw error;
+    }
+    const [assets, qaRuns] = await Promise.all([
+      getAssets(run.locale),
+      getQaRuns(run.locale, { contentType: run.contentType, domain: run.domain, batchId: run.batchId, limit: 500 })
+    ]);
+    const latestRunBySource = new Map();
+    for (const qaRun of qaRuns) if (!latestRunBySource.has(qaRun.source)) latestRunBySource.set(qaRun.source, qaRun);
+    const segments = run.segments.map((segment) => {
+      const qaRun = latestRunBySource.get(segment.source);
+      if (!qaRun) return segment;
+      const references = (qaRun.references || []).filter((item) => item.kind !== "qa_case");
+      const qaCases = (qaRun.references || []).filter((item) => item.kind === "qa_case");
+      const matches = matchTerms(segment.source, assets, { contentType: run.contentType, domain: run.domain });
+      return {
+        ...segment,
+        translation: segment.translation || qaRun.finalTranslation,
+        status: segment.status === "pending" ? "done" : segment.status,
+        result: {
+          ...(segment.result || {}),
+          translation: segment.translation || qaRun.finalTranslation,
+          matches,
+          issues: qaRun.issues || [],
+          qaScore: qaRun.score,
+          aiQa: { ...(segment.result?.aiQa || {}), score: qaRun.score, status: qaRun.status, iterations: qaRun.iterations, used: qaRun.score != null, fallbackReason: qaRun.fallbackReason, references, qaCases, termDecisions: qaRun.termDecisions || [], humanDecisions: qaRun.humanDecisions || [] }
+        }
+      };
+    });
+    return json(res, 200, { ...run, segments });
   }
   if (req.method === "POST" && url.pathname === "/api/batch/export") {
     return json(res, 200, await exportBatchDocument(await readJsonBody(req)));
+  }
+  if (req.method === "POST" && url.pathname === "/api/qa/resolve") {
+    const body = await readJsonBody(req);
+    const locale = assertLocale(body.locale);
+    const source = String(body.source || "").trim();
+    const translation = String(body.translation || "").trim();
+    const action = String(body.action || "");
+    const issueIndex = Number(body.issueIndex);
+    const currentIssues = Array.isArray(body.issues) ? body.issues.slice(0, 30) : [];
+    const issue = Number.isInteger(issueIndex) ? currentIssues[issueIndex] : null;
+    if (!source || !translation || !issue || !["approve", "revise"].includes(action)) {
+      const error = new Error("QA 决定缺少原文、译文、问题或有效操作");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (action === "approve" && issue.severity === "error" && issue.mqmSeverity !== "minor") {
+      const error = new Error("阻断级 QA 问题不能直接批准，请先让 AI 修订或人工编辑译文");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const contentType = body.contentType || "general";
+    const domain = body.domain || "game";
+    const project = body.project || "default";
+    const batchId = body.batchId || "manual-review";
+    let linkedTrajectory = null;
+    if (body.trajectoryId) {
+      linkedTrajectory = assertTrajectoryBinding(
+        await getLearningTrajectory(String(body.trajectoryId)),
+        { locale, source, contentType, domain, project, batchId: body.batchId || "" }
+      );
+    }
+    const assets = await getAssets(locale);
+    const matches = matchTerms(source, assets, { contentType, domain });
+    const classification = await classify({ text: source, hint: contentType, useModel: false });
+    const styleProfile = await getStyleProfile(locale, contentType, domain);
+    const translationSkill = await ensureChampionTranslationSkill(learningScope({ locale, contentType, domain, project }));
+    const qaGuidance = rankQaCases(source, await getQaCases(locale, { contentType, domain, limit: -1 }), { limit: 3, queryEmbedding: await embedSource(source) });
+    const contextPack = buildContextPack({ source, locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
+    const priorDecisions = Array.isArray(body.humanDecisions) ? body.humanDecisions.slice(0, 30) : [];
+    const decision = {
+      decision: action === "approve" ? "approved_as_is" : "revision_requested",
+      issue: {
+        type: issue.type || "qa",
+        category: issue.category || "other",
+        severity: issue.mqmSeverity || issue.severity || "warning",
+        message: issue.message || "",
+        suggestion: issue.suggestion || ""
+      },
+      reason: action === "approve" ? "人工确认当前译文可接受" : "人工要求翻译模型按该建议修订",
+      decidedAt: new Date().toISOString()
+    };
+    const humanDecisions = [...priorDecisions, decision];
+
+    if (action === "revise") {
+      const revisedTranslation = await reviseTranslationWithQa({
+        contextPack, translation, issues: [issue],
+        references: Array.isArray(body.references) ? body.references : [], qaCases: qaGuidance
+      });
+      decision.beforeTranslation = translation;
+      decision.afterTranslation = revisedTranslation;
+      const aiQa = await runAiQaLoop({
+        contextPack, initialTranslation: revisedTranslation, matches, locale, contentType, domain, batchId, humanDecisions
+      });
+      if (linkedTrajectory) {
+        await updateLearningTrajectory(linkedTrajectory.id, {
+          finalTranslation: aiQa.translation,
+          qaAfter: { ...trajectoryMetricsFromIssues(aiQa.issues, aiQa.score, matches), issues: aiQa.issues, iterations: aiQa.iterations },
+          humanDecision: { accepted: false, action: "revision_requested", decisions: humanDecisions, decidedAt: decision.decidedAt },
+          status: aiQa.status === "passed" ? "completed" : "review",
+          events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "human_revision_requested", at: decision.decidedAt }]
+        });
+      }
+      return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, styleProfile: contextPack.styleProfile, trajectoryId: body.trajectoryId || "" });
+    }
+
+    const remainingIssues = currentIssues.filter((_, index) => index !== issueIndex);
+    const score = remainingIssues.length ? (Number.isFinite(Number(body.qaScore)) ? Number(body.qaScore) : 90) : 100;
+    const status = remainingIssues.some((item) => item.severity === "error") || score < 90 ? "review" : "passed";
+    const provider = getProviderConfig();
+    const references = Array.isArray(body.references) ? body.references.slice(0, 12) : [];
+    const termDecisions = Array.isArray(body.termDecisions) ? body.termDecisions.slice(0, 20) : [];
+    await saveQaRun({
+      locale, contentType, domain, source, initialTranslation: translation, finalTranslation: translation,
+      score, status, iterations: Number(body.iterations) || 0, issues: remainingIssues, references,
+      styleProfileId: contextPack.styleProfile?.id || "", model: provider.model, batchId,
+      fallbackReason: "", termDecisions, humanDecisions
+    });
+    if (linkedTrajectory) {
+      await updateLearningTrajectory(linkedTrajectory.id, {
+        finalTranslation: translation,
+        qaAfter: { ...trajectoryMetricsFromIssues(remainingIssues, score, matches), issues: remainingIssues, iterations: Number(body.iterations) || 0 },
+        humanDecision: { accepted: true, action: "qa_issue_approved", decisions: humanDecisions, decidedAt: decision.decidedAt },
+        status: status === "passed" ? "completed" : "review",
+        events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "qa_issue_approved", at: decision.decidedAt }]
+      });
+    }
+    return json(res, 200, {
+      matches, translation, issues: remainingIssues, qaScore: score,
+      aiQa: {
+        score, status, iterations: Number(body.iterations) || 0, used: true, fallbackReason: "",
+        references: references.filter((item) => item.kind !== "qa_case"),
+        qaCases: references.filter((item) => item.kind === "qa_case"), termDecisions, humanDecisions
+      },
+      styleProfile: contextPack.styleProfile,
+      trajectoryId: body.trajectoryId || ""
+    });
   }
   if (req.method === "POST" && url.pathname === "/api/qa") {
     const body = await readJsonBody(req);
     const locale = assertLocale(body.locale);
     const assets = await getAssets(locale);
     const contentType = body.contentType || "general";
-    const domain = body.domain || "general";
+    const domain = body.domain || "game";
     const matches = matchTerms(body.source || "", assets, { contentType, domain });
     if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches }) });
     const classification = await classify({ text: body.source || "", hint: contentType, useModel: false });
     const styleProfile = await getStyleProfile(locale, contentType, domain);
-    const qaGuidance = rankQaCases(body.source || "", await getQaCases(locale, { contentType, domain }), { limit: 3 });
-    const contextPack = buildContextPack({ source: body.source || "", locale, classification, matches, domain, styleProfile, qaGuidance });
+    const translationSkill = await ensureChampionTranslationSkill(learningScope({ locale, contentType, domain, project: body.project || "default" }));
+    const qaGuidance = rankQaCases(body.source || "", await getQaCases(locale, { contentType, domain, limit: -1 }), { limit: 3, queryEmbedding: await embedSource(body.source || "") });
+    const contextPack = buildContextPack({ source: body.source || "", locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
     const aiQa = await runAiQaLoop({ contextPack, initialTranslation: body.translation || "", matches, locale, contentType, domain, batchId: body.batchId || "manual-recheck" });
     return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, styleProfile: contextPack.styleProfile });
   }
@@ -370,59 +1234,128 @@ async function apiHandler(req, res, url) {
     }
     const classification = await classify({ text: body.source, hint: body.contentType, useModel: body.useModelClassification });
     const assets = await getAssets(locale);
+    const domain = body.domain || "game";
+    const scope = learningScope({ locale, contentType: classification.contentType, domain, project: body.project || "default" });
+    const translationSkill = await ensureChampionTranslationSkill(scope);
+    const memoryLimit = Math.min(10, Math.max(1, Number(translationSkill.strategy?.retrieval?.translationMemory?.limit) || 5));
+    const qaCaseLimit = Math.min(10, Math.max(1, Number(translationSkill.strategy?.retrieval?.qaCases?.limit) || 3));
+    const passScore = Math.min(100, Math.max(70, Number(translationSkill.strategy?.qa?.minimumScore) || 90));
+    const maxRevisions = Math.min(4, Math.max(0, Number(translationSkill.strategy?.qa?.maximumRevisionAttempts) ?? 2));
     const matches = matchTerms(body.source, assets, {
       contentType: classification.contentType,
-      domain: body.domain || "general"
+      domain
     });
-    const storedStyleProfile = await getStyleProfile(locale, classification.contentType, body.domain || "general");
-    const qaGuidance = rankQaCases(body.source, await getQaCases(locale, {
-      contentType: classification.contentType,
-      domain: body.domain || "general"
-    }), { limit: 3 });
+    const queryEmbedding = await embedSource(body.source);
+    const [storedStyleProfile, allQaCases, allMemories, userProfile] = await Promise.all([
+      getStyleProfile(locale, classification.contentType, domain),
+      getQaCases(locale, { contentType: classification.contentType, domain, limit: -1 }),
+      getMemories(locale, { contentType: classification.contentType, domain, limit: -1 }),
+      getUserProfile(locale)
+    ]);
+    const qaGuidance = rankQaCases(body.source, allQaCases, { limit: qaCaseLimit, queryEmbedding });
+    const translationReferences = rankTranslationMemories(body.source, allMemories, { limit: memoryLimit, queryEmbedding });
     const contextPack = buildContextPack({
       source: body.source,
       locale,
       classification,
       matches,
-      domain: body.domain || "general",
+      domain,
       neighborContext: body.neighborContext || "",
       styleProfile: storedStyleProfile || body.styleProfile || null,
-      qaGuidance
+      translationSkill,
+      qaGuidance,
+      userProfile,
+      translationReferences
     });
-    const aiQaEnabled = body.aiQa !== false;
-    const result = await translateWithReflection(contextPack, { reflect: !aiQaEnabled && body.reflect !== false });
-    const aiQa = aiQaEnabled
-      ? await runAiQaLoop({
-        contextPack, initialTranslation: result.translation, matches, locale,
-        contentType: classification.contentType, domain: body.domain || "general", batchId: body.batchId || ""
-      })
-      : { translation: result.translation, issues: runQa({ source: body.source, translation: result.translation, matches }), score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
-    const suggestionCandidates = buildSuggestionCandidates(aiQa.translation, matches);
-    let alignment = { requested: suggestionCandidates.length > 0, used: false, fallbackReason: "" };
-    let modelSuggestions = [];
-    if (suggestionCandidates.length) {
-      try {
-        modelSuggestions = await alignTermSuggestionsWithModel(locale, aiQa.translation, suggestionCandidates);
-        alignment.used = true;
-      } catch (error) {
-        alignment.fallbackReason = error.message;
-      }
+    const startedAt = Date.now();
+    let trajectory = null;
+    let learningCaptureError = translationSkill.persistenceError || "";
+    try {
+      trajectory = await saveLearningTrajectory({
+        ...scope, batchId: body.batchId || "", segmentId: body.segmentId || "", source: body.source,
+        contextPack, assetRefs: {
+          translationSkillId: translationSkill.id,
+          styleProfileId: contextPack.styleProfile?.id || "",
+          termIds: matches.map((item) => item.term?.id).filter(Boolean),
+          memoryIds: translationReferences.map((item) => item.id).filter(Boolean),
+          qaCaseIds: qaGuidance.map((item) => item.id).filter(Boolean)
+        },
+        model: getProviderConfig().model, promptVersion: TRANSLATION_PROMPT_VERSION,
+        status: "running", events: [{ type: "started", at: new Date().toISOString() }]
+      });
+    } catch (error) {
+      learningCaptureError = error.message;
     }
-    const termSuggestions = resolveTermSuggestions(aiQa.translation, suggestionCandidates, modelSuggestions);
-    return json(res, 200, {
-      locale,
-      classification,
-      matches,
-      contextPack,
-      ...result,
-      translation: aiQa.translation,
-      issues: aiQa.issues,
-      qaScore: aiQa.score,
-      aiQa,
-      styleProfile: contextPack.styleProfile,
-      termSuggestions,
-      suggestionAlignment: alignment
-    });
+    try {
+      const aiQaEnabled = body.aiQa !== false;
+      const result = await translateWithReflection(contextPack, { reflect: !aiQaEnabled && body.reflect !== false });
+      const aiQa = aiQaEnabled
+        ? await runAiQaLoop({
+          contextPack, initialTranslation: result.translation, matches, locale,
+          contentType: classification.contentType, domain, batchId: body.batchId || "",
+          providedReferences: translationReferences, passScore, maxRevisions
+        })
+        : { translation: result.translation, issues: runQa({ source: body.source, translation: result.translation, matches }), score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
+      const suggestionCandidates = buildSuggestionCandidates(aiQa.translation, matches);
+      let alignment = { requested: suggestionCandidates.length > 0, used: false, fallbackReason: "" };
+      let modelSuggestions = [];
+      if (suggestionCandidates.length) {
+        try {
+          modelSuggestions = await alignTermSuggestionsWithModel(locale, aiQa.translation, suggestionCandidates);
+          alignment.used = true;
+        } catch (error) {
+          alignment.fallbackReason = error.message;
+        }
+      }
+      const termSuggestions = resolveTermSuggestions(aiQa.translation, suggestionCandidates, modelSuggestions);
+      const initialIssues = runQa({ source: body.source, translation: result.initial || result.translation, matches });
+      let completedTrajectory = trajectory;
+      if (trajectory) {
+        try {
+          completedTrajectory = await updateLearningTrajectory(trajectory.id, {
+            initialTranslation: result.initial || result.translation,
+            finalTranslation: aiQa.translation,
+            termDecisions: aiQa.termDecisions || [],
+            qaBefore: { ...trajectoryMetricsFromIssues(initialIssues, calculateQaScore({ hardIssues: initialIssues }), matches), issues: initialIssues },
+            qaAfter: { ...trajectoryMetricsFromIssues(aiQa.issues, aiQa.score, matches), issues: aiQa.issues, iterations: aiQa.iterations },
+            events: [
+              { type: "started", at: trajectory.createdAt },
+              { type: "completed", at: new Date().toISOString(), latencyMs: Date.now() - startedAt, aiQaIterations: aiQa.iterations }
+            ],
+            status: aiQa.status === "review" ? "review" : "completed",
+            error: aiQa.fallbackReason || ""
+          });
+        } catch (error) {
+          learningCaptureError = error.message;
+        }
+      }
+      return json(res, 200, {
+        locale,
+        classification,
+        matches,
+        contextPack,
+        ...result,
+        translation: aiQa.translation,
+        issues: aiQa.issues,
+        qaScore: aiQa.score,
+        aiQa,
+        styleProfile: contextPack.styleProfile,
+        translationSkill: { id: translationSkill.id, name: translationSkill.name, version: translationSkill.version, status: translationSkill.status },
+        trajectoryId: completedTrajectory?.id || "",
+        learningCapture: { captured: Boolean(completedTrajectory?.id) && !learningCaptureError, warning: learningCaptureError },
+        termSuggestions,
+        suggestionAlignment: alignment
+      });
+    } catch (error) {
+      if (trajectory) {
+        await updateLearningTrajectory(trajectory.id, {
+          status: "failed",
+          error: error.message,
+          events: [{ type: "started", at: trajectory.createdAt }, { type: "failed", at: new Date().toISOString(), latencyMs: Date.now() - startedAt, error: error.message }]
+        }).catch(() => undefined);
+      }
+      throw error;
+    }
   }
   return false;
 }

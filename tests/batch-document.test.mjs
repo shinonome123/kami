@@ -30,6 +30,21 @@ test("TXT 解析、分段和导出保持换行结构", async () => {
   assert.equal(exported.filename, "story.ja-JP.txt");
 });
 
+test("历史任务可导出包含 AIQA 与人工决定的 Excel", async () => {
+  const exported = await exportBatchDocument({
+    filename: "历史公告.txt", locale: "ja-JP", format: "task-xlsx",
+    segments: [{ id: "1", source: "欢迎回来。", translation: "おかえりなさい。", status: "done", selected: true, result: { qaScore: 100, issues: [{ message: "语气建议" }], aiQa: { humanDecisions: [{ decision: "approved_as_is", issue: { message: "语气建议" } }] } } }]
+  });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(Buffer.from(exported.base64, "base64"));
+  const sheet = workbook.getWorksheet("翻译任务");
+  assert.equal(sheet.getCell("B2").value, "欢迎回来。");
+  assert.equal(sheet.getCell("C2").value, "おかえりなさい。");
+  assert.match(String(sheet.getCell("F2").value), /语气建议/);
+  assert.match(String(sheet.getCell("G2").value), /批准当前译文/);
+  assert.equal(exported.filename, "历史公告.ja-JP.xlsx");
+});
+
 test("同一自然段可选择逐句或整段翻译", async () => {
   const source = "第一句。第二句！第三句？";
   const sentenceMode = await prepareBatchDocument({ filename: "story.md", text: source, segmentationMode: "sentence" });

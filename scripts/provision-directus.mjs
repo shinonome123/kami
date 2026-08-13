@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 const baseUrl = String(process.env.DIRECTUS_URL || "http://127.0.0.1:8055").replace(/\/$/, "");
 const token = process.env.DIRECTUS_ADMIN_TOKEN || process.env.DIRECTUS_TOKEN;
@@ -22,6 +23,7 @@ const memoryCollections = {
 
 const label = (translation) => [{ language: "zh-CN", translation }];
 const choices = (values) => values.map(([text, value]) => ({ text, value }));
+const typeMigrations = new Set(["term_candidates.source", "term_candidates.target"]);
 
 function uuidField() {
   return {
@@ -83,6 +85,15 @@ function dateField(field, translation, special, sort) {
   };
 }
 
+function uniqueInternalField(field, sort) {
+  return {
+    field,
+    type: "string",
+    meta: { hidden: true, readonly: true, interface: "input", width: "full", sort },
+    schema: { is_nullable: true, is_unique: true }
+  };
+}
+
 const statusValues = [["草稿", "draft"], ["待审核", "pending"], ["已批准", "approved"], ["已废弃", "deprecated"], ["已归档", "archived"]];
 const contentTypeValues = [["宣发文案", "marketing"], ["正式公告", "announcement"], ["游戏内道具名", "item_name"], ["游戏内道具描述", "item_description"], ["UI / 系统提示", "ui"], ["活动规则", "rules"], ["剧情对白", "dialogue"], ["社媒短文案", "social"], ["通用文本", "general"]];
 
@@ -119,8 +130,9 @@ function memoryFields() {
     textField("source_file", "来源文件", { width: "half", sort: 11 }),
     textField("batch_id", "批次 ID", { width: "half", sort: 12 }),
     { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 13, translations: label("来源行号") }, schema: { is_nullable: true } },
-    dateField("date_created", "创建时间", "date-created", 14),
-    dateField("date_updated", "更新时间", "date-updated", 15)
+    jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 14 }),
+    dateField("date_created", "创建时间", "date-created", 15),
+    dateField("date_updated", "更新时间", "date-updated", 16)
   ];
 }
 
@@ -208,10 +220,26 @@ const definitions = [
     schema: {},
     fields: [
       uuidField(),
-      textField("source", "候选中文词", { required: true, sort: 2 }),
-      textField("target", "候选译法", { width: "half", sort: 3 }),
+      textField("source", "候选中文词", { required: true, multiline: true, sort: 2 }),
+      textField("target", "候选译法", { multiline: true, width: "half", sort: 3 }),
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { defaultValue: "ja-JP", sort: 4 }),
       selectField("asset_type", "资产类型", [["术语", "term"], ["翻译记忆", "memory"]], { defaultValue: "term", sort: 5 }),
+      selectField("content_type", "自动识别语体", contentTypeValues, { defaultValue: "general", sort: 6 }),
+      selectField("domain", "自动识别领域", [["游戏", "game"], ["市场营销", "marketing"], ["社区运营", "community"], ["通用", "general"]], { defaultValue: "general", sort: 7 }),
+      selectField("enforcement", "自动约束级别", [["强制采用", "required"], ["优先参考", "preferred"]], { defaultValue: "preferred", sort: 8 }),
+      { field: "classification_confidence", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 9, translations: label("分类置信度") }, schema: { is_nullable: true } },
+      textField("classification_source", "分类来源", { width: "half", sort: 10 }),
+      textField("candidate_key", "候选稳定键", { width: "half", sort: 11 }),
+      selectField("candidate_role", "候选角色", [["完整双语句段", "full_pair"], ["句内术语", "embedded_term"]], { defaultValue: "full_pair", sort: 12 }),
+      textField("parent_candidate_key", "父级句段候选键", { width: "half", sort: 13 }),
+      { field: "parent_row_number", type: "integer", meta: { interface: "input", width: "half", sort: 14, translations: label("父级原表行号") }, schema: { is_nullable: true } },
+      jsonField("parent_candidate_keys", "全部父级句段键", { sort: 15 }),
+      jsonField("parent_evidence", "句内术语来源证据", { sort: 16 }),
+      textField("candidate_origin", "候选提取来源", { width: "half", sort: 14 }),
+      textField("term_category", "术语类别", { width: "half", sort: 15 }),
+      { field: "extraction_confidence", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 16, translations: label("术语提取置信度") }, schema: { is_nullable: true } },
+      jsonField("source_span", "中文原文位置", { sort: 17 }),
+      jsonField("target_span", "目标译文位置", { sort: 18 }),
       { field: "frequency", type: "integer", meta: { interface: "input", width: "half", sort: 6, translations: label("出现频次") }, schema: { is_nullable: false, default_value: 1 } },
       { field: "score", type: "float", meta: { interface: "input", width: "half", sort: 6, translations: label("候选分数") }, schema: { is_nullable: true } },
       textField("batch_id", "导入批次 ID", { width: "half", sort: 7 }),
@@ -222,6 +250,62 @@ const definitions = [
       textField("reason", "判断依据", { multiline: true, sort: 12 }),
       selectField("status", "处理状态", [["待确认", "pending"], ["已采用", "accepted"], ["已忽略", "rejected"]], { defaultValue: "pending", sort: 13 }),
       dateField("date_created", "创建时间", "date-created", 14)
+    ]
+  },
+  {
+    collection: "batch_runs",
+    meta: {
+      icon: "playlist_add_check",
+      note: "批次翻译的运行进度与人工编辑译文，用于刷新页面后恢复。",
+      display_template: "{{filename}}",
+      group: "localization_pipeline",
+      sort: 3,
+      accountability: "all",
+      translations: label("翻译批次进度")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      textField("filename", "文件名", { required: true, sort: 2 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 3 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 4 }),
+      textField("domain", "业务领域", { width: "half", sort: 5 }),
+      textField("format", "文件格式", { width: "half", sort: 6 }),
+      textField("segmentation_mode", "分段模式", { width: "half", sort: 7 }),
+      jsonField("structure", "文档结构", { sort: 8 }),
+      jsonField("segments", "分段与译文", { sort: 9 }),
+      selectField("task_status", "任务状态", [["进行中", "in_progress"], ["QA 待处理", "review"], ["存在失败", "needs_attention"], ["已完成", "completed"]], { defaultValue: "in_progress", sort: 10 }),
+      { field: "total_segments", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 11, translations: label("总分段数") }, schema: { is_nullable: true } },
+      { field: "completed_segments", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 12, translations: label("已完成分段") }, schema: { is_nullable: true } },
+      { field: "failed_segments", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 13, translations: label("失败分段") }, schema: { is_nullable: true } },
+      { field: "qa_pending", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 14, translations: label("QA 待处理数") }, schema: { is_nullable: true } },
+      dateField("date_created", "创建时间", "date-created", 15),
+      dateField("date_updated", "更新时间", "date-updated", 16)
+    ]
+  },
+  {
+    collection: "user_profiles",
+    meta: {
+      icon: "person",
+      note: "从人工采纳译文中蒸馏的全局译者偏好画像，按目标语言各一份，翻译时始终注入。",
+      display_template: "{{name}}",
+      group: "localization_pipeline",
+      sort: 4,
+      accountability: "all",
+      translations: label("译者偏好画像")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      textField("name", "画像名称", { required: true, sort: 2 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 3 }),
+      textField("instructions", "偏好规则", { required: true, multiline: true, sort: 4 }),
+      jsonField("examples", "正反例", { sort: 5 }),
+      { field: "version", type: "integer", meta: { interface: "input", width: "half", sort: 6, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
+      textField("parent_id", "上一版本 ID", { width: "half", sort: 7 }),
+      { field: "evidence_count", type: "integer", meta: { interface: "input", width: "half", sort: 8, translations: label("证据数量") }, schema: { is_nullable: false, default_value: 0 } },
+      selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 9 }),
+      dateField("date_updated", "更新时间", "date-updated", 10)
     ]
   },
   {
@@ -249,6 +333,8 @@ const definitions = [
       { field: "evidence_count", type: "integer", meta: { interface: "input", width: "half", sort: 10, translations: label("证据数量") }, schema: { is_nullable: false, default_value: 0 } },
       jsonField("evidence_ids", "证据 ID", { sort: 11 }),
       textField("generated_by", "生成模型", { width: "half", sort: 12 }),
+      textField("source_batch_id", "来源导入批次 ID", { width: "half", sort: 13 }),
+      textField("learning_run_id", "风格学习记录 ID", { width: "half", sort: 14 }),
       selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 13 }),
       dateField("date_updated", "更新时间", "date-updated", 14)
     ]
@@ -280,8 +366,145 @@ const definitions = [
       textField("target", "目标语言译文", { required: true, multiline: true, sort: 6 }),
       textField("source_file", "来源文件", { width: "half", sort: 7 }),
       { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 8, translations: label("来源行号") }, schema: { is_nullable: true } },
+      textField("batch_id", "来源导入批次 ID", { width: "half", sort: 9 }),
       selectField("status", "状态", [["可用", "accepted"], ["待复核", "pending"], ["已拒绝", "rejected"]], { defaultValue: "pending", sort: 9 }),
-      dateField("date_created", "创建时间", "date-created", 10)
+      textField("provenance", "来源", { width: "half", sort: 10 }),
+      jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 11 }),
+      dateField("date_created", "创建时间", "date-created", 12)
+    ]
+  },
+  {
+    collection: "style_learning_runs",
+    meta: {
+      icon: "auto_awesome",
+      note: "每次导入按目标语言、语体和领域生成的可审核风格学习摘要。",
+      display_template: "{{filename}} · {{target_locale}} · {{content_type}}",
+      group: "localization_pipeline",
+      sort: 10,
+      accountability: "all",
+      translations: label("批次风格学习")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      textField("batch_id", "来源导入批次 ID", { required: true, width: "half", sort: 2 }),
+      textField("filename", "来源文件", { width: "half", sort: 3 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 4 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 5 }),
+      textField("domain", "业务领域", { width: "half", sort: 6 }),
+      { field: "evidence_count", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 7, translations: label("证据数量") }, schema: { is_nullable: false, default_value: 0 } },
+      textField("summary", "本批风格摘要", { required: true, multiline: true, sort: 8 }),
+      jsonField("rules", "提炼规则", { sort: 9 }),
+      jsonField("examples", "代表性正反例", { sort: 10 }),
+      textField("caveat", "适用边界与注意事项", { multiline: true, sort: 11 }),
+      { field: "confidence", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 12, translations: label("学习置信度") }, schema: { is_nullable: true } },
+      selectField("status", "审核状态", [["已学习，继续积累", "observed"], ["待审核", "draft"], ["已批准", "approved"], ["已提升为风格指导", "promoted"], ["已拒绝", "rejected"], ["生成失败", "failed"]], { defaultValue: "observed", sort: 13 }),
+      textField("promoted_profile_id", "已生成风格规范 ID", { width: "half", sort: 14 }),
+      textField("generated_by", "生成模型", { width: "half", sort: 15 }),
+      dateField("date_created", "创建时间", "date-created", 16)
+    ]
+  },
+  {
+    collection: "learning_trajectories",
+    meta: {
+      icon: "route",
+      note: "记录每个翻译片段实际使用的上下文资产、初译、QA、人工决策与最终译文，作为后续学习归因依据。",
+      display_template: "{{project}} · {{target_locale}} · {{batch_id}}/{{segment_id}}",
+      group: "localization_learning",
+      sort: 1,
+      accountability: "all",
+      translations: label("翻译学习轨迹")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("project", "项目", { width: "half", sort: 5 }),
+      textField("batch_id", "批次 ID", { width: "half", sort: 6 }),
+      textField("segment_id", "分段 ID", { width: "half", sort: 7 }),
+      textField("source", "中文原文", { required: true, multiline: true, sort: 8 }),
+      textField("initial_translation", "初始译文", { multiline: true, sort: 9 }),
+      textField("final_translation", "最终译文", { multiline: true, sort: 10 }),
+      jsonField("context_pack", "实际注入上下文", { sort: 11 }),
+      jsonField("asset_refs", "使用资产引用", { sort: 12 }),
+      jsonField("term_decisions", "术语决策", { sort: 13 }),
+      jsonField("qa_before", "修订前 QA", { sort: 14 }),
+      jsonField("qa_after", "修订后 QA", { sort: 15 }),
+      jsonField("human_decision", "人工决策", { sort: 16 }),
+      jsonField("events", "运行事件", { sort: 17 }),
+      textField("model", "执行模型", { width: "half", sort: 18 }),
+      textField("prompt_version", "提示词版本", { width: "half", sort: 19 }),
+      selectField("status", "轨迹状态", [["运行中", "running"], ["已完成", "completed"], ["待复核", "review"], ["失败", "failed"]], { defaultValue: "running", sort: 20 }),
+      textField("error", "失败原因", { multiline: true, sort: 21 }),
+      dateField("date_created", "创建时间", "date-created", 22),
+      dateField("date_updated", "更新时间", "date-updated", 23)
+    ]
+  },
+  {
+    collection: "translation_skills",
+    meta: {
+      icon: "psychology",
+      note: "按目标语言、语体、领域和项目隔离的可版本化翻译策略；同一作用域仅允许一个 champion。",
+      display_template: "{{name}} · v{{version}} · {{status}}",
+      group: "localization_learning",
+      sort: 2,
+      accountability: "all",
+      translations: label("翻译技能")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("project", "项目", { width: "half", sort: 5 }),
+      textField("name", "技能名称", { required: true, sort: 6 }),
+      textField("description", "技能说明", { multiline: true, sort: 7 }),
+      textField("change_reason", "本版变更原因", { multiline: true, sort: 8 }),
+      { field: "version", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 9, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
+      textField("parent_id", "父版本 ID", { width: "half", sort: 10 }),
+      selectField("status", "技能状态", [["当前基准", "champion"], ["候选策略", "challenger"], ["草稿", "draft"], ["停用", "inactive"], ["拒绝", "rejected"]], { defaultValue: "draft", sort: 11 }),
+      jsonField("strategy", "翻译策略", { note: "分句、上下文召回、术语约束、风格、提示词与 QA 修复方法。", sort: 12 }),
+      jsonField("evidence_ids", "来源证据 ID", { sort: 13 }),
+      textField("prompt_version", "提示词版本", { width: "half", sort: 14 }),
+      jsonField("metrics", "当前指标", { sort: 15 }),
+      uniqueInternalField("version_scope_key", 16),
+      uniqueInternalField("champion_scope_key", 17),
+      dateField("date_created", "创建时间", "date-created", 18),
+      dateField("date_updated", "更新时间", "date-updated", 19)
+    ]
+  },
+  {
+    collection: "skill_evaluations",
+    meta: {
+      icon: "compare_arrows",
+      note: "在同一隔离作用域内对 champion 与 challenger 做留出集对照评测，并保留晋升或拒绝依据。",
+      display_template: "{{project}} · {{champion_skill_id}} ↔ {{challenger_skill_id}}",
+      group: "localization_learning",
+      sort: 3,
+      accountability: "all",
+      translations: label("翻译技能评测")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("project", "项目", { width: "half", sort: 5 }),
+      textField("champion_skill_id", "Champion 技能 ID", { required: true, width: "half", sort: 6 }),
+      textField("challenger_skill_id", "Challenger 技能 ID", { required: true, width: "half", sort: 7 }),
+      { field: "sample_count", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 8, translations: label("评测样本数") }, schema: { is_nullable: false, default_value: 0 } },
+      jsonField("champion_metrics", "Champion 指标", { sort: 9 }),
+      jsonField("challenger_metrics", "Challenger 指标", { sort: 10 }),
+      jsonField("metric_deltas", "指标差值", { sort: 11 }),
+      selectField("decision", "评测决策", [["待决策", "pending"], ["晋升 Challenger", "promote"], ["拒绝 Challenger", "reject"], ["需要人工复核", "needs_review"]], { defaultValue: "pending", sort: 12 }),
+      jsonField("report", "评测报告", { sort: 13 }),
+      textField("evaluator", "评测器", { width: "half", sort: 14 }),
+      dateField("date_created", "创建时间", "date-created", 15),
+      dateField("date_updated", "更新时间", "date-updated", 16)
     ]
   },
   {
@@ -300,11 +523,14 @@ const definitions = [
       selectField("status", "结论", [["通过", "passed"], ["待人工复核", "review"], ["失败", "failed"]], { defaultValue: "review", sort: 9 }),
       { field: "iterations", type: "integer", meta: { interface: "input", width: "half", sort: 10, translations: label("修订轮数") }, schema: { is_nullable: false, default_value: 0 } },
       jsonField("issues", "问题清单", { sort: 11 }),
-      jsonField("references", "检索译例", { sort: 12 }),
-      textField("style_profile_id", "风格版本 ID", { width: "half", sort: 13 }),
-      textField("model", "审校模型", { width: "half", sort: 14 }),
-      textField("batch_id", "批次 ID", { width: "half", sort: 15 }),
-      dateField("date_created", "创建时间", "date-created", 16)
+      jsonField("term_decisions", "AI 术语裁决", { note: "疑似术语由模型自动判断采用或不适用，并保留理由。", sort: 12 }),
+      jsonField("human_decisions", "人工 QA 决定", { note: "逐条记录批准当前译文或要求 AI 修订的人工决定。", sort: 13 }),
+      jsonField("references", "检索译例", { sort: 14 }),
+      textField("style_profile_id", "风格版本 ID", { width: "half", sort: 15 }),
+      textField("model", "审校模型", { width: "half", sort: 16 }),
+      textField("batch_id", "批次 ID", { width: "half", sort: 17 }),
+      textField("fallback_reason", "未完成原因", { multiline: true, sort: 18 }),
+      dateField("date_created", "创建时间", "date-created", 19)
     ]
   },
   {
@@ -323,7 +549,8 @@ const definitions = [
       { field: "score_before", type: "float", meta: { interface: "input", width: "half", sort: 9, translations: label("修订前分数") }, schema: { is_nullable: true } },
       { field: "score_after", type: "float", meta: { interface: "input", width: "half", sort: 10, translations: label("修订后分数") }, schema: { is_nullable: true } },
       selectField("status", "状态", [["机器验证", "machine_verified"], ["人工批准", "human_approved"], ["待复核", "review"]], { defaultValue: "review", sort: 11 }),
-      dateField("date_created", "创建时间", "date-created", 12)
+      jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 12 }),
+      dateField("date_created", "创建时间", "date-created", 13)
     ]
   }
 ];
@@ -372,9 +599,14 @@ async function ensureCollection(definition) {
   }
   await api(`/collections/${definition.collection}`, { method: "PATCH", body: { meta: definition.meta } });
   const currentFields = await api(`/fields/${definition.collection}`);
-  const fieldNames = new Set(currentFields.map((field) => field.field));
+  const fieldsByName = new Map(currentFields.map((field) => [field.field, field]));
   for (const field of definition.fields) {
-    if (!fieldNames.has(field.field)) await api(`/fields/${definition.collection}`, { method: "POST", body: field });
+    const current = fieldsByName.get(field.field);
+    if (!current) await api(`/fields/${definition.collection}`, { method: "POST", body: field });
+    else if (typeMigrations.has(`${definition.collection}.${field.field}`) && current.type !== field.type) {
+      await api(`/fields/${definition.collection}/${field.field}`, { method: "PATCH", body: field });
+      console.log(`migrated ${definition.collection}.${field.field} from ${current.type} to ${field.type}`);
+    }
   }
   console.log(`checked ${definition.collection}`);
 }
@@ -403,6 +635,43 @@ async function migrateSeedAssets() {
   }
 }
 
+function learningScopeHash(item, version = null) {
+  const scope = [item.target_locale, item.content_type || "general", item.domain || "general", item.project || "default"].join("\u0000");
+  return createHash("sha256").update(version == null ? scope : `${scope}\u0000${version}`).digest("hex");
+}
+
+async function reconcileTranslationSkillKeys() {
+  const items = await api("/items/translation_skills?limit=-1&fields=id,target_locale,content_type,domain,project,version,status,date_created,date_updated");
+  const groups = new Map();
+  for (const item of items) {
+    const scopeKey = learningScopeHash(item);
+    if (!groups.has(scopeKey)) groups.set(scopeKey, []);
+    groups.get(scopeKey).push(item);
+  }
+  const updates = [];
+  for (const [scopeKey, scoped] of groups) {
+    const versions = new Set();
+    for (const item of scoped) {
+      const version = Math.max(1, Number(item.version) || 1);
+      if (versions.has(version)) throw new Error(`translation_skills has duplicate version ${version} in scope ${scopeKey}; resolve it before provisioning`);
+      versions.add(version);
+    }
+    const champions = scoped.filter((item) => item.status === "champion")
+      .sort((a, b) => Number(b.version) - Number(a.version) || String(b.date_updated || b.date_created || "").localeCompare(String(a.date_updated || a.date_created || "")));
+    const winner = champions[0] || null;
+    for (const item of scoped) {
+      updates.push({
+        id: item.id,
+        version_scope_key: learningScopeHash(item, Math.max(1, Number(item.version) || 1)),
+        champion_scope_key: item.id === winner?.id ? scopeKey : null,
+        ...(item.status === "champion" && item.id !== winner?.id ? { status: "inactive" } : {})
+      });
+    }
+  }
+  if (updates.length) await api("/items/translation_skills", { method: "PATCH", body: updates });
+  console.log(`translation skill invariants: ${groups.size} scopes checked`);
+}
+
 async function ensureServiceAccount() {
   const serviceEmail = process.env.DIRECTUS_SERVICE_EMAIL;
   const servicePassword = process.env.DIRECTUS_SERVICE_PASSWORD;
@@ -427,10 +696,16 @@ async function ensureServiceAccount() {
     ...["create", "read"].map((action) => ["corpus_documents", action]),
     ...["create", "read", "update"].map((action) => ["term_candidates", action]),
     ...["create", "read", "update"].map((action) => ["term_import_batches", action]),
+    ...["create", "read", "update"].map((action) => ["batch_runs", action]),
     ...["create", "read", "update"].map((action) => ["style_profiles", action]),
+    ...["create", "read", "update"].map((action) => ["user_profiles", action]),
     ...["create", "read", "update"].map((action) => ["style_evidence", action]),
+    ...["create", "read", "update"].map((action) => ["style_learning_runs", action]),
+    ...["create", "read", "update"].map((action) => ["learning_trajectories", action]),
+    ...["create", "read", "update"].map((action) => ["translation_skills", action]),
+    ...["create", "read", "update"].map((action) => ["skill_evaluations", action]),
     ...["create", "read"].map((action) => ["qa_runs", action]),
-    ...["create", "read", "update"].map((action) => ["qa_cases", action])
+    ...["create", "read", "update", "delete"].map((action) => ["qa_cases", action])
   ];
   const currentPermissions = await api(`/permissions?filter[policy][_eq]=${policy.id}&limit=-1`);
   const existingPermissionKeys = new Set(currentPermissions.map((permission) => `${permission.collection}:${permission.action}`));
@@ -475,7 +750,9 @@ async function ensureServiceAccount() {
 await waitForDirectus();
 await ensureFolder("localization_assets", "四语术语资产", "translate", 1);
 await ensureFolder("localization_pipeline", "语料与规则", "account_tree", 2);
+await ensureFolder("localization_learning", "翻译学习与评测", "psychology", 3);
 for (const definition of definitions) await ensureCollection(definition);
+await reconcileTranslationSkillKeys();
 await api("/settings", { method: "PATCH", body: { project_name: "Kami 本地化语言工作台", project_descriptor: "中译日、韩、繁中（台湾）、泰的强隔离语言资产后台", project_color: "#123e31" } });
 await ensureServiceAccount();
 await migrateSeedAssets();

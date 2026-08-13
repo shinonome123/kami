@@ -1,13 +1,34 @@
 import http from "node:http";
 
+function mockVector(input) {
+  const text = typeof input === "string" ? input : (Array.isArray(input) ? String(input[0] || "") : "");
+  const vector = Array.from({ length: 8 }, (_, index) => {
+    let sum = 0;
+    for (const character of text) sum += character.codePointAt(0) * (index + 1);
+    return Math.sin(sum * (index + 1) + index * 0.7);
+  });
+  const norm = Math.sqrt(vector.reduce((total, value) => total + value * value, 0));
+  return vector.map((value) => value / (norm || 1));
+}
+
 const server = http.createServer(async (req, res) => {
-  if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+  if (req.method !== "POST") {
     res.writeHead(404).end();
     return;
   }
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (req.url === "/v1/embeddings") {
+    const payload = JSON.stringify({ data: [{ embedding: mockVector(body.input) }] });
+    res.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(payload) });
+    res.end(payload);
+    return;
+  }
+  if (req.url !== "/v1/chat/completions") {
+    res.writeHead(404).end();
+    return;
+  }
   const prompt = body.messages?.map((message) => message.content).join("\n") || "";
   const content = prompt.includes("Excel 表格结构分析器")
     ? JSON.stringify({ sheets: [{ sheet: "Delivery", headerRow: 1, confidence: 0.98, reason: "表头和列内容分布明确", columns: [
@@ -38,4 +59,6 @@ const server = http.createServer(async (req, res) => {
   res.end(payload);
 });
 
-server.listen(11435, "127.0.0.1", () => console.log("mock OpenAI server: http://127.0.0.1:11435/v1"));
+const port = Number(process.env.MOCK_OPENAI_PORT || 11435);
+const listener = server.listen(port, "127.0.0.1", () => console.log(`mock OpenAI server: http://127.0.0.1:${port}/v1`));
+listener.unref();

@@ -1,4 +1,5 @@
 .docx-review-*/
+.reasonix/
 data/corpora/*.json
 *.log
 node_modules/

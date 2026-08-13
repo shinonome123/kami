@@ -215,7 +215,41 @@ export async function exportBatchDocument(input = {}) {
   let mimeType;
   let extension;
 
-  if (format === "text" || format === "markdown") {
+  if (format === "task-xlsx") {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("翻译任务");
+    worksheet.columns = [
+      { header: "序号", key: "index", width: 9 },
+      { header: "中文原文", key: "source", width: 54 },
+      { header: "译文", key: "translation", width: 54 },
+      { header: "状态", key: "status", width: 14 },
+      { header: "AIQA 分数", key: "score", width: 13 },
+      { header: "QA 意见", key: "issues", width: 58 },
+      { header: "人工决定", key: "decisions", width: 34 }
+    ];
+    (input.segments || []).filter((segment) => segment.selected !== false).forEach((segment, index) => {
+      const result = segment.result || {};
+      worksheet.addRow({
+        index: index + 1,
+        source: segment.source || "",
+        translation: segment.translation || "",
+        status: segment.status === "done" ? "已翻译" : segment.status === "error" ? "失败" : "待处理",
+        score: Number.isFinite(result.qaScore) ? result.qaScore : "",
+        issues: (result.issues || []).map((issue) => issue.message || issue.suggestion || issue.type).filter(Boolean).join("\n"),
+        decisions: (result.aiQa?.humanDecisions || []).map((item) => `${item.decision === "approved_as_is" ? "批准当前译文" : "要求 AI 修订"}：${item.issue?.message || item.reason || ""}`).join("\n")
+      });
+    });
+    worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    worksheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF123E31" } };
+    worksheet.views = [{ state: "frozen", ySplit: 1 }];
+    worksheet.eachRow((row, rowNumber) => {
+      row.alignment = { vertical: "top", wrapText: true };
+      if (rowNumber > 1) row.height = 42;
+    });
+    buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    extension = ".xlsx";
+  } else if (format === "text" || format === "markdown") {
     const content = (input.structure?.pieces || []).map((piece) => piece.type === "segment" ? (translations.get(piece.id) || "") : String(piece.value || "")).join("");
     buffer = Buffer.from(content, "utf8");
     mimeType = format === "markdown" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8";

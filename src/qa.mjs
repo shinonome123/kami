@@ -13,7 +13,15 @@ export function runQa({ source, translation, matches = [] }) {
       issues.push({ severity: "error", type: "required_term", message: `未使用强制译法：${term.source} → ${term.target}` });
     }
     if (mode !== "exact" && !adopted) {
-      issues.push({ severity: "warning", type: "potential_term", message: `疑似术语待确认：${matchPhrase || term.source} ≈ ${term.source} → ${term.target}` });
+      issues.push({
+        severity: "warning",
+        type: "potential_term",
+        category: "terminology",
+        sourceTerm: term.source,
+        matchedSource: matchPhrase || term.source,
+        targetTerm: term.target,
+        message: `疑似术语待确认：${matchPhrase || term.source} ≈ ${term.source} → ${term.target}`
+      });
     }
     for (const forbidden of term.forbidden ?? []) {
       if (forbidden && normalizeSource(translation).includes(normalizeSource(forbidden))) {

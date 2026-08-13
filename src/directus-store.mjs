@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { assertLocale } from "./config.mjs";
+import { embedSource, embeddingModelName } from "./embedding.mjs";
 
 export const LOCALE_COLLECTIONS = Object.freeze({
   "ja-JP": "terms_ja_jp",
@@ -15,6 +16,37 @@ export const MEMORY_COLLECTIONS = Object.freeze({
   "th-TH": "translation_memory_th_th"
 });
 
+// Directus is configured for 128 MB on localhost. There is no arbitrary item
+// count limit; the 64 MB fallback only protects a single HTTP request if the
+// spreadsheet upload ceiling is raised in the future.
+const DIRECTUS_WRITE_CHUNK_BYTES = 64 * 1024 * 1024;
+const DIRECTUS_WRITE_CHUNK_ITEMS = Number.POSITIVE_INFINITY;
+const DIRECTUS_BULK_WRITE_TIMEOUT_MS = 120_000;
+
+export function chunkDirectusRecords(records, {
+  maxBytes = DIRECTUS_WRITE_CHUNK_BYTES,
+  maxItems = DIRECTUS_WRITE_CHUNK_ITEMS
+} = {}) {
+  const chunks = [];
+  let chunk = [];
+  let chunkBytes = 2;
+
+  for (const record of records || []) {
+    const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8");
+    const separatorBytes = chunk.length ? 1 : 0;
+    if (chunk.length && (chunk.length >= maxItems || chunkBytes + separatorBytes + recordBytes > maxBytes)) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 2;
+    }
+    chunk.push(record);
+    chunkBytes += (chunk.length > 1 ? 1 : 0) + recordBytes;
+  }
+
+  if (chunk.length) chunks.push(chunk);
+  return chunks;
+}
+
 function config() {
   const baseUrl = String(process.env.DIRECTUS_URL || "http://127.0.0.1:8055").replace(/\/$/, "");
   const token = process.env.DIRECTUS_TOKEN;
@@ -22,7 +54,7 @@ function config() {
   return { baseUrl, token };
 }
 
-async function request(path, { method = "GET", body } = {}) {
+async function request(path, { method = "GET", body, timeoutMs = 10_000 } = {}) {
   const { baseUrl, token } = config();
   const response = await fetch(`${baseUrl}${path}`, {
     method,
@@ -31,7 +63,7 @@ async function request(path, { method = "GET", body } = {}) {
       ...(body === undefined ? {} : { "content-type": "application/json" })
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(10_000)
+    signal: AbortSignal.timeout(timeoutMs)
   });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
@@ -41,6 +73,36 @@ async function request(path, { method = "GET", body } = {}) {
     throw error;
   }
   return payload?.data ?? payload;
+}
+
+async function createItemsInChunks(path, records) {
+  const saved = [];
+  for (const chunk of chunkDirectusRecords(records)) {
+    try {
+      const result = await request(path, { method: "POST", body: chunk, timeoutMs: DIRECTUS_BULK_WRITE_TIMEOUT_MS });
+      saved.push(...(Array.isArray(result) ? result : [result]));
+    } catch (error) {
+      error.createdItems = saved;
+      throw error;
+    }
+  }
+  return saved;
+}
+
+async function updateItemsInChunks(path, records) {
+  for (const chunk of chunkDirectusRecords(records)) {
+    await request(path, { method: "PATCH", body: chunk, timeoutMs: DIRECTUS_BULK_WRITE_TIMEOUT_MS });
+  }
+}
+
+async function candidateIdsForBatch(batchId) {
+  const params = new URLSearchParams({
+    limit: "-1",
+    fields: "id",
+    filter: JSON.stringify({ batch_id: { _eq: batchId } })
+  });
+  const items = await request(`/items/term_candidates?${params}`);
+  return items.map((item) => item.id).filter(Boolean);
 }
 
 function collectionFor(locale) {
@@ -78,7 +140,7 @@ function toTerm(item) {
     contentTypes: arrayValue(item.content_types),
     enforcement: item.enforcement || "required",
     note: item.note || "",
-    status: item.status || "draft",
+    status: item.status || "observed",
     provenance: item.provenance || "directus",
     createdAt: item.date_created,
     updatedAt: item.date_updated
@@ -104,15 +166,25 @@ function toDirectusTerm(input) {
 export async function initializeDirectusStore() {
   const health = await fetch(`${config().baseUrl}/server/ping`, { signal: AbortSignal.timeout(5_000) });
   if (!health.ok) throw new Error(`Directus health check failed (${health.status})`);
-  await Promise.all([...Object.values(LOCALE_COLLECTIONS), ...Object.values(MEMORY_COLLECTIONS)].map((collection) => request(`/items/${collection}?limit=1&fields=id`)));
+  await Promise.all([
+    ...Object.values(LOCALE_COLLECTIONS),
+    ...Object.values(MEMORY_COLLECTIONS),
+    "style_learning_runs",
+    "learning_trajectories",
+    "translation_skills",
+    "skill_evaluations"
+  ].map((collection) => request(`/items/${collection}?limit=1&fields=id`)));
 }
 
 export async function getDirectusMemories(locale, { contentType = "general", domain = "general", limit = 500 } = {}) {
   const collection = memoryCollectionFor(locale);
-  const params = new URLSearchParams({ limit: String(Math.min(1000, limit)), sort: "-date_updated,-date_created", fields: "id,source,target,domain,content_type,channel,style_profile_id,quality_status,qa_score,provenance,source_file,batch_id,source_row,date_created,date_updated" });
-  if (contentType) params.set("filter[content_type][_eq]", contentType);
+  const directusLimit = Number(limit) <= 0 ? "-1" : String(Math.min(1000, limit));
+  const params = new URLSearchParams({ limit: directusLimit, sort: "-date_updated,-date_created", fields: "id,source,target,domain,content_type,channel,style_profile_id,quality_status,qa_score,provenance,source_file,batch_id,source_row,embedding,date_created,date_updated" });
   const items = await request(`/items/${collection}?${params}`);
-  return items.filter((item) => !domain || domain === "general" || item.domain === domain || item.domain === "general").map((item) => ({
+  return items.filter((item) =>
+    (!contentType || contentType === "general" || item.content_type === contentType || item.content_type === "general")
+    && (!domain || domain === "general" || item.domain === domain || item.domain === "general")
+  ).map((item) => ({
     id: item.id,
     source: item.source,
     target: item.target,
@@ -126,6 +198,7 @@ export async function getDirectusMemories(locale, { contentType = "general", dom
     sourceFile: item.source_file || "",
     batchId: item.batch_id || "",
     sourceRow: item.source_row || null,
+    embedding: item.embedding || null,
     createdAt: item.date_created,
     updatedAt: item.date_updated
   }));
@@ -136,6 +209,7 @@ export async function saveDirectusMemory(locale, input) {
   const source = String(input.source || "").trim();
   const target = String(input.target || "").trim();
   if (!source || !target) throw new Error("翻译记忆的中外文不能为空");
+  const embedding = input.embedding ?? await embedSource(source);
   const params = new URLSearchParams({ limit: "1", fields: "id,quality_status,qa_score" });
   params.set("filter[source][_eq]", source);
   params.set("filter[target][_eq]", target);
@@ -152,7 +226,8 @@ export async function saveDirectusMemory(locale, input) {
     provenance: input.provenance || "kami-workbench",
     source_file: input.sourceFile || "",
     batch_id: input.batchId || "",
-    source_row: Number(input.sourceRow) || null
+    source_row: Number(input.sourceRow) || null,
+    ...(embedding ? { embedding } : {})
   };
   const saved = existing[0]
     ? await request(`/items/${collection}/${existing[0].id}`, { method: "PATCH", body })
@@ -162,7 +237,7 @@ export async function saveDirectusMemory(locale, input) {
 
 export async function getDirectusStyleProfile(locale, contentType, domain = "general") {
   assertLocale(locale);
-  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,evidence_ids,generated_by,status,date_updated" });
+  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
   params.set("filter[target_locale][_eq]", locale);
   params.set("filter[content_type][_eq]", contentType || "general");
   params.set("filter[status][_eq]", "active");
@@ -180,11 +255,14 @@ export async function getDirectusStyleProfile(locale, contentType, domain = "gen
     examples: arrayValue(profile.examples),
     version: Number(profile.version) || 1,
     evidenceCount: Number(profile.evidence_count) || 0,
+    sourceBatchId: profile.source_batch_id || "",
+    learningRunId: profile.learning_run_id || "",
     updatedAt: profile.date_updated
   };
 }
 
 export async function saveDirectusStyleEvidence(input) {
+  const embedding = input.embedding ?? await embedSource(input.source);
   const saved = await request("/items/style_evidence", { method: "POST", body: {
     target_locale: assertLocale(input.locale),
     content_type: input.contentType || "general",
@@ -193,9 +271,86 @@ export async function saveDirectusStyleEvidence(input) {
     target: String(input.target || "").trim(),
     source_file: input.sourceFile || "",
     source_row: Number(input.sourceRow) || null,
-    status: input.status || "accepted"
+    batch_id: input.batchId || "",
+    status: input.status || "accepted",
+    provenance: input.provenance || "",
+    ...(embedding ? { embedding } : {})
   } });
   return { id: saved.id, ...input };
+}
+
+export async function getDirectusStyleEvidence(locale, options = {}) {
+  assertLocale(locale);
+  const params = new URLSearchParams({ limit: String(Math.min(1000, options.limit || 1000)), sort: "-date_created", fields: "id,target_locale,content_type,domain,source,target,source_file,source_row,batch_id,status,provenance,embedding,date_created" });
+  params.set("filter[target_locale][_eq]", locale);
+  if (options.contentType) params.set("filter[content_type][_eq]", options.contentType);
+  if (options.exactScope && options.domain) params.set("filter[domain][_eq]", options.domain);
+  if (options.batchId) params.set("filter[batch_id][_eq]", options.batchId);
+  const items = await request(`/items/style_evidence?${params}`);
+  return items
+    .filter((item) => options.exactScope
+      ? (!options.contentType || item.content_type === options.contentType) && (!options.domain || item.domain === options.domain)
+      : (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general"))
+    .map((item) => ({
+      id: item.id, locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
+      source: item.source, target: item.target, sourceFile: item.source_file || "", sourceRow: Number(item.source_row) || null,
+      batchId: item.batch_id || "",
+      status: item.status || "accepted", provenance: item.provenance || "",
+      embedding: item.embedding || null, createdAt: item.date_created
+    }));
+}
+
+export async function getDirectusQaRuns(locale, options = {}) {
+  assertLocale(locale);
+  const params = new URLSearchParams({ limit: String(Math.min(500, options.limit || 100)), sort: "-date_created", fields: "id,target_locale,content_type,domain,source,initial_translation,final_translation,score,status,iterations,issues,term_decisions,human_decisions,references,style_profile_id,model,fallback_reason,batch_id,date_created" });
+  params.set("filter[target_locale][_eq]", locale);
+  if (options.contentType) params.set("filter[content_type][_eq]", options.contentType);
+  if (options.batchId) params.set("filter[batch_id][_eq]", options.batchId);
+  const items = await request(`/items/qa_runs?${params}`);
+  return items
+    .filter((item) => !options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general")
+    .map((item) => ({
+      id: item.id, locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
+      source: item.source, initialTranslation: item.initial_translation, finalTranslation: item.final_translation,
+      score: item.score == null ? null : Number(item.score), status: item.status || "review", iterations: Number(item.iterations) || 0,
+      issues: arrayValue(item.issues), termDecisions: arrayValue(item.term_decisions), humanDecisions: arrayValue(item.human_decisions), references: arrayValue(item.references), styleProfileId: item.style_profile_id || "",
+      model: item.model || "", fallbackReason: item.fallback_reason || "", batchId: item.batch_id || "", createdAt: item.date_created
+    }));
+}
+
+export async function getDirectusUserProfile(locale) {
+  assertLocale(locale);
+  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,instructions,examples,version,parent_id,evidence_count,status,date_updated" });
+  params.set("filter[target_locale][_eq]", locale);
+  params.set("filter[status][_eq]", "active");
+  const items = await request(`/items/user_profiles?${params}`);
+  const profile = items[0];
+  if (!profile) return null;
+  return {
+    id: profile.id, name: profile.name, locale: profile.target_locale, instruction: profile.instructions,
+    examples: arrayValue(profile.examples), version: Number(profile.version) || 1,
+    evidenceCount: Number(profile.evidence_count) || 0, updatedAt: profile.date_updated
+  };
+}
+
+export async function saveDirectusUserProfile(input) {
+  const locale = assertLocale(input.locale);
+  const params = new URLSearchParams({ limit: "1", sort: "-version,-date_updated", fields: "id,version,status" });
+  params.set("filter[target_locale][_eq]", locale);
+  const existing = await request(`/items/user_profiles?${params}`);
+  const previous = existing[0];
+  const saved = await request("/items/user_profiles", { method: "POST", body: {
+    name: input.name || `${locale} 译者画像`,
+    target_locale: locale,
+    instructions: input.instruction,
+    examples: input.examples || [],
+    version: (Number(previous?.version) || 0) + 1,
+    parent_id: previous?.id || null,
+    evidence_count: Number(input.evidenceCount) || 0,
+    status: input.status || "active"
+  } });
+  if (previous?.id && saved.status === "active") await request(`/items/user_profiles/${previous.id}`, { method: "PATCH", body: { status: "inactive" } });
+  return { id: saved.id, name: saved.name, locale, instruction: saved.instructions, examples: saved.examples || [], version: saved.version };
 }
 
 export async function saveDirectusStyleProfile(input) {
@@ -218,39 +373,120 @@ export async function saveDirectusStyleProfile(input) {
     evidence_count: Number(input.evidenceCount) || 0,
     evidence_ids: input.evidenceIds || [],
     generated_by: input.generatedBy || "",
+    source_batch_id: input.sourceBatchId || "",
+    learning_run_id: input.learningRunId || "",
     status: input.status || "active"
   } });
   if (previous?.id && saved.status === "active") await request(`/items/style_profiles/${previous.id}`, { method: "PATCH", body: { status: "inactive" } });
-  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], version: saved.version, locale, contentType: saved.content_type, domain: saved.domain };
+  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], version: saved.version, locale, contentType: saved.content_type, domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
+}
+
+function mapStyleLearningRun(item) {
+  return {
+    id: item.id,
+    batchId: item.batch_id || "",
+    filename: item.filename || "",
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    evidenceCount: Number(item.evidence_count) || 0,
+    summary: item.summary || "",
+    rules: arrayValue(item.rules),
+    examples: arrayValue(item.examples),
+    caveat: item.caveat || "",
+    confidence: item.confidence == null ? null : Number(item.confidence),
+    status: item.status || "draft",
+    promotedProfileId: item.promoted_profile_id || "",
+    generatedBy: item.generated_by || "",
+    createdAt: item.date_created || null
+  };
+}
+
+export async function saveDirectusStyleLearningRun(input) {
+  const body = input.id ? {} : {
+    batch_id: String(input.batchId || ""),
+    filename: String(input.filename || ""),
+    target_locale: assertLocale(input.locale),
+    content_type: input.contentType || "general",
+    domain: input.domain || "general",
+    evidence_count: Number(input.evidenceCount) || 0,
+    summary: String(input.summary || ""),
+    rules: input.rules || [],
+    examples: input.examples || [],
+    caveat: String(input.caveat || ""),
+    confidence: input.confidence == null ? null : Math.max(0, Math.min(1, Number(input.confidence) || 0)),
+    status: input.status || "observed",
+    promoted_profile_id: input.promotedProfileId || "",
+    generated_by: input.generatedBy || ""
+  };
+  if (input.id) {
+    const fields = {
+      batchId: ["batch_id", (value) => String(value || "")],
+      filename: ["filename", (value) => String(value || "")],
+      locale: ["target_locale", (value) => assertLocale(value)],
+      contentType: ["content_type", (value) => value || "general"],
+      domain: ["domain", (value) => value || "general"],
+      evidenceCount: ["evidence_count", (value) => Number(value) || 0],
+      summary: ["summary", (value) => String(value || "")],
+      rules: ["rules", (value) => value || []],
+      examples: ["examples", (value) => value || []],
+      caveat: ["caveat", (value) => String(value || "")],
+      confidence: ["confidence", (value) => value == null ? null : Math.max(0, Math.min(1, Number(value) || 0))],
+      status: ["status", (value) => value || "observed"],
+      promotedProfileId: ["promoted_profile_id", (value) => value || ""],
+      generatedBy: ["generated_by", (value) => value || ""]
+    };
+    for (const [inputField, [directusField, normalize]] of Object.entries(fields)) {
+      if (Object.hasOwn(input, inputField)) body[directusField] = normalize(input[inputField]);
+    }
+  }
+  const saved = input.id
+    ? await request(`/items/style_learning_runs/${encodeURIComponent(input.id)}`, { method: "PATCH", body })
+    : await request("/items/style_learning_runs", { method: "POST", body });
+  return mapStyleLearningRun(saved);
+}
+
+export async function getDirectusStyleLearningRuns(locale, options = {}) {
+  const params = new URLSearchParams({
+    limit: String(Math.min(500, Math.max(1, Number(options.limit) || 100))),
+    sort: "-date_created",
+    fields: "id,batch_id,filename,target_locale,content_type,domain,evidence_count,summary,rules,examples,caveat,confidence,status,promoted_profile_id,generated_by,date_created"
+  });
+  params.set("filter[target_locale][_eq]", assertLocale(locale));
+  if (options.batchId) params.set("filter[batch_id][_eq]", options.batchId);
+  if (options.status) params.set("filter[status][_eq]", options.status);
+  return (await request(`/items/style_learning_runs?${params}`)).map(mapStyleLearningRun);
 }
 
 export async function saveDirectusQaRun(input) {
   return request("/items/qa_runs", { method: "POST", body: {
     target_locale: assertLocale(input.locale), content_type: input.contentType || "general", domain: input.domain || "general",
     source: input.source, initial_translation: input.initialTranslation, final_translation: input.finalTranslation,
-    score: input.score, status: input.status, iterations: input.iterations || 0, issues: input.issues || [], references: input.references || [],
-    style_profile_id: input.styleProfileId || "", model: input.model || "", batch_id: input.batchId || ""
+    score: input.score, status: input.status, iterations: input.iterations || 0, issues: input.issues || [], term_decisions: input.termDecisions || [], human_decisions: input.humanDecisions || [], references: input.references || [],
+    style_profile_id: input.styleProfileId || "", model: input.model || "", batch_id: input.batchId || "", fallback_reason: input.fallbackReason || ""
   } });
 }
 
 export async function saveDirectusQaCase(input) {
+  const embedding = input.embedding ?? await embedSource(input.source);
   return request("/items/qa_cases", { method: "POST", body: {
     target_locale: assertLocale(input.locale), content_type: input.contentType || "general", domain: input.domain || "general",
     source: input.source, rejected_translation: input.rejectedTranslation, corrected_translation: input.correctedTranslation || "",
-    issues: input.issues || [], score_before: input.scoreBefore, score_after: input.scoreAfter, status: input.status || "review"
+    issues: input.issues || [], score_before: input.scoreBefore, score_after: input.scoreAfter, status: input.status || "review",
+    ...(embedding ? { embedding } : {})
   } });
 }
 
-export async function getDirectusQaCases(locale, { contentType = "general", domain = "general", limit = 200 } = {}) {
-  assertLocale(locale);
-  const params = new URLSearchParams({ limit: String(Math.min(500, limit)), sort: "-date_created", fields: "id,target_locale,content_type,domain,source,rejected_translation,corrected_translation,issues,score_before,score_after,status,date_created" });
+export async function getDirectusQaCases(locale, { contentType = "general", domain = "general", limit = 200 } = {}) {  assertLocale(locale);
+  const directusLimit = Number(limit) <= 0 ? "-1" : String(Math.min(500, limit));
+  const params = new URLSearchParams({ limit: directusLimit, sort: "-date_created", fields: "id,target_locale,content_type,domain,source,rejected_translation,corrected_translation,issues,score_before,score_after,status,embedding,date_created" });
   params.set("filter[target_locale][_eq]", locale);
   if (contentType) params.set("filter[content_type][_eq]", contentType);
   const items = await request(`/items/qa_cases?${params}`);
   return items.filter((item) => (!domain || domain === "general" || item.domain === domain || item.domain === "general") && ["machine_verified", "human_approved"].includes(item.status)).map((item) => ({
     id: item.id, locale: item.target_locale, contentType: item.content_type, domain: item.domain || "general", source: item.source,
     rejectedTranslation: item.rejected_translation, correctedTranslation: item.corrected_translation, issues: arrayValue(item.issues),
-    scoreBefore: Number(item.score_before) || 0, scoreAfter: Number(item.score_after) || 0, status: item.status, createdAt: item.date_created
+    scoreBefore: Number(item.score_before) || 0, scoreAfter: Number(item.score_after) || 0, status: item.status, embedding: item.embedding || null, createdAt: item.date_created
   }));
 }
 
@@ -332,7 +568,12 @@ export async function saveDirectusImportPreview(input) {
       candidate_count: input.candidates.length,
       status: "reviewing",
       ai_used: Boolean(input.ai?.used),
-      summary: input.statistics || {}
+      summary: {
+        ...(input.statistics || {}),
+        fileMode: input.fileMode || "mixed",
+        ai: input.ai || null,
+        sheets: input.sheets || []
+      }
     }
   });
   const records = input.candidates.map((candidate) => ({
@@ -340,6 +581,22 @@ export async function saveDirectusImportPreview(input) {
     target: candidate.target,
     target_locale: candidate.locale,
     asset_type: candidate.assetType || "term",
+    content_type: candidate.contentType || "general",
+    domain: candidate.domain || "general",
+    enforcement: candidate.enforcement || "preferred",
+    classification_confidence: Number(candidate.contentTypeConfidence) || Number(candidate.score) || null,
+    classification_source: candidate.contentTypeSource || (input.ai?.used ? "ai" : "rules"),
+    candidate_key: candidate.candidateKey || "",
+    candidate_role: candidate.candidateRole || "full_pair",
+    parent_candidate_key: candidate.parentCandidateKey || "",
+    parent_row_number: Number(candidate.parentRowNumber) || null,
+    parent_candidate_keys: candidate.parentCandidateKeys || (candidate.parentCandidateKey ? [candidate.parentCandidateKey] : []),
+    parent_evidence: candidate.parentEvidence || [],
+    candidate_origin: candidate.candidateOrigin || candidate.extractionSource || "table-pair",
+    term_category: candidate.termCategory || "",
+    extraction_confidence: candidate.extractionConfidence == null ? null : Number(candidate.extractionConfidence),
+    source_span: candidate.sourceSpan || null,
+    target_span: candidate.targetSpan || null,
     frequency: candidate.occurrences || 1,
     score: candidate.score,
     batch_id: batch.id,
@@ -349,7 +606,27 @@ export async function saveDirectusImportPreview(input) {
     reason: (candidate.reasons || []).join("；"),
     status: "pending"
   }));
-  const saved = records.length ? await request("/items/term_candidates", { method: "POST", body: records }) : [];
+  let saved = [];
+  try {
+    saved = records.length ? await createItemsInChunks("/items/term_candidates", records) : [];
+    if (saved.length !== records.length) throw new Error(`Directus candidate write was incomplete (${saved.length}/${records.length})`);
+  } catch (error) {
+    const knownIds = [...saved, ...(error.createdItems || [])].map((item) => item?.id).filter(Boolean);
+    const persistedIds = await candidateIdsForBatch(batch.id).catch(() => []);
+    const savedIds = [...new Set([...knownIds, ...persistedIds])];
+    if (savedIds.length) {
+      await updateItemsInChunks("/items/term_candidates", savedIds.map((id) => ({
+        id,
+        status: "rejected",
+        decision: "excluded"
+      }))).catch(() => {});
+    }
+    await request(`/items/term_import_batches/${encodeURIComponent(batch.id)}`, {
+      method: "PATCH",
+      body: { status: "cancelled", summary: { ...(input.statistics || {}), partialCandidates: savedIds.length, error: error.message } }
+    }).catch(() => {});
+    throw error;
+  }
   return {
     batchId: batch.id,
     candidates: input.candidates.map((candidate, index) => ({ ...candidate, candidateId: saved[index]?.id }))
@@ -362,11 +639,743 @@ export async function completeDirectusImport(batchId, decisions, summary) {
     status: item.status,
     decision: item.decision || (item.status === "accepted" ? "ready" : "excluded")
   }));
-  if (updates.length) await request("/items/term_candidates", { method: "PATCH", body: updates });
+  if (updates.length) await updateItemsInChunks("/items/term_candidates", updates);
   await request(`/items/term_import_batches/${encodeURIComponent(batchId)}`, {
     method: "PATCH",
     body: { status: "completed", summary }
   });
+}
+
+export async function rebuildDirectusEmbeddings(locale) {
+  assertLocale(locale);
+  const model = embeddingModelName();
+  if (!model) {
+    const error = new Error("未配置 embedding 模型，无法重建向量索引");
+    error.statusCode = 400;
+    throw error;
+  }
+  const stats = { memories: 0, qaCases: 0, evidence: 0 };
+  const collection = memoryCollectionFor(locale);
+  const memoryItems = await request(`/items/${collection}?limit=-1&fields=id,source,embedding`);
+  for (const item of memoryItems) {
+    if (item.embedding?.vector?.length && item.embedding?.model === model) continue;
+    const embedding = await embedSource(item.source);
+    if (!embedding) {
+      const error = new Error("embedding 服务不可用，重建中断");
+      error.statusCode = 503;
+      throw error;
+    }
+    await request(`/items/${collection}/${encodeURIComponent(item.id)}`, { method: "PATCH", body: { embedding } });
+    stats.memories += 1;
+  }
+  for (const [collectionName, key] of [["qa_cases", "qaCases"], ["style_evidence", "evidence"]]) {
+    const params = new URLSearchParams({ limit: "-1", fields: "id,source,embedding" });
+    params.set("filter[target_locale][_eq]", locale);
+    const items = await request(`/items/${collectionName}?${params}`);
+    for (const item of items) {
+      if (item.embedding?.vector?.length && item.embedding?.model === model) continue;
+      const embedding = await embedSource(item.source);
+      if (!embedding) {
+        const error = new Error("embedding 服务不可用，重建中断");
+        error.statusCode = 503;
+        throw error;
+      }
+      await request(`/items/${collectionName}/${encodeURIComponent(item.id)}`, { method: "PATCH", body: { embedding } });
+      stats[key] += 1;
+    }
+  }
+  return stats;
+}
+
+export async function demoteDirectusMemories(locale, source, exceptId) {
+  const collection = memoryCollectionFor(locale);
+  const params = new URLSearchParams({ limit: "-1", fields: "id,quality_status" });
+  params.set("filter[source][_eq]", source);
+  const items = await request(`/items/${collection}?${params}`);
+  const updates = items
+    .filter((item) => item.id !== exceptId && item.quality_status !== "rejected")
+    .map((item) => ({ id: item.id, quality_status: item.quality_status === "human_approved" ? "machine_verified" : "rejected" }));
+  if (updates.length) await request(`/items/${collection}`, { method: "PATCH", body: updates });
+  return updates.length;
+}
+
+export async function approveDirectusQaCase(id) {
+  const saved = await request(`/items/qa_cases/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: "human_approved" } });
+  return Boolean(saved?.id);
+}
+
+function batchMetrics(segments = []) {
+  const selected = segments.filter((segment) => segment.selected !== false);
+  const completedSegments = selected.filter((segment) => segment.status === "done" && segment.translation).length;
+  const failedSegments = selected.filter((segment) => segment.status === "error").length;
+  const qaPending = selected.filter((segment) => {
+    const result = segment.result || {};
+    return Boolean(result.aiQa?.fallbackReason) || (Number.isFinite(result.qaScore) && result.qaScore < 90) || (result.issues || []).length > 0;
+  }).length;
+  return {
+    totalSegments: selected.length, completedSegments, failedSegments, qaPending,
+    status: failedSegments ? "needs_attention" : completedSegments < selected.length ? "in_progress" : qaPending ? "review" : "completed"
+  };
+}
+
+export async function saveDirectusBatchRun(input) {
+  const id = String(input.batchId || randomUUID());
+  const metrics = batchMetrics(input.segments || []);
+  const body = {
+    filename: String(input.filename || ""),
+    target_locale: assertLocale(input.locale),
+    content_type: String(input.contentType || "general"),
+    domain: String(input.domain || "general"),
+    format: String(input.format || ""),
+    segmentation_mode: String(input.segmentationMode || "sentence"),
+    structure: input.structure ?? null,
+    segments: input.segments || [],
+    task_status: metrics.status,
+    total_segments: metrics.totalSegments,
+    completed_segments: metrics.completedSegments,
+    failed_segments: metrics.failedSegments,
+    qa_pending: metrics.qaPending
+  };
+  const params = new URLSearchParams({ limit: "1", fields: "id" });
+  params.set("filter[id][_eq]", id);
+  const existing = await request(`/items/batch_runs?${params}`);
+  if (existing[0]?.id) await request(`/items/batch_runs/${encodeURIComponent(id)}`, { method: "PATCH", body });
+  else await request("/items/batch_runs", { method: "POST", body: { ...body, id } });
+  return { batchId: id };
+}
+
+export async function getDirectusBatchRun(batchId) {
+  try {
+    const item = await request(`/items/batch_runs/${encodeURIComponent(String(batchId))}?fields=id,filename,target_locale,content_type,domain,format,segmentation_mode,structure,segments,date_updated`);
+    return {
+      batchId: item.id,
+      filename: item.filename || "",
+      locale: item.target_locale || "",
+      contentType: item.content_type || "general",
+      domain: item.domain || "general",
+      format: item.format || "",
+      segmentationMode: item.segmentation_mode || "sentence",
+      structure: item.structure ?? null,
+      segments: arrayValue(item.segments),
+      updatedAt: item.date_updated || null
+    };
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+function summarizeBatchRun(item) {
+  const fallbackMetrics = item.segments ? batchMetrics(arrayValue(item.segments)) : null;
+  const totalSegments = item.total_segments == null ? fallbackMetrics?.totalSegments || 0 : Number(item.total_segments);
+  const completedSegments = item.completed_segments == null ? fallbackMetrics?.completedSegments || 0 : Number(item.completed_segments);
+  const failedSegments = item.failed_segments == null ? fallbackMetrics?.failedSegments || 0 : Number(item.failed_segments);
+  const qaPending = item.qa_pending == null ? fallbackMetrics?.qaPending || 0 : Number(item.qa_pending);
+  const status = item.task_status || fallbackMetrics?.status || "in_progress";
+  return {
+    batchId: item.id, filename: item.filename || "未命名任务", locale: item.target_locale || "",
+    contentType: item.content_type || "general", domain: item.domain || "general", format: item.format || "",
+    segmentationMode: item.segmentation_mode || "sentence", status,
+    totalSegments, completedSegments, failedSegments, qaPending,
+    createdAt: item.date_created || null, updatedAt: item.date_updated || item.date_created || null
+  };
+}
+
+export async function listDirectusBatchRuns({ locale = "", status = "", search = "", limit = 200 } = {}) {
+  const params = new URLSearchParams({ limit: String(Math.min(500, Math.max(1, Number(limit) || 200))), sort: "-date_updated,-date_created", fields: "id,filename,target_locale,content_type,domain,format,segmentation_mode,task_status,total_segments,completed_segments,failed_segments,qa_pending,date_created,date_updated" });
+  if (locale) params.set("filter[target_locale][_eq]", assertLocale(locale));
+  if (search) params.set("filter[filename][_icontains]", String(search).slice(0, 120));
+  const items = await request(`/items/batch_runs?${params}`);
+  for (const item of items.filter((entry) => entry.total_segments == null)) {
+    const legacy = await request(`/items/batch_runs/${encodeURIComponent(item.id)}?fields=segments`);
+    const metrics = batchMetrics(arrayValue(legacy.segments));
+    Object.assign(item, { task_status: metrics.status, total_segments: metrics.totalSegments, completed_segments: metrics.completedSegments, failed_segments: metrics.failedSegments, qa_pending: metrics.qaPending });
+    await request(`/items/batch_runs/${encodeURIComponent(item.id)}`, { method: "PATCH", body: { task_status: metrics.status, total_segments: metrics.totalSegments, completed_segments: metrics.completedSegments, failed_segments: metrics.failedSegments, qa_pending: metrics.qaPending } });
+  }
+  const summaries = items.map(summarizeBatchRun);
+  return status ? summaries.filter((item) => item.status === status) : summaries;
+}
+
+export async function listDirectusStyleProfiles(locale, status) {
+  assertLocale(locale);
+  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,status,date_updated" });
+  styleParams.set("filter[target_locale][_eq]", locale);
+  if (status) styleParams.set("filter[status][_eq]", status);
+  const styleProfiles = await request(`/items/style_profiles?${styleParams}`);
+  const profileParams = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,instructions,examples,version,parent_id,evidence_count,status,date_updated" });
+  profileParams.set("filter[target_locale][_eq]", locale);
+  if (status) profileParams.set("filter[status][_eq]", status);
+  const userProfiles = await request(`/items/user_profiles?${profileParams}`);
+  return {
+    styleProfiles: styleProfiles.map((item) => ({
+      id: item.id, name: item.name, locale: item.target_locale, contentType: item.content_type, domain: item.domain || "general",
+      instruction: item.instructions, examples: arrayValue(item.examples), version: Number(item.version) || 1,
+      parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0,
+      sourceBatchId: item.source_batch_id || "", learningRunId: item.learning_run_id || "",
+      status: item.status, updatedAt: item.date_updated
+    })),
+    userProfiles: userProfiles.map((item) => ({
+      id: item.id, name: item.name, locale: item.target_locale, instruction: item.instructions, examples: arrayValue(item.examples),
+      version: Number(item.version) || 1, parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0, status: item.status, updatedAt: item.date_updated
+    }))
+  };
+}
+
+export async function activateDirectusStyleProfile(id) {
+  let target;
+  try {
+    target = await request(`/items/style_profiles/${encodeURIComponent(id)}?fields=id,target_locale,content_type,domain,status`);
+  } catch (error) {
+    if (error.statusCode === 404) {
+      target = await request(`/items/user_profiles/${encodeURIComponent(id)}?fields=id,target_locale,status`);
+      const deactivate = await request(`/items/user_profiles?limit=-1&fields=id,status&filter[target_locale][_eq]=${target.target_locale}&filter[status][_eq]=active`);
+      if (deactivate.length) await request("/items/user_profiles", { method: "PATCH", body: deactivate.map((item) => ({ id: item.id, status: "inactive" })) });
+      const saved = await request(`/items/user_profiles/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: "active" } });
+      return { id: saved.id, kind: "user_profile", status: "active" };
+    }
+    throw error;
+  }
+  const params = new URLSearchParams({ limit: "-1", fields: "id,status" });
+  params.set("filter[target_locale][_eq]", target.target_locale);
+  params.set("filter[content_type][_eq]", target.content_type);
+  params.set("filter[status][_eq]", "active");
+  const activeOthers = await request(`/items/style_profiles?${params}`);
+  const updates = activeOthers.filter((item) => item.domain === target.domain && item.id !== id).map((item) => ({ id: item.id, status: "inactive" }));
+  if (updates.length) await request("/items/style_profiles", { method: "PATCH", body: updates });
+  const saved = await request(`/items/style_profiles/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: "active" } });
+  return { id: saved.id, kind: "style_profile", status: "active" };
+}
+
+export async function rejectDirectusStyleProfile(id) {
+  for (const collection of ["style_profiles", "user_profiles"]) {
+    try {
+      const saved = await request(`/items/${collection}/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: "inactive" } });
+      return { id: saved.id, kind: collection, status: "inactive" };
+    } catch (error) {
+      if (error.statusCode !== 404) throw error;
+    }
+  }
+  const error = new Error("未找到该风格规范");
+  error.statusCode = 404;
+  throw error;
+}
+
+export async function listDirectusPendingQaCases(locale) {
+  assertLocale(locale);
+  const params = new URLSearchParams({ limit: "20", sort: "-date_created", fields: "id,target_locale,content_type,domain,source,rejected_translation,corrected_translation,issues,score_before,score_after,status,date_created" });
+  params.set("filter[target_locale][_eq]", locale);
+  params.set("filter[status][_eq]", "review");
+  const items = await request(`/items/qa_cases?${params}`);
+  return items.map((item) => ({
+    id: item.id, locale: item.target_locale, contentType: item.content_type, domain: item.domain || "general", source: item.source,
+    rejectedTranslation: item.rejected_translation, correctedTranslation: item.corrected_translation, issues: arrayValue(item.issues),
+    scoreBefore: Number(item.score_before) || 0, scoreAfter: Number(item.score_after) || 0, status: item.status, createdAt: item.date_created
+  }));
+}
+
+export async function disposeDirectusQaCase(id) {
+  await request(`/items/qa_cases/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return true;
+}
+
+const LEARNING_TRAJECTORY_STATUSES = new Set(["running", "completed", "review", "failed"]);
+const TRANSLATION_SKILL_STATUSES = new Set(["champion", "challenger", "draft", "inactive", "rejected"]);
+const SKILL_EVALUATION_DECISIONS = new Set(["pending", "promote", "reject", "needs_review"]);
+
+function assertLearningChoice(value, allowed, label) {
+  if (!allowed.has(value)) {
+    const error = new Error(`Unsupported ${label}: ${value}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return value;
+}
+
+function directusJson(value, fallback = {}) {
+  if (value && typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {}
+  }
+  return structuredClone(fallback);
+}
+
+function directusLearningScope(input, fallback = {}) {
+  return {
+    locale: assertLocale(input.locale ?? fallback.locale),
+    contentType: String(input.contentType ?? fallback.contentType ?? "general").trim() || "general",
+    domain: String(input.domain ?? fallback.domain ?? "general").trim() || "general",
+    project: String(input.project ?? fallback.project ?? "default").trim() || "default"
+  };
+}
+
+function sameDirectusLearningScope(left, right) {
+  return left.locale === right.locale
+    && left.contentType === right.contentType
+    && left.domain === right.domain
+    && left.project === right.project;
+}
+
+function translationSkillScopeKey(scope) {
+  const normalized = directusLearningScope(scope);
+  return createHash("sha256")
+    .update([normalized.locale, normalized.contentType, normalized.domain, normalized.project].join("\u0000"))
+    .digest("hex");
+}
+
+function translationSkillVersionKey(scope, version) {
+  return createHash("sha256")
+    .update(`${translationSkillScopeKey(scope)}\u0000${Math.max(1, Number(version) || 1)}`)
+    .digest("hex");
+}
+
+function directusConflict(message) {
+  const error = new Error(message);
+  error.statusCode = 409;
+  return error;
+}
+
+function assertDirectusImmutable(existing, patch, fields) {
+  for (const field of fields) {
+    if (Object.hasOwn(patch, field) && patch[field] != null && String(patch[field]) !== String(existing[field] ?? "")) {
+      throw directusConflict(`${field} is immutable after creation`);
+    }
+  }
+}
+
+function addLearningScopeFilters(params, filters = {}) {
+  if (filters.locale) params.set("filter[target_locale][_eq]", assertLocale(filters.locale));
+  if (filters.contentType) params.set("filter[content_type][_eq]", filters.contentType);
+  if (filters.domain) params.set("filter[domain][_eq]", filters.domain);
+  if (filters.project) params.set("filter[project][_eq]", filters.project);
+  return params;
+}
+
+function directusListLimit(value, fallback = 100) {
+  return String(Math.min(1_000, Math.max(1, Number(value) || fallback)));
+}
+
+function mapLearningTrajectory(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    project: item.project || "default",
+    batchId: item.batch_id || "",
+    segmentId: item.segment_id || "",
+    source: item.source || "",
+    initialTranslation: item.initial_translation || "",
+    finalTranslation: item.final_translation || "",
+    contextPack: directusJson(item.context_pack),
+    assetRefs: directusJson(item.asset_refs, []),
+    termDecisions: directusJson(item.term_decisions, []),
+    qaBefore: directusJson(item.qa_before),
+    qaAfter: directusJson(item.qa_after),
+    humanDecision: directusJson(item.human_decision),
+    events: directusJson(item.events, []),
+    model: item.model || "",
+    promptVersion: item.prompt_version || "",
+    status: item.status || "running",
+    error: item.error || "",
+    createdAt: item.date_created || null,
+    updatedAt: item.date_updated || item.date_created || null
+  };
+}
+
+function learningTrajectoryBody(input, fallback = {}) {
+  const scope = directusLearningScope(input, fallback);
+  const status = assertLearningChoice(input.status ?? fallback.status ?? "running", LEARNING_TRAJECTORY_STATUSES, "learning trajectory status");
+  const source = String(input.source ?? fallback.source ?? "");
+  if (!source) {
+    const error = new Error("Learning trajectory source cannot be empty");
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    target_locale: scope.locale,
+    content_type: scope.contentType,
+    domain: scope.domain,
+    project: scope.project,
+    batch_id: String(input.batchId ?? fallback.batchId ?? ""),
+    segment_id: String(input.segmentId ?? fallback.segmentId ?? ""),
+    source,
+    initial_translation: String(input.initialTranslation ?? fallback.initialTranslation ?? ""),
+    final_translation: String(input.finalTranslation ?? fallback.finalTranslation ?? ""),
+    context_pack: directusJson(input.contextPack ?? fallback.contextPack),
+    asset_refs: directusJson(input.assetRefs ?? fallback.assetRefs, []),
+    term_decisions: directusJson(input.termDecisions ?? fallback.termDecisions, []),
+    qa_before: directusJson(input.qaBefore ?? fallback.qaBefore),
+    qa_after: directusJson(input.qaAfter ?? fallback.qaAfter),
+    human_decision: directusJson(input.humanDecision ?? fallback.humanDecision),
+    events: directusJson(input.events ?? fallback.events, []),
+    model: String(input.model ?? fallback.model ?? ""),
+    prompt_version: String(input.promptVersion ?? fallback.promptVersion ?? ""),
+    status,
+    error: String(input.error ?? fallback.error ?? "")
+  };
+}
+
+function learningTrajectoryPatch(patch) {
+  const body = {};
+  const assign = (key, field, normalize = (value) => value) => {
+    if (Object.hasOwn(patch, key)) body[field] = normalize(patch[key]);
+  };
+  assign("initialTranslation", "initial_translation", (value) => String(value ?? ""));
+  assign("finalTranslation", "final_translation", (value) => String(value ?? ""));
+  assign("contextPack", "context_pack", (value) => directusJson(value));
+  assign("assetRefs", "asset_refs", (value) => directusJson(value, []));
+  assign("termDecisions", "term_decisions", (value) => directusJson(value, []));
+  assign("qaBefore", "qa_before", (value) => directusJson(value));
+  assign("qaAfter", "qa_after", (value) => directusJson(value));
+  assign("humanDecision", "human_decision", (value) => directusJson(value));
+  assign("events", "events", (value) => directusJson(value, []));
+  assign("model", "model", (value) => String(value ?? ""));
+  assign("promptVersion", "prompt_version", (value) => String(value ?? ""));
+  assign("status", "status", (value) => assertLearningChoice(value, LEARNING_TRAJECTORY_STATUSES, "learning trajectory status"));
+  assign("error", "error", (value) => String(value ?? ""));
+  return body;
+}
+
+export async function saveDirectusLearningTrajectory(input) {
+  if (input.id) {
+    const existing = await getDirectusLearningTrajectory(input.id);
+    if (existing) return updateDirectusLearningTrajectory(input.id, input);
+  }
+  const body = learningTrajectoryBody(input);
+  const saved = await request("/items/learning_trajectories", { method: "POST", body: { ...(input.id ? { id: input.id } : {}), ...body } });
+  return mapLearningTrajectory(saved);
+}
+
+export async function listDirectusLearningTrajectories(filters = {}) {
+  const params = addLearningScopeFilters(new URLSearchParams({ limit: directusListLimit(filters.limit), sort: "-date_updated,-date_created", fields: "*" }), filters);
+  if (filters.batchId) params.set("filter[batch_id][_eq]", filters.batchId);
+  if (filters.status) params.set("filter[status][_eq]", filters.status);
+  return (await request(`/items/learning_trajectories?${params}`)).map(mapLearningTrajectory);
+}
+
+export async function getDirectusLearningTrajectory(id) {
+  try {
+    return mapLearningTrajectory(await request(`/items/learning_trajectories/${encodeURIComponent(String(id))}?fields=*`));
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function updateDirectusLearningTrajectory(id, patch) {
+  const existing = await getDirectusLearningTrajectory(id);
+  if (!existing) return null;
+  assertDirectusImmutable(existing, patch, ["locale", "contentType", "domain", "project", "batchId", "segmentId", "source"]);
+  const body = learningTrajectoryPatch(patch);
+  if (!Object.keys(body).length) return existing;
+  const saved = await request(`/items/learning_trajectories/${encodeURIComponent(String(id))}`, { method: "PATCH", body });
+  return mapLearningTrajectory(saved);
+}
+
+function mapTranslationSkill(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    project: item.project || "default",
+    name: item.name || "",
+    description: item.description || "",
+    changeReason: item.change_reason || "",
+    version: Number(item.version) || 1,
+    parentId: item.parent_id || null,
+    status: item.status || "draft",
+    strategy: directusJson(item.strategy),
+    evidenceIds: directusJson(item.evidence_ids, []),
+    promptVersion: item.prompt_version || "",
+    metrics: directusJson(item.metrics),
+    createdAt: item.date_created || null,
+    updatedAt: item.date_updated || item.date_created || null
+  };
+}
+
+function translationSkillBody(input, fallback = {}) {
+  const scope = directusLearningScope(input, fallback);
+  return {
+    target_locale: scope.locale,
+    content_type: scope.contentType,
+    domain: scope.domain,
+    project: scope.project,
+    name: String(input.name ?? fallback.name ?? `${scope.locale} ${scope.contentType} translation skill`).trim(),
+    description: String(input.description ?? fallback.description ?? ""),
+    change_reason: String(input.changeReason ?? fallback.changeReason ?? ""),
+    version: Math.max(1, Number(input.version ?? fallback.version) || 1),
+    parent_id: input.parentId === null ? null : String(input.parentId ?? fallback.parentId ?? "") || null,
+    status: assertLearningChoice(input.status ?? fallback.status ?? "draft", TRANSLATION_SKILL_STATUSES, "translation skill status"),
+    strategy: directusJson(input.strategy ?? fallback.strategy),
+    evidence_ids: directusJson(input.evidenceIds ?? fallback.evidenceIds, []),
+    prompt_version: String(input.promptVersion ?? fallback.promptVersion ?? ""),
+    metrics: directusJson(input.metrics ?? fallback.metrics),
+    version_scope_key: translationSkillVersionKey(scope, input.version ?? fallback.version),
+    champion_scope_key: input.status === "champion" ? translationSkillScopeKey(scope) : null
+  };
+}
+
+function translationSkillPatch(patch) {
+  const body = {};
+  const assign = (key, field, normalize = (value) => value) => {
+    if (Object.hasOwn(patch, key)) body[field] = normalize(patch[key]);
+  };
+  assign("name", "name", (value) => String(value ?? "").trim());
+  assign("description", "description", (value) => String(value ?? ""));
+  assign("changeReason", "change_reason", (value) => String(value ?? ""));
+  assign("strategy", "strategy", (value) => directusJson(value));
+  assign("evidenceIds", "evidence_ids", (value) => directusJson(value, []));
+  assign("promptVersion", "prompt_version", (value) => String(value ?? ""));
+  assign("metrics", "metrics", (value) => directusJson(value));
+  assign("status", "status", (value) => assertLearningChoice(value, TRANSLATION_SKILL_STATUSES, "translation skill status"));
+  return body;
+}
+
+async function latestDirectusTranslationSkill(scope) {
+  const params = addLearningScopeFilters(new URLSearchParams({ limit: "1", sort: "-version,-date_updated", fields: "*" }), scope);
+  return mapTranslationSkill((await request(`/items/translation_skills?${params}`))[0]);
+}
+
+export async function saveDirectusTranslationSkill(input) {
+  if (input.id) {
+    const existing = await getDirectusTranslationSkill(input.id);
+    if (existing) return updateDirectusTranslationSkill(input.id, input);
+  }
+  const scope = directusLearningScope(input);
+  const previous = await latestDirectusTranslationSkill(scope);
+  const version = Math.max(1, Number(input.version) || (Number(previous?.version) || 0) + 1);
+  const versionParams = addLearningScopeFilters(new URLSearchParams({ limit: "1", fields: "id" }), scope);
+  versionParams.set("filter[version][_eq]", String(version));
+  if ((await request(`/items/translation_skills?${versionParams}`))[0]) throw directusConflict(`Translation skill version ${version} already exists in this scope`);
+  const parentId = input.parentId === null ? null : input.parentId || previous?.id || null;
+  if (parentId) {
+    const parent = await getDirectusTranslationSkill(parentId);
+    if (!parent || !sameDirectusLearningScope(parent, scope)) throw directusConflict("Translation skill parent must exist in the same scope");
+  }
+  const requestedStatus = assertLearningChoice(input.status || "draft", TRANSLATION_SKILL_STATUSES, "translation skill status");
+  const body = translationSkillBody({
+    ...input,
+    ...scope,
+    version,
+    parentId,
+    status: requestedStatus === "champion" ? "draft" : requestedStatus
+  });
+  const saved = mapTranslationSkill(await request("/items/translation_skills", { method: "POST", body: { ...(input.id ? { id: input.id } : {}), ...body } }));
+  return requestedStatus === "champion" ? activateDirectusTranslationSkill(saved.id) : saved;
+}
+
+export async function listDirectusTranslationSkills(filters = {}) {
+  const params = addLearningScopeFilters(new URLSearchParams({ limit: directusListLimit(filters.limit), sort: "-version,-date_updated", fields: "*" }), filters);
+  if (filters.status) params.set("filter[status][_eq]", filters.status);
+  return (await request(`/items/translation_skills?${params}`)).map(mapTranslationSkill);
+}
+
+export async function getDirectusTranslationSkill(id) {
+  try {
+    return mapTranslationSkill(await request(`/items/translation_skills/${encodeURIComponent(String(id))}?fields=*`));
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function updateDirectusTranslationSkill(id, patch) {
+  const existing = await getDirectusTranslationSkill(id);
+  if (!existing) return null;
+  assertDirectusImmutable(existing, patch, ["locale", "contentType", "domain", "project", "version", "parentId"]);
+  const requestedStatus = Object.hasOwn(patch, "status") ? assertLearningChoice(patch.status, TRANSLATION_SKILL_STATUSES, "translation skill status") : null;
+  if (existing.status === "champion" && requestedStatus && requestedStatus !== "champion") {
+    throw directusConflict("The current champion must be replaced or rolled back, not directly deactivated");
+  }
+  if (existing.status === "rejected" && requestedStatus && requestedStatus !== "rejected") {
+    throw directusConflict("Rejected translation skill cannot be reactivated through update");
+  }
+  const body = translationSkillPatch(patch);
+  if (requestedStatus === "champion") delete body.status;
+  else if (requestedStatus) body.champion_scope_key = null;
+  let saved = existing;
+  if (Object.keys(body).length) saved = mapTranslationSkill(await request(`/items/translation_skills/${encodeURIComponent(String(id))}`, { method: "PATCH", body }));
+  return requestedStatus === "champion" ? activateDirectusTranslationSkill(saved.id) : saved;
+}
+
+export async function activateDirectusTranslationSkill(id, { rollback = false } = {}) {
+  const target = await getDirectusTranslationSkill(id);
+  if (!target) return null;
+  if (target.status === "rejected") throw directusConflict("Rejected translation skill cannot be activated");
+  const params = addLearningScopeFilters(new URLSearchParams({ limit: "-1", sort: "-version,-date_updated", fields: "id,target_locale,content_type,domain,project,parent_id,version,status" }), target);
+  params.set("filter[status][_eq]", "champion");
+  const current = (await request(`/items/translation_skills?${params}`)).map(mapTranslationSkill);
+  const otherChampions = current.filter((item) => item.id !== target.id);
+  if (otherChampions.length && target.status !== "champion") {
+    const isChildOfCurrent = otherChampions.some((item) => target.parentId === item.id);
+    const isRollbackTarget = rollback && otherChampions.some((item) => item.parentId === target.id);
+    if (!isChildOfCurrent && !isRollbackTarget) throw directusConflict("Translation skill was not evaluated against the current champion");
+  }
+  const updates = [
+    ...otherChampions.map((item) => ({ id: item.id, status: "inactive", champion_scope_key: null })),
+    { id: target.id, status: "champion", champion_scope_key: translationSkillScopeKey(target) }
+  ];
+  try {
+    await request("/items/translation_skills", { method: "PATCH", body: updates, timeoutMs: DIRECTUS_BULK_WRITE_TIMEOUT_MS });
+  } catch (error) {
+    if (/champion_scope_key|unique|duplicate/i.test(error.message)) error.statusCode = 409;
+    throw error;
+  }
+  return getDirectusTranslationSkill(target.id);
+}
+
+export async function rollbackDirectusTranslationSkill(id) {
+  const current = await getDirectusTranslationSkill(id);
+  if (!current) return null;
+  if (current.status !== "champion") {
+    const error = new Error("Only the current champion translation skill can be rolled back");
+    error.statusCode = 409;
+    throw error;
+  }
+  let parent = current.parentId ? await getDirectusTranslationSkill(current.parentId) : null;
+  if (parent && (parent.status === "rejected" || parent.locale !== current.locale || parent.contentType !== current.contentType || parent.domain !== current.domain || parent.project !== current.project)) parent = null;
+  if (!parent) {
+    const candidates = await listDirectusTranslationSkills({ locale: current.locale, contentType: current.contentType, domain: current.domain, project: current.project, limit: 1_000 });
+    parent = candidates.filter((item) => item.id !== current.id && item.status !== "rejected" && item.version < current.version).sort((a, b) => b.version - a.version)[0] || null;
+  }
+  if (!parent) {
+    const error = new Error("No previous translation skill version is available for rollback");
+    error.statusCode = 409;
+    throw error;
+  }
+  const champion = await activateDirectusTranslationSkill(parent.id, { rollback: true });
+  return { rolledBack: await getDirectusTranslationSkill(current.id), champion };
+}
+
+function mapSkillEvaluation(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    project: item.project || "default",
+    championSkillId: item.champion_skill_id || "",
+    challengerSkillId: item.challenger_skill_id || "",
+    sampleCount: Number(item.sample_count) || 0,
+    championMetrics: directusJson(item.champion_metrics),
+    challengerMetrics: directusJson(item.challenger_metrics),
+    metricDeltas: directusJson(item.metric_deltas),
+    decision: item.decision || "pending",
+    report: directusJson(item.report),
+    evaluator: item.evaluator || "",
+    createdAt: item.date_created || null,
+    updatedAt: item.date_updated || item.date_created || null
+  };
+}
+
+function skillEvaluationBody(input, fallback = {}) {
+  const scope = directusLearningScope(input, fallback);
+  const championSkillId = String(input.championSkillId ?? fallback.championSkillId ?? "");
+  const challengerSkillId = String(input.challengerSkillId ?? fallback.challengerSkillId ?? "");
+  if (!championSkillId || !challengerSkillId || championSkillId === challengerSkillId) {
+    const error = new Error("Skill evaluation requires distinct championSkillId and challengerSkillId");
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    target_locale: scope.locale,
+    content_type: scope.contentType,
+    domain: scope.domain,
+    project: scope.project,
+    champion_skill_id: championSkillId,
+    challenger_skill_id: challengerSkillId,
+    sample_count: Math.max(0, Number(input.sampleCount ?? fallback.sampleCount) || 0),
+    champion_metrics: directusJson(input.championMetrics ?? fallback.championMetrics),
+    challenger_metrics: directusJson(input.challengerMetrics ?? fallback.challengerMetrics),
+    metric_deltas: directusJson(input.metricDeltas ?? fallback.metricDeltas),
+    decision: assertLearningChoice(input.decision ?? fallback.decision ?? "pending", SKILL_EVALUATION_DECISIONS, "skill evaluation decision"),
+    report: directusJson(input.report ?? fallback.report),
+    evaluator: String(input.evaluator ?? fallback.evaluator ?? "")
+  };
+}
+
+function mapSkillEvaluationBody(body) {
+  return {
+    locale: body.target_locale,
+    contentType: body.content_type,
+    domain: body.domain,
+    project: body.project,
+    championSkillId: body.champion_skill_id,
+    challengerSkillId: body.challenger_skill_id,
+    decision: body.decision
+  };
+}
+
+async function validateDirectusSkillEvaluation(input) {
+  const [champion, challenger] = await Promise.all([
+    getDirectusTranslationSkill(input.championSkillId),
+    getDirectusTranslationSkill(input.challengerSkillId)
+  ]);
+  if (!champion || champion.status !== "champion" || !sameDirectusLearningScope(champion, input)) {
+    throw directusConflict("Skill evaluation champion is not the current champion in this scope");
+  }
+  if (!challenger || !["challenger", "draft"].includes(challenger.status) || !sameDirectusLearningScope(challenger, input)) {
+    throw directusConflict("Skill evaluation challenger is not an active candidate in this scope");
+  }
+}
+
+function skillEvaluationPatch(patch) {
+  const body = {};
+  const assign = (key, field, normalize = (value) => value) => {
+    if (Object.hasOwn(patch, key)) body[field] = normalize(patch[key]);
+  };
+  assign("sampleCount", "sample_count", (value) => Math.max(0, Number(value) || 0));
+  assign("championMetrics", "champion_metrics", (value) => directusJson(value));
+  assign("challengerMetrics", "challenger_metrics", (value) => directusJson(value));
+  assign("metricDeltas", "metric_deltas", (value) => directusJson(value));
+  assign("decision", "decision", (value) => assertLearningChoice(value, SKILL_EVALUATION_DECISIONS, "skill evaluation decision"));
+  assign("report", "report", (value) => directusJson(value));
+  assign("evaluator", "evaluator", (value) => String(value ?? ""));
+  return body;
+}
+
+export async function saveDirectusSkillEvaluation(input) {
+  if (input.id) {
+    const existing = await getDirectusSkillEvaluation(input.id);
+    if (existing) return updateDirectusSkillEvaluation(input.id, input);
+  }
+  const body = skillEvaluationBody(input);
+  await validateDirectusSkillEvaluation(mapSkillEvaluationBody(body));
+  return mapSkillEvaluation(await request("/items/skill_evaluations", { method: "POST", body: { ...(input.id ? { id: input.id } : {}), ...body } }));
+}
+
+export async function listDirectusSkillEvaluations(filters = {}) {
+  const params = addLearningScopeFilters(new URLSearchParams({ limit: directusListLimit(filters.limit), sort: "-date_updated,-date_created", fields: "*" }), filters);
+  if (filters.decision) params.set("filter[decision][_eq]", filters.decision);
+  if (filters.championSkillId) params.set("filter[champion_skill_id][_eq]", filters.championSkillId);
+  if (filters.challengerSkillId) params.set("filter[challenger_skill_id][_eq]", filters.challengerSkillId);
+  return (await request(`/items/skill_evaluations?${params}`)).map(mapSkillEvaluation);
+}
+
+export async function getDirectusSkillEvaluation(id) {
+  try {
+    return mapSkillEvaluation(await request(`/items/skill_evaluations/${encodeURIComponent(String(id))}?fields=*`));
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function updateDirectusSkillEvaluation(id, patch) {
+  const existing = await getDirectusSkillEvaluation(id);
+  if (!existing) return null;
+  assertDirectusImmutable(existing, patch, ["locale", "contentType", "domain", "project", "championSkillId", "challengerSkillId"]);
+  const body = skillEvaluationPatch(patch);
+  if (body.decision === "promote") await validateDirectusSkillEvaluation({ ...existing, decision: body.decision });
+  if (!Object.keys(body).length) return existing;
+  return mapSkillEvaluation(await request(`/items/skill_evaluations/${encodeURIComponent(String(id))}`, { method: "PATCH", body }));
 }
 
 export function getDirectusMetadata() {

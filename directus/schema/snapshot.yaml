@@ -2,6 +2,34 @@ version: 1
 directus: 12.2.0
 vendor: postgres
 collections:
+  - collection: batch_runs
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: batch_runs
+      color: null
+      display_template: '{{filename}}'
+      group: localization_pipeline
+      hidden: false
+      icon: playlist_add_check
+      item_duplication_fields: null
+      note: 批次翻译的运行进度与人工编辑译文，用于刷新页面后恢复。
+      preview_url: null
+      singleton: false
+      sort: 3
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 翻译批次进度
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: batch_runs
   - collection: corpus_documents
     meta:
       accountability: all
@@ -30,6 +58,34 @@ collections:
       versioning: false
     schema:
       name: corpus_documents
+  - collection: learning_trajectories
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: learning_trajectories
+      color: null
+      display_template: '{{project}} · {{target_locale}} · {{batch_id}}/{{segment_id}}'
+      group: localization_learning
+      hidden: false
+      icon: route
+      item_duplication_fields: null
+      note: 记录每个翻译片段实际使用的上下文资产、初译、QA、人工决策与最终译文，作为后续学习归因依据。
+      preview_url: null
+      singleton: false
+      sort: 1
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 翻译学习轨迹
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: learning_trajectories
   - collection: localization_assets
     meta:
       accountability: all
@@ -54,6 +110,32 @@ collections:
       translations:
         - language: zh-CN
           translation: 四语术语资产
+      unarchive_value: null
+      versioning: false
+  - collection: localization_learning
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: localization_learning
+      color: null
+      display_template: null
+      group: null
+      hidden: false
+      icon: psychology
+      item_duplication_fields: null
+      note: null
+      preview_url: null
+      singleton: false
+      sort: 3
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 翻译学习与评测
       unarchive_value: null
       versioning: false
   - collection: localization_pipeline
@@ -138,6 +220,34 @@ collections:
       versioning: false
     schema:
       name: qa_runs
+  - collection: skill_evaluations
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: skill_evaluations
+      color: null
+      display_template: '{{project}} · {{champion_skill_id}} ↔ {{challenger_skill_id}}'
+      group: localization_learning
+      hidden: false
+      icon: compare_arrows
+      item_duplication_fields: null
+      note: 在同一隔离作用域内对 champion 与 challenger 做留出集对照评测，并保留晋升或拒绝依据。
+      preview_url: null
+      singleton: false
+      sort: 3
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 翻译技能评测
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: skill_evaluations
   - collection: style_evidence
     meta:
       accountability: all
@@ -166,6 +276,34 @@ collections:
       versioning: false
     schema:
       name: style_evidence
+  - collection: style_learning_runs
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: style_learning_runs
+      color: null
+      display_template: '{{filename}} · {{target_locale}} · {{content_type}}'
+      group: localization_pipeline
+      hidden: false
+      icon: auto_awesome
+      item_duplication_fields: null
+      note: 每次导入按目标语言、语体和领域生成的可审核风格学习摘要。
+      preview_url: null
+      singleton: false
+      sort: 10
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 批次风格学习
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: style_learning_runs
   - collection: style_profiles
     meta:
       accountability: all
@@ -474,7 +612,812 @@ collections:
       versioning: false
     schema:
       name: translation_memory_zh_hant_tw
+  - collection: translation_skills
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: translation_skills
+      color: null
+      display_template: '{{name}} · v{{version}} · {{status}}'
+      group: localization_learning
+      hidden: false
+      icon: psychology
+      item_duplication_fields: null
+      note: 按目标语言、语体、领域和项目隔离的可版本化翻译策略；同一作用域仅允许一个 champion。
+      preview_url: null
+      singleton: false
+      sort: 2
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 翻译技能
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: translation_skills
+  - collection: user_profiles
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: user_profiles
+      color: null
+      display_template: '{{name}}'
+      group: localization_pipeline
+      hidden: false
+      icon: person
+      item_duplication_fields: null
+      note: 从人工采纳译文中蒸馏的全局译者偏好画像，按目标语言各一份，翻译时始终注入。
+      preview_url: null
+      singleton: false
+      sort: 4
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 译者偏好画像
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: user_profiles
 fields:
+  - collection: batch_runs
+    field: id
+    type: uuid
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: batch_runs
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: filename
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: filename
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 文件名
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: filename
+      table: batch_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: target_locale
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: batch_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: content_type
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: batch_runs
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: domain
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: batch_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: format
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: format
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 文件格式
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: format
+      table: batch_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: segmentation_mode
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: segmentation_mode
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 分段模式
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: segmentation_mode
+      table: batch_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: structure
+    type: json
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: structure
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 文档结构
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: structure
+      table: batch_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: segments
+    type: json
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: segments
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 分段与译文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: segments
+      table: batch_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: date_created
+    type: timestamp
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: batch_runs
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 11
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: batch_runs
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: task_status
+    type: string
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 进行中
+            value: in_progress
+          - text: QA 待处理
+            value: review
+          - text: 存在失败
+            value: needs_attention
+          - text: 已完成
+            value: completed
+      field: task_status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 进行中
+            value: in_progress
+          - text: QA 待处理
+            value: review
+          - text: 存在失败
+            value: needs_attention
+          - text: 已完成
+            value: completed
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 任务状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: task_status
+      table: batch_runs
+      data_type: character varying
+      default_value: in_progress
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: total_segments
+    type: integer
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: total_segments
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 总分段数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: total_segments
+      table: batch_runs
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: completed_segments
+    type: integer
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: completed_segments
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 12
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 已完成分段
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: completed_segments
+      table: batch_runs
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: failed_segments
+    type: integer
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: failed_segments
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 13
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 失败分段
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: failed_segments
+      table: batch_runs
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: qa_pending
+    type: integer
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: qa_pending
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: QA 待处理数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: qa_pending
+      table: batch_runs
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: corpus_documents
     field: id
     type: uuid
@@ -841,6 +1784,1054 @@ fields:
     schema:
       name: date_created
       table: corpus_documents
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: id
+    type: uuid
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: learning_trajectories
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: target_locale
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: content_type
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: learning_trajectories
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: domain
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: project
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: project
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 项目
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: project
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: batch_id
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: batch_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 批次 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: batch_id
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: segment_id
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: segment_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 分段 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: segment_id
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: source
+    type: text
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: source
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文原文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: source
+      table: learning_trajectories
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: initial_translation
+    type: text
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: initial_translation
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 初始译文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: initial_translation
+      table: learning_trajectories
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: final_translation
+    type: text
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: final_translation
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 最终译文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: final_translation
+      table: learning_trajectories
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: context_pack
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: context_pack
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 实际注入上下文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: context_pack
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: asset_refs
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: asset_refs
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 使用资产引用
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: asset_refs
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: term_decisions
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: term_decisions
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 术语决策
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: term_decisions
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: qa_before
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: qa_before
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 修订前 QA
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: qa_before
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: qa_after
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: qa_after
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 修订后 QA
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: qa_after
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: human_decision
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: human_decision
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 人工决策
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: human_decision
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: events
+    type: json
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: events
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 17
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 运行事件
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: events
+      table: learning_trajectories
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: model
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: model
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 18
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 执行模型
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: model
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: prompt_version
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: prompt_version
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 19
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 提示词版本
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: prompt_version
+      table: learning_trajectories
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: status
+    type: string
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 运行中
+            value: running
+          - text: 已完成
+            value: completed
+          - text: 待复核
+            value: review
+          - text: 失败
+            value: failed
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 运行中
+            value: running
+          - text: 已完成
+            value: completed
+          - text: 待复核
+            value: review
+          - text: 失败
+            value: failed
+      readonly: false
+      required: false
+      searchable: true
+      sort: 20
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 轨迹状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: learning_trajectories
+      data_type: character varying
+      default_value: running
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: error
+    type: text
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: error
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 21
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 失败原因
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: error
+      table: learning_trajectories
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: date_created
+    type: timestamp
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 22
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: learning_trajectories
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: learning_trajectories
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: learning_trajectories
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 23
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: learning_trajectories
       data_type: timestamp with time zone
       default_value: null
       max_length: null
@@ -1417,6 +3408,49 @@ fields:
       name: date_created
       table: qa_cases
       data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_cases
+    field: embedding
+    type: json
+    meta:
+      collection: qa_cases
+      conditions: null
+      display: null
+      display_options: null
+      field: embedding
+      group: null
+      hidden: false
+      interface: tags
+      note: embedding 模型生成的归一化向量，用于语义相似度检索。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 语义向量
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: embedding
+      table: qa_cases
+      data_type: json
       default_value: null
       max_length: null
       numeric_precision: null
@@ -2174,6 +4208,885 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: qa_runs
+    field: fallback_reason
+    type: text
+    meta:
+      collection: qa_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: fallback_reason
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 16
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 未完成原因
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: fallback_reason
+      table: qa_runs
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_runs
+    field: term_decisions
+    type: json
+    meta:
+      collection: qa_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: term_decisions
+      group: null
+      hidden: false
+      interface: tags
+      note: 疑似术语由模型自动判断采用或不适用，并保留理由。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: AI 术语裁决
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: term_decisions
+      table: qa_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_runs
+    field: human_decisions
+    type: json
+    meta:
+      collection: qa_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: human_decisions
+      group: null
+      hidden: false
+      interface: tags
+      note: 逐条记录批准当前译文或要求 AI 修订的人工决定。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 人工 QA 决定
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: human_decisions
+      table: qa_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: id
+    type: uuid
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: skill_evaluations
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: target_locale
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: skill_evaluations
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: content_type
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: skill_evaluations
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: domain
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: skill_evaluations
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: project
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: project
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 项目
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: project
+      table: skill_evaluations
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: champion_skill_id
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: champion_skill_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: Champion 技能 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: champion_skill_id
+      table: skill_evaluations
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: challenger_skill_id
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: challenger_skill_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: Challenger 技能 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: challenger_skill_id
+      table: skill_evaluations
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: sample_count
+    type: integer
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: sample_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 评测样本数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: sample_count
+      table: skill_evaluations
+      data_type: integer
+      default_value: 0
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: champion_metrics
+    type: json
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: champion_metrics
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: Champion 指标
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: champion_metrics
+      table: skill_evaluations
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: challenger_metrics
+    type: json
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: challenger_metrics
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: Challenger 指标
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: challenger_metrics
+      table: skill_evaluations
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: metric_deltas
+    type: json
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: metric_deltas
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 指标差值
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: metric_deltas
+      table: skill_evaluations
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: decision
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 待决策
+            value: pending
+          - text: 晋升 Challenger
+            value: promote
+          - text: 拒绝 Challenger
+            value: reject
+          - text: 需要人工复核
+            value: needs_review
+      field: decision
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 待决策
+            value: pending
+          - text: 晋升 Challenger
+            value: promote
+          - text: 拒绝 Challenger
+            value: reject
+          - text: 需要人工复核
+            value: needs_review
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 评测决策
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: decision
+      table: skill_evaluations
+      data_type: character varying
+      default_value: pending
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: report
+    type: json
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: report
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 评测报告
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: report
+      table: skill_evaluations
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: evaluator
+    type: string
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: evaluator
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 评测器
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: evaluator
+      table: skill_evaluations
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: date_created
+    type: timestamp
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 15
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: skill_evaluations
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: skill_evaluations
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: skill_evaluations
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: skill_evaluations
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: style_evidence
     field: id
     type: uuid
@@ -2650,6 +5563,885 @@ fields:
     schema:
       name: date_created
       table: style_evidence
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_evidence
+    field: embedding
+    type: json
+    meta:
+      collection: style_evidence
+      conditions: null
+      display: null
+      display_options: null
+      field: embedding
+      group: null
+      hidden: false
+      interface: tags
+      note: embedding 模型生成的归一化向量，用于语义相似度检索。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 语义向量
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: embedding
+      table: style_evidence
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_evidence
+    field: provenance
+    type: string
+    meta:
+      collection: style_evidence
+      conditions: null
+      display: null
+      display_options: null
+      field: provenance
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: provenance
+      table: style_evidence
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_evidence
+    field: batch_id
+    type: string
+    meta:
+      collection: style_evidence
+      conditions: null
+      display: null
+      display_options: null
+      field: batch_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源导入批次 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: batch_id
+      table: style_evidence
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: id
+    type: uuid
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: style_learning_runs
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: batch_id
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: batch_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源导入批次 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: batch_id
+      table: style_learning_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: filename
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: filename
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源文件
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: filename
+      table: style_learning_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: target_locale
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: style_learning_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: content_type
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: style_learning_runs
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: domain
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: style_learning_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: evidence_count
+    type: integer
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: evidence_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 证据数量
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: evidence_count
+      table: style_learning_runs
+      data_type: integer
+      default_value: 0
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: summary
+    type: text
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: summary
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 本批风格摘要
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: summary
+      table: style_learning_runs
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: rules
+    type: json
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: rules
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 提炼规则
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: rules
+      table: style_learning_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: examples
+    type: json
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: examples
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 代表性正反例
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: examples
+      table: style_learning_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: caveat
+    type: text
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: caveat
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 适用边界与注意事项
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: caveat
+      table: style_learning_runs
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: confidence
+    type: float
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: confidence
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 12
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 学习置信度
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: confidence
+      table: style_learning_runs
+      data_type: real
+      default_value: null
+      max_length: null
+      numeric_precision: 24
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: status
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 待审核
+            value: draft
+          - text: 已批准
+            value: approved
+          - text: 已提升为风格指导
+            value: promoted
+          - text: 已拒绝
+            value: rejected
+          - text: 生成失败
+            value: failed
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 待审核
+            value: draft
+          - text: 已批准
+            value: approved
+          - text: 已提升为风格指导
+            value: promoted
+          - text: 已拒绝
+            value: rejected
+          - text: 生成失败
+            value: failed
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 审核状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: style_learning_runs
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: promoted_profile_id
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: promoted_profile_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 已生成风格规范 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: promoted_profile_id
+      table: style_learning_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: generated_by
+    type: string
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: generated_by
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 生成模型
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: generated_by
+      table: style_learning_runs
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: date_created
+    type: timestamp
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: style_learning_runs
       data_type: timestamp with time zone
       default_value: null
       max_length: null
@@ -3324,6 +7116,90 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: style_profiles
+    field: source_batch_id
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: source_batch_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源导入批次 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source_batch_id
+      table: style_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: learning_run_id
+    type: string
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: learning_run_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 风格学习记录 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: learning_run_id
+      table: style_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: term_candidates
     field: id
     type: uuid
@@ -3367,7 +7243,7 @@ fields:
       foreign_key_column: null
   - collection: term_candidates
     field: source
-    type: string
+    type: text
     meta:
       collection: term_candidates
       conditions: null
@@ -3393,9 +7269,9 @@ fields:
     schema:
       name: source
       table: term_candidates
-      data_type: character varying
+      data_type: text
       default_value: null
-      max_length: 255
+      max_length: null
       numeric_precision: null
       numeric_scale: null
       is_nullable: false
@@ -3634,7 +7510,7 @@ fields:
       foreign_key_column: null
   - collection: term_candidates
     field: target
-    type: string
+    type: text
     meta:
       collection: term_candidates
       conditions: null
@@ -3660,9 +7536,9 @@ fields:
     schema:
       name: target
       table: term_candidates
-      data_type: character varying
+      data_type: text
       default_value: null
-      max_length: 255
+      max_length: null
       numeric_precision: null
       numeric_scale: null
       is_nullable: true
@@ -4002,6 +7878,758 @@ fields:
       numeric_precision: null
       numeric_scale: null
       is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: content_type
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 自动识别语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: term_candidates
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: domain
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 游戏
+            value: game
+          - text: 市场营销
+            value: marketing
+          - text: 社区运营
+            value: community
+          - text: 通用
+            value: general
+      field: domain
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 游戏
+            value: game
+          - text: 市场营销
+            value: marketing
+          - text: 社区运营
+            value: community
+          - text: 通用
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 自动识别领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: term_candidates
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: enforcement
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      field: enforcement
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 强制采用
+            value: required
+          - text: 优先参考
+            value: preferred
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 自动约束级别
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: enforcement
+      table: term_candidates
+      data_type: character varying
+      default_value: preferred
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: classification_confidence
+    type: float
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: classification_confidence
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 分类置信度
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: classification_confidence
+      table: term_candidates
+      data_type: real
+      default_value: null
+      max_length: null
+      numeric_precision: 24
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: classification_source
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: classification_source
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 分类来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: classification_source
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: candidate_key
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: candidate_key
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选稳定键
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: candidate_key
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: candidate_role
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 完整双语句段
+            value: full_pair
+          - text: 句内术语
+            value: embedded_term
+      field: candidate_role
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 完整双语句段
+            value: full_pair
+          - text: 句内术语
+            value: embedded_term
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选角色
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: candidate_role
+      table: term_candidates
+      data_type: character varying
+      default_value: full_pair
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: parent_candidate_key
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: parent_candidate_key
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 父级句段候选键
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: parent_candidate_key
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: candidate_origin
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: candidate_origin
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 候选提取来源
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: candidate_origin
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: term_category
+    type: string
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: term_category
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 术语类别
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: term_category
+      table: term_candidates
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: extraction_confidence
+    type: float
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: extraction_confidence
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 16
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 术语提取置信度
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: extraction_confidence
+      table: term_candidates
+      data_type: real
+      default_value: null
+      max_length: null
+      numeric_precision: 24
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: source_span
+    type: json
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: source_span
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 17
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 中文原文位置
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: source_span
+      table: term_candidates
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: target_span
+    type: json
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: target_span
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 18
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 目标译文位置
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: target_span
+      table: term_candidates
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: parent_row_number
+    type: integer
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: parent_row_number
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 父级原表行号
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: parent_row_number
+      table: term_candidates
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: parent_candidate_keys
+    type: json
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: parent_candidate_keys
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 全部父级句段键
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: parent_candidate_keys
+      table: term_candidates
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: term_candidates
+    field: parent_evidence
+    type: json
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: parent_evidence
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 句内术语来源证据
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: parent_evidence
+      table: term_candidates
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
       is_unique: false
       is_indexed: false
       is_primary_key: false
@@ -7506,6 +12134,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_memory_ja_jp
+    field: embedding
+    type: json
+    meta:
+      collection: translation_memory_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: embedding
+      group: null
+      hidden: false
+      interface: tags
+      note: embedding 模型生成的归一化向量，用于语义相似度检索。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 语义向量
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: embedding
+      table: translation_memory_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: translation_memory_ko_kr
     field: id
     type: uuid
@@ -8193,6 +12864,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_memory_ko_kr
+    field: embedding
+    type: json
+    meta:
+      collection: translation_memory_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: embedding
+      group: null
+      hidden: false
+      interface: tags
+      note: embedding 模型生成的归一化向量，用于语义相似度检索。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 语义向量
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: embedding
+      table: translation_memory_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: translation_memory_th_th
     field: id
     type: uuid
@@ -8880,6 +13594,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_memory_th_th
+    field: embedding
+    type: json
+    meta:
+      collection: translation_memory_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: embedding
+      group: null
+      hidden: false
+      interface: tags
+      note: embedding 模型生成的归一化向量，用于语义相似度检索。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 语义向量
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: embedding
+      table: translation_memory_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: translation_memory_zh_hant_tw
     field: id
     type: uuid
@@ -9553,6 +14310,1378 @@ fields:
     schema:
       name: date_updated
       table: translation_memory_zh_hant_tw
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_memory_zh_hant_tw
+    field: embedding
+    type: json
+    meta:
+      collection: translation_memory_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: embedding
+      group: null
+      hidden: false
+      interface: tags
+      note: embedding 模型生成的归一化向量，用于语义相似度检索。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 语义向量
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: embedding
+      table: translation_memory_zh_hant_tw
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: id
+    type: uuid
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: translation_skills
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: target_locale
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: content_type
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: translation_skills
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: domain
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: project
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: project
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 项目
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: project
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: name
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: name
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 技能名称
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: name
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: description
+    type: text
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: description
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 技能说明
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: description
+      table: translation_skills
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: change_reason
+    type: text
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: change_reason
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 本版变更原因
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: change_reason
+      table: translation_skills
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: version
+    type: integer
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: version
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 版本
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: version
+      table: translation_skills
+      data_type: integer
+      default_value: 1
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: parent_id
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: parent_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 父版本 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: parent_id
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: status
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 当前基准
+            value: champion
+          - text: 候选策略
+            value: challenger
+          - text: 草稿
+            value: draft
+          - text: 停用
+            value: inactive
+          - text: 拒绝
+            value: rejected
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 当前基准
+            value: champion
+          - text: 候选策略
+            value: challenger
+          - text: 草稿
+            value: draft
+          - text: 停用
+            value: inactive
+          - text: 拒绝
+            value: rejected
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 技能状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: translation_skills
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: strategy
+    type: json
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: strategy
+      group: null
+      hidden: false
+      interface: tags
+      note: 分句、上下文召回、术语约束、风格、提示词与 QA 修复方法。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 翻译策略
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: strategy
+      table: translation_skills
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: evidence_ids
+    type: json
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: evidence_ids
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 来源证据 ID
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: evidence_ids
+      table: translation_skills
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: prompt_version
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: prompt_version
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 提示词版本
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: prompt_version
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: metrics
+    type: json
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: metrics
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 当前指标
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: metrics
+      table: translation_skills
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: date_created
+    type: timestamp
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: translation_skills
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 17
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: translation_skills
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: version_scope_key
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: version_scope_key
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 16
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: version_scope_key
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: true
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_skills
+    field: champion_scope_key
+    type: string
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: champion_scope_key
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 17
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: champion_scope_key
+      table: translation_skills
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: true
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: id
+    type: uuid
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: user_profiles
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: name
+    type: string
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: name
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 画像名称
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: name
+      table: user_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: target_locale
+    type: string
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: user_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: instructions
+    type: text
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: instructions
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 偏好规则
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: instructions
+      table: user_profiles
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: examples
+    type: json
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: examples
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 正反例
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: examples
+      table: user_profiles
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: version
+    type: integer
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: version
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 版本
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: version
+      table: user_profiles
+      data_type: integer
+      default_value: 1
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: parent_id
+    type: string
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: parent_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 上一版本 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: parent_id
+      table: user_profiles
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: evidence_count
+    type: integer
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: evidence_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 证据数量
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: evidence_count
+      table: user_profiles
+      data_type: integer
+      default_value: 0
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: status
+    type: string
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 启用
+            value: active
+          - text: 草稿
+            value: draft
+          - text: 停用
+            value: inactive
+      field: status
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 启用
+            value: active
+          - text: 草稿
+            value: draft
+          - text: 停用
+            value: inactive
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 状态
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: status
+      table: user_profiles
+      data_type: character varying
+      default_value: draft
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: user_profiles
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: user_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: user_profiles
       data_type: timestamp with time zone
       default_value: null
       max_length: null

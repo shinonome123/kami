@@ -5,17 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
     <title>Kami 本地化工作台</title>
-    <link rel="icon" type="image/png" href="/assets/kami-logo-clean.png" />
+    <link rel="icon" type="image/png" href="/assets/kami-favicon-v2.png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand"><img class="brand-logo" src="/assets/kami-logo-clean.png" alt="Kami 本地化语言工作台" /></div>
+        <div class="brand"><img class="brand-logo" src="/assets/kami-sidebar-logo-v2.png" alt="Kami 本地化语言工作台" /></div>
         <nav class="nav" aria-label="主导航">
-          <button class="nav-item active" data-view="workbench"><span class="nav-icon">译</span><span>翻译</span></button>
-          <button class="nav-item" data-view="import"><span class="nav-icon">筛</span><span>术语导入</span></button>
-          <button class="nav-item" data-view="assets"><span class="nav-icon">库</span><span>术语库</span></button>
+          <button class="nav-item active" data-view="workbench"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h9M7.5 3v2c0 4-1.8 7-4.5 9M5 9c1.4 2.1 3.2 3.7 5.5 5M14 20l4-10 4 10M15.5 16h5" /></svg></span><span>翻译</span></button>
+          <button class="nav-item" data-view="tasks"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6M9 3h6v3H9zM7 5H5.5A1.5 1.5 0 0 0 4 6.5v13A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 18.5 5H17M8 11l1.5 1.5L12 10M14 12h3M8 16l1.5 1.5L12 15M14 17h3" /></svg></span><span>任务中心</span></button>
+          <button class="nav-item" data-view="import"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5zM17.5 2v5M15.5 5l2 2 2-2" /></svg></span><span>术语导入</span></button>
+          <button class="nav-item" data-view="assets"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.5 5.5A3.5 3.5 0 0 1 7 4h4a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H7a3.5 3.5 0 0 0-3.5 1.5v-14zM20.5 5.5A3.5 3.5 0 0 0 17 4h-2a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h2a3.5 3.5 0 0 1 3.5 1.5v-14z" /></svg></span><span>术语库</span></button>
+          <button class="nav-item" data-view="styles"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20c4.5-1 8.5-4.2 11-8.5L19 4l1 1-7.5 4C8.2 11.5 5 15.5 4 20zM9 15l-2-2M17.5 13.5v4M15.5 15.5h4" /></svg></span><span>风格指导</span></button>
+          <button class="nav-item" data-view="learning"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 15.5V20h4.5M20 8.5V4h-4.5M6.2 9A7 7 0 0 1 18.7 6M17.8 15A7 7 0 0 1 5.3 18M12 8v8M8 12h8" /></svg></span><span>学习中心</span></button>
         </nav>
         <div class="sidebar-status">
           <span class="status-dot" id="serverDot"></span>
@@ -45,8 +48,8 @@
         <section class="view active" id="view-workbench">
           <div class="locale-strip" id="workbenchLocales" aria-label="目标语言"></div>
           <div class="translation-mode-switch" aria-label="翻译模式">
-            <button class="translation-mode active" data-translation-mode="single"><span>单句翻译</span><small>快速粘贴处理</small></button>
-            <button class="translation-mode" data-translation-mode="batch"><span>批次 / 文件翻译</span><small>自动分段与合并导出</small></button>
+            <button class="translation-mode active" data-translation-mode="single"><span>单句输入</span><small>手动输入即时处理</small></button>
+            <button class="translation-mode" data-translation-mode="batch"><span>粘贴 / 文件翻译</span><small>自动分句与合并导出</small></button>
           </div>
           <div class="control-row compact-controls">
             <label><span>内容语体</span><select id="contentType"><option value="auto">自动识别</option></select></label>
@@ -57,11 +60,11 @@
           <div class="translation-grid">
             <article class="editor-card source-card">
               <div class="card-head"><div><span class="card-kicker">SOURCE · ZH-CN</span><h2>中文原文</h2></div><span class="count" id="sourceCount">0 字</span></div>
-              <textarea id="sourceText" placeholder="粘贴宣发文案、公告、道具说明或 UI 文本……">全新高级通行证现已登场！活动期间完成任务，即可领取限定奖励。维护将于8月15日 10:00开始，请提前退出游戏。</textarea>
+              <textarea id="sourceText" placeholder="手动输入单句；粘贴文本会自动切换到分句队列……">全新高级通行证现已登场！</textarea>
               <label class="context-field" for="neighborContext"><span>可选上下文</span><input id="neighborContext" placeholder="活动背景、角色关系或上一段内容" /></label>
             </article>
             <article class="editor-card target-card">
-              <div class="card-head"><div><span class="card-kicker" id="targetKicker">TARGET · JA-JP</span><h2 id="targetTitle">日本語译文</h2></div><div class="target-status"><span class="term-legends" id="targetLegend" hidden><span class="term-legend official" id="officialLegend"><i></i><span id="officialCount">0 处正式术语</span></span><span class="term-legend suggestion" id="suggestionLegend"><i></i><span id="suggestionCount">0 处疑似术语</span></span></span><span class="badge neutral" id="translationState">等待翻译</span></div></div>
+              <div class="card-head"><div><span class="card-kicker" id="targetKicker">TARGET · JA-JP</span><h2 id="targetTitle">日本語译文</h2></div><div class="target-status"><span class="term-legends" id="targetLegend" hidden><span class="term-legend official" id="officialLegend"><i></i><span id="officialCount">0 处正式术语</span></span><span class="term-legend suggestion" id="suggestionLegend"><i></i><span id="suggestionCount">0 处疑似术语</span></span></span><button class="button ghost small" id="toggleTargetEdit" hidden>编辑译文</button><button class="button ghost small" id="acceptTranslation" disabled>采纳为正式译法</button><span class="badge neutral" id="translationState">等待翻译</span></div></div>
               <div class="target-output empty" id="targetOutput">译文将在这里显示</div>
             </article>
           </div>
@@ -75,13 +78,13 @@
           <div class="batch-workspace" id="batchWorkspace" hidden>
             <div class="batch-setup-grid">
               <article class="panel batch-source-panel">
-                <div class="panel-head"><div><span class="card-kicker">SOURCE DOCUMENT</span><h2>长文与文件</h2></div><span class="count" id="batchSourceMeta">尚未载入</span></div>
+                <div class="panel-head"><div><span class="card-kicker">SOURCE DOCUMENT</span><h2>粘贴文本与文件</h2></div><span class="count" id="batchSourceMeta">尚未载入</span></div>
                 <label class="drop-zone batch-drop-zone" id="batchDropZone" for="batchFile">
                   <input id="batchFile" type="file" accept=".txt,.md,.docx,.xlsx" hidden />
                   <span class="upload-mark">↑</span><strong id="batchFilePrompt">拖入或点击选择文件</strong><small id="batchFileMeta">拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX，最大 10MB</small>
                 </label>
-                <div class="batch-or"><span>或直接粘贴长文</span></div>
-                <textarea id="batchPasteText" class="batch-paste" placeholder="粘贴公告、剧情、运营文案等长文本；解析时会按段落与句子自动切分。"></textarea>
+                <div class="batch-or"><span>或直接粘贴文本 · 粘贴后自动解析</span></div>
+                <textarea id="batchPasteText" class="batch-paste" placeholder="粘贴单句、公告、剧情或运营文案；系统会立即按完整句子生成队列。"></textarea>
               </article>
               <article class="panel batch-policy-panel">
                 <span class="card-kicker">SEGMENT POLICY</span><h2>分段与翻译策略</h2>
@@ -98,50 +101,84 @@
             <article class="panel batch-queue-panel">
               <div class="panel-head">
                 <div><span class="card-kicker">TRANSLATION QUEUE</span><h2>分段队列</h2></div>
-                <div class="batch-progress-summary"><strong id="batchProgressText">等待解析</strong><span id="batchProgressMeta">0 / 0</span></div>
+                <div class="batch-progress-summary"><strong id="batchProgressText">等待解析</strong><span id="batchProgressMeta">0 / 0</span><button class="button ghost small" id="acceptAllSegments" hidden>全部采纳</button></div>
               </div>
               <div class="batch-progress-track"><i id="batchProgressBar"></i></div>
-              <div class="batch-segments" id="batchSegments"><div class="empty-list batch-empty">拖入文件后会自动识别正文、补充信息并生成翻译队列。</div></div>
+              <div class="batch-segments" id="batchSegments"><div class="empty-list batch-empty">粘贴文本或拖入文件后，会自动识别正文并生成分句队列。</div></div>
             </article>
           </div>
         </section>
 
+        <section class="view" id="view-tasks">
+          <article class="panel task-center-panel">
+            <div class="panel-head"><div><span class="card-kicker">PERSISTENT WORK QUEUE</span><h2>历史翻译任务</h2></div><div class="asset-count" id="taskCount">0 个任务</div></div>
+            <div class="task-toolbar">
+              <label><span>目标语言</span><select id="taskLocale"><option value="">全部语言</option></select></label>
+              <label><span>任务状态</span><select id="taskStatus"><option value="">全部状态</option><option value="in_progress">进行中</option><option value="review">QA 待处理</option><option value="needs_attention">存在失败</option><option value="completed">已完成</option></select></label>
+              <label class="task-search"><span>搜索任务</span><input id="taskSearch" placeholder="文件名或任务名称" /></label>
+              <button class="button secondary" id="refreshTasks">刷新列表</button>
+            </div>
+            <div class="task-summary" id="taskSummary"></div>
+            <div class="task-list" id="taskList"><div class="empty-list">正在读取历史任务……</div></div>
+          </article>
+        </section>
+
         <section class="view" id="view-import">
           <div class="step-banner">
-            <span class="step-badge">SMART INGEST</span>
-            <div><h2>拖入中外文表格，自动拆分术语、译例与风格证据</h2><p>无需表头：AI 识别列 → 资产分流 → 人工确认 → 分语言沉淀 → 生成分类风格版本。</p></div>
+            <span class="step-badge">ZERO-CONFIG</span>
+            <div><h2>只需拖入表格，其余全部自动完成</h2><p>自动识别语言和正文列，并逐条区分术语、翻译记忆、语体、领域及约束级别。</p></div>
           </div>
-          <div class="import-setup-grid">
-            <article class="panel upload-panel">
-              <span class="card-kicker">01 · SOURCE FILE</span><h2>选择表格</h2>
+          <div class="smart-import-entry">
+            <article class="panel upload-panel smart-upload-panel">
+              <span class="card-kicker">01 · DROP FILE</span><h2>上传中外文表格</h2>
               <label class="drop-zone" id="dropZone" for="termFile">
                 <input id="termFile" type="file" accept=".xlsx,.csv" hidden />
                 <span class="upload-mark">↑</span><strong id="filePrompt">拖入或点击选择 .xlsx / .csv</strong><small id="fileMeta">拖入后自动识别；不要求表头，支持日、韩、繁中、泰列</small>
               </label>
-            </article>
-            <article class="panel cleaning-panel">
-              <span class="card-kicker">02 · CLEANING POLICY</span><h2>清洗策略</h2>
-              <div class="form-grid">
-                <label><span>目标语言</span><select id="importLocale"><option value="auto">自动识别全部语言列</option></select></label>
-                <label><span>入库语体</span><select id="importContentType"></select></label>
-                <label><span>业务领域</span><select id="importDomain"><option value="game">游戏</option><option value="general">通用</option><option value="marketing">市场营销</option><option value="community">社区运营</option></select></label>
-                <label><span>约束级别</span><select id="importEnforcement"><option value="required">强制采用</option><option value="preferred">优先参考</option></select></label>
+              <div class="smart-import-capabilities" aria-label="自动识别能力">
+                <div><span>01</span><strong>识别表格结构</strong><small>无表头也能找到中外文列，排除位置、DDL 和字符限制。</small></div>
+                <div><span>02</span><strong>逐条分流资产</strong><small>短术语进入术语库；完整句段进入翻译记忆和风格证据池。</small></div>
+                <div><span>03</span><strong>自动确定规则</strong><small>识别语体、领域与强制/优先级；异常项才留给人工确认。</small></div>
               </div>
-              <label class="ai-option"><input type="checkbox" id="useAiCleaning" checked /><span><strong>AI 二次清洗</strong><small>模型不可用时自动使用本地规则结果，不会阻断上传。</small></span></label>
+              <p class="smart-import-fallback">AI 会自动参与清洗；模型暂时不可用时改用本地规则并明确标记，不会卡住导入。</p>
             </article>
           </div>
           <article class="panel preview-panel">
             <div class="panel-head">
-              <div><span class="card-kicker">03 · REVIEW</span><h2>候选审核</h2></div>
+              <div><span class="card-kicker">02 · CONFIRM RESULTS</span><h2>确认自动归类结果</h2></div>
               <div class="summary-chips" id="importSummary"><span>尚未清洗</span></div>
             </div>
             <div class="mapping-note" id="mappingNote">拖入表格后会自动识别结构并生成审核队列。</div>
-            <div class="candidate-table-wrap">
-              <table class="candidate-table">
-                <thead><tr><th class="check-cell"><input id="selectAllCandidates" type="checkbox" /></th><th>目标库</th><th>中文源词</th><th>正式译法</th><th>判断</th><th>依据</th></tr></thead>
-                <tbody id="importCandidates"><tr><td colspan="6" class="table-empty">还没有候选数据</td></tr></tbody>
-              </table>
+            <div class="import-progress" id="importProgress" hidden>
+              <div class="import-progress-head"><strong id="importProgressText">准备识别</strong><span id="importProgressMeta">0%</span></div>
+              <div class="import-progress-track"><i id="importProgressBar"></i></div>
             </div>
+            <div class="import-candidate-tabs" id="importCandidateTabs" role="tablist" aria-label="导入候选类型">
+              <button class="import-candidate-tab active" id="importTermsTab" type="button" role="tab" aria-selected="true" aria-controls="importTermsPane" data-import-candidate-tab="terms"><strong>术语候选</strong><small>短术语与从完整句段中提取的术语</small></button>
+              <button class="import-candidate-tab" id="importStylesTab" type="button" role="tab" aria-selected="false" aria-controls="importStylesPane" data-import-candidate-tab="styles"><strong>完整译例与风格证据</strong><small>保留整句对照，用于翻译记忆与风格学习</small></button>
+            </div>
+            <div class="import-candidate-pane active" id="importTermsPane" role="tabpanel" aria-labelledby="importTermsTab">
+              <div class="import-pane-head"><div><strong>术语资产审核</strong><small>句内提取项会标明来源行；确认后写入对应目标语言术语库。</small></div><div class="summary-chips" id="termImportSummary"><span>0 条术语</span></div></div>
+              <div class="candidate-table-wrap">
+                <table class="candidate-table term-candidate-table">
+                  <thead><tr><th class="check-cell"><input id="selectAllTermCandidates" type="checkbox" aria-label="选择全部术语候选" /></th><th>目标语言 / 来源</th><th>中文术语</th><th>正式译法</th><th>入库判断</th><th>提取依据</th></tr></thead>
+                  <tbody id="termImportCandidates"><tr><td colspan="6" class="table-empty">还没有术语候选</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="import-candidate-pane" id="importStylesPane" role="tabpanel" aria-labelledby="importStylesTab" hidden>
+              <div class="import-pane-head"><div><strong>完整译例与风格证据审核</strong><small>完整句段不会冒充术语；确认后进入翻译记忆，并参与本批风格浓缩。</small></div><div class="summary-chips" id="styleImportSummary"><span>0 条译例</span></div></div>
+              <div class="candidate-table-wrap">
+                <table class="candidate-table style-candidate-table">
+                  <thead><tr><th class="check-cell"><input id="selectAllStyleCandidates" type="checkbox" aria-label="选择全部完整译例" /></th><th>目标语言 / 风格范围</th><th>中文完整句段</th><th>对齐译文</th><th>入库判断</th><th>风格信号</th></tr></thead>
+                  <tbody id="styleImportCandidates"><tr><td colspan="6" class="table-empty">还没有完整译例</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </article>
+          <article class="panel import-learning-panel" id="importBatchLearningPanel" hidden>
+            <div class="panel-head"><div><span class="card-kicker">03 · BATCH STYLE LEARNING</span><h2>本批 AI 学到了什么</h2><p class="panel-caption">这里展示本次完整译例浓缩出的可执行风格观察。证据不足时只继续积累，不会直接影响生产翻译。</p></div><div class="asset-count" id="importBatchLearningCount">0 个范围</div></div>
+            <div class="batch-learning-list" id="importBatchLearningList"><div class="empty-list">提交译例后显示本批风格学习结果</div></div>
           </article>
         </section>
 
@@ -152,6 +189,95 @@
             <div class="asset-search"><input id="assetSearch" placeholder="搜索中文源词、正式译法或别名" /></div>
             <div class="asset-list" id="assetList"></div>
             <p class="isolation-note">当前列表只读取所选目标语言的物理表；其他三套术语不会混入匹配或写入流程。</p>
+          </article>
+        </section>
+
+        <section class="view" id="view-styles">
+          <div class="locale-strip" id="styleLocales" aria-label="风格语言"></div>
+          <article class="panel style-guidance-panel">
+            <div class="panel-head"><div><span class="card-kicker">STYLE GUIDANCE LIBRARY</span><h2 id="styleGuidanceTitle">日本語翻译风格指导</h2></div><div class="asset-count" id="styleGuidanceCount">0 条规则</div></div>
+            <div class="style-explainer">
+              <div><span>01</span><strong>收集同类双语句段</strong><small>表格导入的完整译例、人工采纳译文和 AIQA 复盘分别记账；短术语不会冒充风格。</small></div>
+              <div><span>02</span><strong>按语言 × 语体 × 领域精炼</strong><small>同一分类累计 8 条风格证据后生成草稿，日韩繁泰互不混用。</small></div>
+              <div><span>03</span><strong>人工启用后才生效</strong><small>待启用只是候选规则；只有已启用版本才会进入后续翻译提示。</small></div>
+            </div>
+            <div class="style-filter-row"><label><span>状态</span><select id="styleStatus"><option value="">全部</option><option value="active">已启用</option><option value="inactive">已关闭</option><option value="draft">待启用</option></select></label><button class="button secondary" id="refreshStyles">刷新风格</button></div>
+            <section class="style-library-section active-style-section">
+              <div class="style-section-head"><div><span class="card-kicker">01 · PRODUCTION RULES</span><h3>当前规则与待批准规范</h3></div><small>已启用规则才会进入翻译上下文</small></div>
+              <div class="style-guidance-list" id="styleGuidanceList"><div class="empty-list">正在读取风格规则……</div></div>
+            </section>
+            <section class="style-library-section">
+              <div class="style-section-head"><div><span class="card-kicker">02 · RECENT LEARNING</span><h3>近期批次学习</h3></div><div class="asset-count subtle" id="styleLearningCount">0 个批次范围</div></div>
+              <div class="batch-learning-list style-learning-list" id="styleLearningRuns"><div class="empty-list">还没有可展示的批次学习记录</div></div>
+            </section>
+            <section class="style-library-section evidence-section">
+              <div class="style-section-head"><div><span class="card-kicker">03 · RAW EVIDENCE</span><h3>原始证据池</h3></div><small>用于判断每个语言、语体与领域是否已经积累到足够样本</small></div>
+              <div class="style-evidence-pools" id="styleEvidencePools"><div class="empty-list">正在统计风格证据来源……</div></div>
+            </section>
+          </article>
+          <article class="panel style-qa-panel">
+            <div class="panel-head"><div><span class="card-kicker">REVIEW QUEUE · NOT A STYLE RULE</span><h2>AIQA 反例审核</h2><p class="panel-caption">这里是“错误译文 → 修正译文”的质量案例，不是风格指导。采纳后只用于提醒后续 AI 避免同类错误。</p></div><div class="asset-count" id="styleQaCount">0 条</div></div>
+            <div class="style-qa-list" id="styleQaList"><div class="empty-list">当前没有待审核案例</div></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-learning">
+          <div class="locale-strip" id="learningLocales" aria-label="学习资产语言"></div>
+          <div class="learning-scope-bar">
+            <div><span class="card-kicker">SKILL SCOPE</span><strong>当前学习范围</strong><small>每种目标语言严格隔离；候选技能只在同一语体与领域中对比。</small></div>
+            <label><span>内容语体</span><select id="learningContentType"><option value="general">通用内容</option></select></label>
+            <label><span>业务领域</span><select id="learningDomain"><option value="game">游戏</option><option value="general">通用</option><option value="marketing">市场营销</option><option value="community">社区运营</option></select></label>
+          </div>
+          <div class="learning-error" id="learningError" role="alert" hidden>
+            <div><strong>学习中心暂时无法读取</strong><span id="learningErrorMessage">请稍后重试。</span></div>
+            <button class="button ghost small" id="retryLearning" type="button">重新读取</button>
+          </div>
+
+          <section class="learning-overview" aria-label="学习概览">
+            <article class="learning-stat-card">
+              <span class="learning-stat-icon trajectory" aria-hidden="true">↗</span>
+              <div><strong id="learningTrajectoryCount">—</strong><span>当前范围有效轨迹</span><small>仅统计已有最终译文的完成或复核轨迹</small></div>
+            </article>
+            <article class="learning-stat-card">
+              <span class="learning-stat-icon skill" aria-hidden="true">S</span>
+              <div><strong id="learningSkillCount">—</strong><span>当前范围技能版本</span><small>严格按语言、语体、领域与项目统计</small></div>
+            </article>
+            <article class="learning-stat-card">
+              <span class="learning-stat-icon pending" aria-hidden="true">◇</span>
+              <div><strong id="learningPendingCount">—</strong><span>尚未运行评测的候选</span><small>证据不足或未通过的候选不计入此数</small></div>
+            </article>
+          </section>
+
+          <article class="panel learning-champion-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">CURRENT CHAMPION</span><h2>当前生产技能</h2><p class="panel-caption">只有冠军版本会影响生产翻译；候选技能始终在隔离评测中运行。</p></div>
+              <div class="asset-count" id="learningChampionStatus">未加载</div>
+            </div>
+            <div id="learningChampion"><div class="empty-list learning-empty">正在读取当前技能……</div></div>
+          </article>
+
+          <article class="panel learning-candidates-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">CHALLENGER QUEUE</span><h2>候选技能版本</h2><p class="panel-caption">系统从重复修订、成功轨迹和用户纠正中提出变更，批准前不会进入生产。</p></div>
+              <div class="asset-count subtle" id="learningCandidateCount">0 个候选</div>
+            </div>
+            <div class="learning-candidate-list" id="learningCandidateList"><div class="empty-list learning-empty">当前没有候选技能</div></div>
+          </article>
+
+          <article class="panel learning-evaluation-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">EVALUATION BOARD</span><h2>新旧版本评测对比</h2><p class="panel-caption">候选必须在独立样本上优于当前冠军，并通过术语、QA 与退化检查。</p></div>
+              <div class="learning-legend"><span><i class="positive"></i>提升</span><span><i class="negative"></i>退化</span></div>
+            </div>
+            <div class="learning-evaluation-matrix" id="learningEvaluationMatrix"><div class="empty-list learning-empty">运行候选评测后展示对比指标</div></div>
+          </article>
+
+          <article class="panel learning-evidence-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">TRACEABLE EVIDENCE</span><h2>来源证据与变更原因</h2><p class="panel-caption">每次进化都应能追溯到具体任务、QA 反例或人工反馈，而不是由模型凭空改写。</p></div>
+              <div class="asset-count subtle" id="learningEvidenceCount">0 条证据</div>
+            </div>
+            <div class="learning-evidence-list" id="learningEvidenceList"><div class="empty-list learning-empty">选定语言暂无学习证据</div></div>
           </article>
         </section>
       </main>
@@ -178,6 +304,9 @@
         <div class="dialog-head"><div><span class="card-kicker">OPENAI-COMPATIBLE</span><h2>模型服务设置</h2></div><button class="icon-button" type="button" data-close="providerDialog" aria-label="关闭">×</button></div>
         <label><span>Base URL</span><input name="baseUrl" placeholder="http://localhost:11434/v1" /></label>
         <label><span>模型名称</span><input name="model" placeholder="qwen3:14b" /></label>
+        <label><span>Embedding 模型（可选，留空禁用向量检索）</span><input name="embeddingModel" placeholder="nomic-embed-text" /></label>
+        <label><span>Embedding Base URL（留空复用主 Base URL）</span><input name="embeddingBaseUrl" placeholder="http://localhost:11434/v1" /></label>
+        <label><span>Embedding API Key（留空复用主 Key）</span><input name="embeddingApiKey" type="password" autocomplete="off" /></label>
         <label><span>API Key（留空保持现有 Key）</span><input name="apiKey" type="password" autocomplete="off" /></label>
         <p class="provider-security-note" id="providerSecurityNote">保存后使用 Windows 当前用户级加密，不会以明文写入项目。</p>
         <div class="dialog-actions"><button class="button ghost" type="button" data-close="providerDialog">取消</button><button class="button primary" type="submit">保存设置</button></div>
