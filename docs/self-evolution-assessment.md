@@ -83,7 +83,7 @@
 1. ✅ **Clean-room 评测**（2026-08-13 已实施主体）：新增 `src/benchmark-isolation.mjs`，评测重跑前剔除与留出原文同源（归一化相等或相似度 ≥0.95）的翻译记忆、QA 案例，以及风格规范/译者画像中同源的正反例；每次评测报告携带 `benchmark.isolation` 剔除统计。剩余子项："零检索基线"对照尚未实现，画像/风格的指令文本中可能残留的抽象偏好（无法逐 case 消除）仍待观察。
 2. ✅ **评测后台化**（2026-08-13 已实施）：新增 `src/evaluation-jobs.mjs` 后台任务队列（单任务串行、FIFO），评测转入后台执行，前端轮询 `/api/learning/evaluation-jobs/:id` 显示逐对进度，任务检查点逐对持久化到 `data/learning/jobs/`（已 gitignore），服务重启后任务标记为 `interrupted` 并可续跑剩余样本。真实成本：`provider.mjs` 的 `chat` 采集 OpenAI 与 Ollama 两种 usage 格式，模型设置新增输入/输出百万 token 定价，`src/skill-benchmark.mjs` 逐 case 记录 `usage` 与 `costUsd`；定价齐全时评测自动启用成本门禁（`requireCost`），否则跳过。剩余子项：生产翻译轨迹的 `costUsd` 记录（Directus 需加字段）与任务取消功能尚未实现。
 3. ✅ **自动触发候选生成**（2026-08-13 已实施）：新增 `src/auto-proposal.mjs`（触发决策纯函数 + 串行化后台提议器）与 `src/skill-proposal.mjs`（手动/自动共用同一候选生成实现，顺带修复手动入口丢弃 champion metadata 的问题）。人工采纳或 QA 批准后触发后台检查：同一作用域人工批准终稿达到阈值（默认 10，`KAMI_AUTO_PROPOSE_THRESHOLD`）且无活跃候选时自动提议 challenger；上次成功后需再新增 10 条（`KAMI_AUTO_PROPOSE_GROWTH_WINDOW`）防抖，上次失败则任一新增终稿即重试。记账存于 champion 的 `metadata.autoPropose`，学习中心展示触发状态。评测与激活仍为人工闸门。剩余子项：Directus `translation_skills.metadata` 字段需在 Docker 恢复后执行 `npm run directus:provision`（脚本已更新，未运行时记账自动降级为不持久化）。
-4. **策略补丁 JSON Schema 白名单校验**：`additionalRules` 做长度与字符净化。
+4. ✅ **策略补丁 Schema 白名单校验与净化**（2026-08-14 已实施）：新增 `src/strategy-patch.mjs`，候选生成前对模型返回的 `strategyPatch` 做白名单校验：未知区块/字段丢弃、数值按区间夹紧、布尔与类型强制、`additionalRules` 截断到 12 条 × 300 字符并剥离控制字符、`additionalInstruction` 截断到 600 字符；内置中英文注入特征拦截（"忽略以上规则"、"ignore all previous instructions"、"system:" 等），命中即整条丢弃。净化明细写入候选 `metadata.sanitization`，学习中心候选卡片展示。被丢弃字段回落冠军原值，净化后为空的补丁整体拒绝（409）。15 项新测试覆盖全部路径。
 5. **启动容错**：Directus 不可用自动回退 JSON 模式并在界面告警，不让 `npm start` 崩溃。
 
 ## 7. 施工日志
@@ -92,7 +92,8 @@
 | --- | --- | --- | --- |
 | 2026-08-13 | 1 | Clean-room 评测隔离（`src/benchmark-isolation.mjs` + `server.mjs` 评测路径接入 + 8 项单元测试） | 已实施并提交（`b87de5a`） |
 | 2026-08-13 | 2 | 评测后台化 + 真实 token 成本（`src/evaluation-jobs.mjs`、`src/skill-benchmark.mjs`、provider usage 采集与定价、前端轮询、5 项新测试） | 已实施并提交（`f27396f`） |
-| 2026-08-13 | 3 | 自动触发候选生成（`src/auto-proposal.mjs`、`src/skill-proposal.mjs`、Directus metadata 字段、前端状态展示、12 项新测试） | 已实施，待提交 |
+| 2026-08-13 | 3 | 自动触发候选生成（`src/auto-proposal.mjs`、`src/skill-proposal.mjs`、Directus metadata 字段、前端状态展示、12 项新测试） | 已实施并提交（`89caa9a`） |
+| 2026-08-14 | 4 | 策略补丁白名单校验与净化（`src/strategy-patch.mjs` + 注入拦截 + 前端净化明细 + 15 项新测试） | 已实施，待提交 |
 
 ## 8. 结论
 

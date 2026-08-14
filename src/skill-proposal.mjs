@@ -7,6 +7,7 @@
 import { collectTrainingEvidenceIds, mergeTranslationSkillPatch } from "./learning-engine.mjs";
 import { getProviderConfig, proposeTranslationSkillWithModel } from "./provider.mjs";
 import { saveTranslationSkill } from "./store.mjs";
+import { sanitizeStrategyPatch } from "./strategy-patch.mjs";
 
 /** Trajectories that can inform a proposal: finished or reviewed, with a final translation. */
 export function selectProposalTrajectories(trajectories = [], limit = 40) {
@@ -28,6 +29,13 @@ export async function proposeChallengerSkill({ scope, champion, trajectories = [
   }
   const trainingEvidenceIds = collectTrainingEvidenceIds(usable);
   const proposed = await proposeTranslationSkillWithModel({ ...scope, champion, trajectories: usable });
+  // 模型返回的策略补丁是不可信输入：白名单校验、数值夹紧、长度截断与注入特征拦截。
+  const sanitized = sanitizeStrategyPatch(proposed.strategyPatch);
+  if (!Object.keys(sanitized.patch).length) {
+    const error = new Error("模型返回的策略补丁未通过白名单校验，已拒绝生成候选");
+    error.statusCode = 409;
+    throw error;
+  }
   const engineChampion = {
     id: champion.id,
     version: champion.version,
@@ -38,12 +46,15 @@ export async function proposeChallengerSkill({ scope, champion, trajectories = [
     strategy: champion.strategy || {},
     metadata: champion.metadata || {}
   };
+  const sanitizationMetadata = sanitized.warnings.length
+    ? { sanitization: { warnings: sanitized.warnings, sanitizedAt: new Date().toISOString() } }
+    : {};
   const merged = mergeTranslationSkillPatch(engineChampion, {
     name: proposed.name,
     description: proposed.reason,
     changeReason: proposed.reason,
-    strategy: proposed.strategyPatch,
-    metadata: { generatedBy: getProviderConfig().model }
+    strategy: sanitized.patch,
+    metadata: { generatedBy: getProviderConfig().model, ...sanitizationMetadata }
   });
   return saveTranslationSkill({
     ...scope,

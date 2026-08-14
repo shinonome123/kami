@@ -1803,6 +1803,10 @@ function renderLearningCandidates(candidates, evaluations, champion, validTrajec
     const [statusLabel, statusClass] = learningStatusMeta({ ...skill, status: resolvedStatus });
     const selected = id === state.learningSelectedSkillId;
     const reason = skill.changeReason || skill.change_reason || skill.reason || skill.rationale || skill.summary || "由近期高频修订与成功翻译轨迹提出。";
+    const sanitizationWarnings = skill.metadata?.sanitization?.warnings || skill.metadata?.sanitization_warnings || [];
+    const sanitizationNote = sanitizationWarnings.length
+      ? `<div class="learning-auto-note" title="模型补丁中超出白名单、越界或疑似注入的内容已被净化，不影响候选生成。">模型补丁已净化 ${sanitizationWarnings.length} 处：${escapeHtml(String(sanitizationWarnings[0].reason || sanitizationWarnings[0] || ""))}${sanitizationWarnings.length > 1 ? " 等" : ""}</div>`
+      : "";
     const rules = learningRules(skill);
     const evidenceCount = Number(skill.evidenceCount ?? skill.evidence_count ?? skill.trajectoryCount ?? skill.trajectory_count) || learningArray(skill.evidence || skill.evidenceIds || skill.evidence_ids).length;
     const canActivate = Boolean(evaluation && baselineCurrent && evaluationPassed(evaluation, skill));
@@ -1819,6 +1823,7 @@ function renderLearningCandidates(candidates, evaluations, champion, validTrajec
     return `<article class="learning-skill-card candidate ${selected ? "selected" : ""}" data-learning-select="${escapeHtml(id)}" tabindex="0">
       <div class="learning-skill-head"><div><span class="learning-skill-version">${escapeHtml(learningVersion(skill))}</span><h3>${escapeHtml(learningSkillTitle(skill))}</h3><small>${evidenceCount} 条来源证据${skill.createdAt || skill.created_at ? ` · ${escapeHtml(formatLearningDate(skill.createdAt || skill.created_at))}` : ""}</small></div><span class="learning-status ${statusClass}">${statusLabel}</span></div>
       <div class="learning-change-reason"><span>为什么提出这次变更</span><p>${escapeHtml(reason)}</p></div>
+      ${sanitizationNote}
       ${rules.length ? `<details class="learning-change-details"><summary>查看 ${rules.length} 项候选执行配置</summary>${rules.map((rule) => `<p>${escapeHtml(rule)}</p>`).join("")}</details>` : ""}
       <div class="learning-card-footer"><small>${escapeHtml(footerText)}</small><div class="learning-actions"><button class="button secondary small" type="button" data-learning-action="evaluate" data-skill-id="${escapeHtml(id)}" ${baselineCurrent ? "" : "disabled"}>${evaluation ? "重新评测" : "运行评测"}</button><button class="button primary small" type="button" data-learning-action="activate" data-skill-id="${escapeHtml(id)}" ${canActivate ? "" : "disabled"}>批准启用</button><button class="button ghost small danger" type="button" data-learning-action="reject" data-skill-id="${escapeHtml(id)}">拒绝</button></div></div>
     </article>`;

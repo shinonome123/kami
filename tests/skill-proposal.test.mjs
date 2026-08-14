@@ -57,6 +57,44 @@ test("proposeChallengerSkill 走完模型提议、补丁合并与隔离保存的
   assert.equal(challenger.metadata.generatedBy, "mock-model");
 });
 
+test("垃圾补丁经白名单净化后入库并记录净化明细", async () => {
+  const scope = { locale: "th-TH", contentType: "general", domain: "game", project: "default" };
+  const template = engine.createDefaultTranslationSkill({ scope });
+  const champion = await store.saveTranslationSkill({ ...scope, ...template });
+  const created = await store.saveLearningTrajectory({
+    ...scope, batchId: "manual-review", segmentId: "", source: "返回垃圾补丁的测试句",
+    contextPack: {}, assetRefs: {}, model: "mock-model", promptVersion: "kami-translation-v1", status: "running", events: []
+  });
+  await store.updateLearningTrajectory(created.id, { finalTranslation: "訳", status: "completed" });
+  const trajectories = await store.listLearningTrajectories({ ...scope, limit: 100 });
+  const challenger = await proposal.proposeChallengerSkill({ scope, champion, trajectories, promptVersion: "kami-translation-v1" });
+
+  // 数值夹紧；被丢弃的字段回落冠军原值（includeNextSegments=1、includeDocumentMetadata=true）
+  assert.equal(challenger.strategy.context.includePreviousSegments, 6);
+  assert.equal(challenger.strategy.context.includeNextSegments, 1, "非数值应丢弃并保留冠军原值");
+  assert.equal(challenger.strategy.context.includeDocumentMetadata, true);
+  // 非法 limit 丢弃并保留冠军原值 5，越界 limit 夹紧
+  assert.equal(challenger.strategy.retrieval.translationMemory.limit, 5);
+  assert.equal(challenger.strategy.retrieval.qaCases.limit, 20);
+  assert.equal(challenger.strategy.retrieval.qaCases.enabled, true);
+  assert.deepEqual(challenger.strategy.retrieval.styleProfile, { enabled: false, limit: 3 });
+  // 规则：注入丢弃、截断到 12 条
+  const rules = challenger.strategy.prompting.additionalRules;
+  assert.equal(rules.length, 12);
+  assert.ok(!rules.some((rule) => /忽略|密钥/.test(rule)), "注入规则应被丢弃");
+  assert.equal(challenger.strategy.prompting.additionalInstruction.length, 600);
+  // QA 夹紧
+  assert.equal(challenger.strategy.qa.minimumScore, 70);
+  assert.equal(challenger.strategy.qa.maximumRevisionAttempts, 4);
+  assert.equal(challenger.strategy.qa.blockOnHardError, true, "非法布尔应丢弃并保留冠军原值");
+  // 未知区块被丢弃
+  assert.equal(challenger.strategy.extraSection, undefined);
+  // 净化明细写入 metadata
+  assert.ok(Array.isArray(challenger.metadata.sanitization?.warnings));
+  assert.ok(challenger.metadata.sanitization.warnings.length > 0);
+  assert.equal(challenger.metadata.generatedBy, "mock-model");
+});
+
 test("没有可用轨迹时抛出与手动入口一致的 409", async () => {
   const scope = { locale: "ko-KR", contentType: "general", domain: "game", project: "default" };
   const template = engine.createDefaultTranslationSkill({ scope });

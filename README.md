@@ -148,6 +148,8 @@ translation_memory_th_th
 
 候选生成支持**自动提议**：同一作用域内人工批准的终稿达到阈值（默认 10 条，可用 `KAMI_AUTO_PROPOSE_THRESHOLD` / `KAMI_AUTO_PROPOSE_GROWTH_WINDOW` 调整）且当前没有待评测候选时，系统会在后台自动生成 challenger；评测与激活仍必须人工执行。自动提议的记账信息保存在 Champion 技能的 `metadata` 字段（Directus 模式下需运行 `npm run directus:provision` 创建该字段）。
 
+模型返回的策略补丁是不可信输入：入库前经过白名单校验与净化——未知区块和字段丢弃、数值按区间夹紧、规则与指令长度截断、控制字符剥离，并拦截"忽略以上规则"类中英文注入特征；净化明细记录在候选的 `metadata.sanitization` 并在学习中心展示。
+
 ## 测试
 
 ```powershell
