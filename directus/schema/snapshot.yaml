@@ -15243,6 +15243,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_skills
+    field: metadata
+    type: json
+    meta:
+      collection: translation_skills
+      conditions: null
+      display: null
+      display_options: null
+      field: metadata
+      group: null
+      hidden: false
+      interface: tags
+      note: 自动候选生成等内部记账信息。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 元数据
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: metadata
+      table: translation_skills
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: user_profiles
     field: id
     type: uuid
