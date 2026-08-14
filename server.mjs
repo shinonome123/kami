@@ -1397,7 +1397,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (!(await serveStatic(req, res, url))) json(res, 404, { error: "Not found" });
   } catch (error) {
-    console.error(error);
+    console.error(`[${new Date().toISOString()}]`, error);
     json(res, error.statusCode || 500, { error: error.message || "Internal server error" });
   }
 });

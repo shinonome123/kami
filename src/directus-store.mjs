@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { assertLocale } from "./config.mjs";
 import { embedSource, embeddingModelName } from "./embedding.mjs";
+import { fetchWithTimeout } from "./provider.mjs";
 
 export const LOCALE_COLLECTIONS = Object.freeze({
   "ja-JP": "terms_ja_jp",
@@ -56,16 +57,18 @@ function config() {
 
 async function request(path, { method = "GET", body, timeoutMs = 10_000 } = {}) {
   const { baseUrl, token } = config();
-  const response = await fetch(`${baseUrl}${path}`, {
+  const { response, text } = await fetchWithTimeout(`${baseUrl}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body === undefined ? {} : { "content-type": "application/json" })
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  const payload = response.status === 204 ? null : await response.json().catch(() => null);
+    body: body === undefined ? undefined : JSON.stringify(body)
+  }, { timeoutMs, label: "Directus" });
+  let payload = null;
+  if (response.status !== 204 && text) {
+    try { payload = JSON.parse(text); } catch { payload = null; }
+  }
   if (!response.ok) {
     const details = payload?.errors?.map((error) => error.message).join("; ") || response.statusText;
     const error = new Error(`Directus ${method} ${path} failed (${response.status}): ${details}`);

@@ -94,7 +94,8 @@
 | 2026-08-13 | 2 | 评测后台化 + 真实 token 成本（`src/evaluation-jobs.mjs`、`src/skill-benchmark.mjs`、provider usage 采集与定价、前端轮询、5 项新测试） | 已实施并提交（`f27396f`） |
 | 2026-08-13 | 3 | 自动触发候选生成（`src/auto-proposal.mjs`、`src/skill-proposal.mjs`、Directus metadata 字段、前端状态展示、12 项新测试） | 已实施并提交（`89caa9a`） |
 | 2026-08-14 | 4 | 策略补丁白名单校验与净化（`src/strategy-patch.mjs` + 注入拦截 + 前端净化明细 + 15 项新测试） | 已实施并提交（`e4949fb`） |
-| 2026-08-14 | 5 | 启动容错：Directus 不可用自动回退 JSON（`store.mjs` 回退 + health/bootstrap 告警 + 前端横幅 + 2 项测试与冒烟验证） | 已实施，待提交 |
+| 2026-08-14 | 5 | 启动容错：Directus 不可用自动回退 JSON（`store.mjs` 回退 + health/bootstrap 告警 + 前端横幅 + 2 项测试与冒烟验证） | 已实施并提交（`54b7d55`） |
+| 2026-08-14 | 6 | 超时错误修复：`fetchWithTimeout` 全生命周期超时转换（含正文读取阶段），模型/Directus 请求超时显示带标签中文错误并在模型调用上自动重试一次，服务端错误日志带时间戳；5 项新测试（`tests/provider-timeout.test.mjs`） | 已实施，待提交 |
 
 ## 8. 结论
 

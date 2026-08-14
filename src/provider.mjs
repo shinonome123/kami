@@ -133,39 +133,70 @@ function packPrompt(contextPack) {
     `规则：\n1. 不得使用其他目标语言的表达。\n2. 不漏译、不增译、不改变数值与事实。\n3. 强制术语必须逐字采用指定目标译法。\n4. 上下文只用于消歧和保持连贯，不得把上文或下文混入译文。\n5. 标有 contextualFallback 或 contentType 不同的历史译例只用于稳定术语与基础表达，不得覆盖当前语体要求。\n6. 只翻译“当前原文”，只输出译文，不解释。\n\n当前原文：\n${contextPack.source}`;
 }
 
+/**
+ * Fetch with full-lifecycle timeout safety.
+ *
+ * AbortSignal.timeout covers the ENTIRE request, including body reads. A
+ * timeout can therefore fire while reading the response body — outside the
+ * initial fetch() call — and must be converted to a labeled error here,
+ * otherwise a raw DOMException escapes to the user as "The operation was
+ * aborted due to timeout". Optional retries only apply to timeouts.
+ */
+export async function fetchWithTimeout(url, init = {}, { timeoutMs = 30_000, label = "请求", retries = 0, retryDelayMs = 300 } = {}) {
+  const attempts = Math.max(1, Math.trunc(retries) + 1);
+  const timeoutText = timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)} 秒` : `${timeoutMs} 毫秒`;
+  const timeoutMessage = `${label}请求超时（${timeoutText}）`;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (error) {
+      if (error?.name !== "TimeoutError" && error?.name !== "AbortError") throw error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        continue;
+      }
+      throw new Error(timeoutMessage);
+    }
+    let text = null;
+    try {
+      text = response.status === 204 ? null : await response.text();
+    } catch (error) {
+      if (error?.name !== "TimeoutError" && error?.name !== "AbortError") throw error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        continue;
+      }
+      throw new Error(timeoutMessage);
+    }
+    return { response, text };
+  }
+  throw new Error(timeoutMessage);
+}
+
 async function chat(messages, config = runtimeConfig, options = {}) {
   const normalizedOptions = typeof options === "number" ? { temperature: options } : options;
   const temperature = normalizedOptions.temperature ?? 0.25;
   const timeoutMs = normalizedOptions.timeoutMs ?? 60_000;
   const requestLabel = normalizedOptions.requestLabel || "模型";
-  let response;
-  try {
-    response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {})
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        temperature,
-        ...(normalizedOptions.maxTokens ? { max_tokens: normalizedOptions.maxTokens } : {}),
-        ...(normalizedOptions.responseFormat ? { response_format: normalizedOptions.responseFormat } : {})
-      }),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-  } catch (error) {
-    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      throw new Error(`${requestLabel}请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
-    }
-    throw error;
-  }
+  const { response, text } = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {})
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      temperature,
+      ...(normalizedOptions.maxTokens ? { max_tokens: normalizedOptions.maxTokens } : {}),
+      ...(normalizedOptions.responseFormat ? { response_format: normalizedOptions.responseFormat } : {})
+    })
+  }, { timeoutMs, label: requestLabel, retries: 1 });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`模型请求失败 (${response.status})：${detail.slice(0, 500)}`);
+    throw new Error(`模型请求失败 (${response.status})：${(text || "").slice(0, 500)}`);
   }
-  const payload = await response.json();
+  const payload = JSON.parse(text || "{}");
   if (typeof normalizedOptions.onUsage === "function") {
     const usage = payload.usage
       ? { promptTokens: Number(payload.usage.prompt_tokens) || 0, completionTokens: Number(payload.usage.completion_tokens) || 0 }
@@ -181,25 +212,23 @@ export function isEmbeddingConfigured() {
   return Boolean(runtimeConfig.embeddingModel);
 }
 
-export async function embed(text, { model: modelOverride } = {}) {
+export async function embed(text, { model: modelOverride, timeoutMs = 30_000 } = {}) {
   const model = modelOverride || runtimeConfig.embeddingModel;
   if (!model) throw new Error("未配置 embedding 模型，向量检索保持禁用");
   const baseUrl = runtimeConfig.embeddingBaseUrl || runtimeConfig.baseUrl;
   const apiKey = runtimeConfig.embeddingApiKey || runtimeConfig.apiKey;
-  const response = await fetch(`${baseUrl}/embeddings`, {
+  const { response, text: responseText } = await fetchWithTimeout(`${baseUrl}/embeddings`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
     },
-    body: JSON.stringify({ model, input: String(text).slice(0, 16_000) }),
-    signal: AbortSignal.timeout(30_000)
-  });
+    body: JSON.stringify({ model, input: String(text).slice(0, 16_000) })
+  }, { timeoutMs, label: "embedding" });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`embedding 请求失败 (${response.status})：${detail.slice(0, 500)}`);
+    throw new Error(`embedding 请求失败 (${response.status})：${(responseText || "").slice(0, 500)}`);
   }
-  const payload = await response.json();
+  const payload = JSON.parse(responseText || "{}");
   let vector = payload.data?.[0]?.embedding ?? payload.embedding;
   if (!Array.isArray(vector) || !vector.length || !vector.every((value) => Number.isFinite(value))) {
     throw new Error("embedding 响应缺少有效向量");
