@@ -2306,6 +2306,12 @@ async function initialize() {
     const [bootstrap, health] = await Promise.all([api("/api/bootstrap"), api("/api/health")]);
     state.bootstrap = bootstrap;
     state.serverVersion = health.version || "0.0.0";
+    const fallback = bootstrap.storeFallback || health.storeFallback;
+    if (fallback?.active) {
+      const banner = $("#storeFallbackBanner");
+      banner.hidden = false;
+      banner.textContent = `资产后台（Directus）不可用，已回退到本地 JSON 存储：${fallback.reason}。当前写入保存在 data/ 下；Directus 恢复后重启服务即可回到资产后台模式（回退期间的写入不会自动同步）。`;
+    }
     const batchModeButton = $('.translation-mode[data-translation-mode="batch"]');
     if (!supportsBatchApi(state.serverVersion)) {
       batchModeButton.title = "批次模块等待服务重启后启用";

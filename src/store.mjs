@@ -817,12 +817,37 @@ async function updateJsonSkillEvaluation(id, patch) {
 
 export const DATA_ROOT = ROOT;
 
+// Directus 启动检查失败后的回退状态：仅在进程内生效，重启后重新尝试 Directus。
+let directusFallback = null;
+
 function usesDirectus() {
-  return process.env.KAMI_STORE === "directus";
+  return process.env.KAMI_STORE === "directus" && !directusFallback;
+}
+
+/** 启动回退状态，供 health/bootstrap 接口与界面告警使用。 */
+export function getStoreFallbackInfo() {
+  if (directusFallback) {
+    return {
+      active: true,
+      requestedMode: "directus",
+      activeMode: "json",
+      reason: directusFallback.reason,
+      at: directusFallback.at
+    };
+  }
+  return { active: false, activeMode: usesDirectus() ? "directus" : "json" };
 }
 
 export async function initializeStore() {
-  return usesDirectus() ? initializeDirectusStore() : initializeJsonStore();
+  if (process.env.KAMI_STORE !== "directus") return initializeJsonStore();
+  try {
+    await initializeDirectusStore();
+    return;
+  } catch (error) {
+    directusFallback = { reason: error.message, at: new Date().toISOString() };
+    console.error(`[Kami] Directus 不可用（${error.message}），已自动回退到本地 JSON 存储。Directus 恢复后重启服务即可回到资产后台模式；回退期间的写入保存在 data/ 下，不会自动同步回 Directus。`);
+    await initializeJsonStore();
+  }
 }
 
 export async function getAssets(locale) {

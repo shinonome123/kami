@@ -59,6 +59,8 @@ npm run directus:snapshot
 
 `directus:provision` 是幂等的，可以安全地重新检查缺失集合、字段、权限和种子数据。Schema 快照保存在 `directus/schema/snapshot.yaml`。
 
+**启动容错**：`KAMI_STORE=directus` 时如果 Directus 不可用（Docker 未启动、健康检查失败或缺少 token），Kami 不会崩溃，而是自动回退到本地 JSON 存储，并在控制台、健康检查接口和页面顶部横幅中告警。Directus 恢复后重启服务即自动回到资产后台模式。注意：回退期间的写入保存在 `data/` 下，不会自动同步回 Directus。
+
 默认模型地址是本地 Ollama 的 OpenAI-compatible 端点：
 
 ```text

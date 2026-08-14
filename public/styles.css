@@ -7,6 +7,7 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+.store-fallback-banner { padding: 9px 16px; color: #7a3c14; background: #fff0d5; border-bottom: 1px solid #e8cf9d; font-size: 11px; line-height: 1.6; }
 body { margin: 0; background: var(--paper); }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
