@@ -29,7 +29,7 @@ const PORT = Number(process.env.PORT || 4173);
 const MAX_BODY_BYTES = 15 * 1024 * 1024;
 const TERM_AI_CONCURRENCY = 5;
 const TERM_AI_BATCH_SIZE = 24;
-const TRANSLATION_PROMPT_VERSION = "kami-translation-v2";
+const TRANSLATION_PROMPT_VERSION = "kami-translation-v3";
 const importProgress = new Map();
 
 const MIME_TYPES = {

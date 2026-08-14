@@ -4,28 +4,44 @@ export const LOCALES = Object.freeze({
     label: "日本語",
     shortLabel: "日",
     language: "Japanese",
-    defaultInstruction: "自然な日本語として成立させ、直訳調を避ける。用途に応じて敬体・常体を統一する。"
+    defaultInstruction: "自然な日本語として成立させ、直訳調を避ける。用途に応じて敬体・常体を統一する。",
+    localizationExamples: [
+      { source: "肝就完了！", literal: "肝臓が終わった。", idiomatic: "根性で乗り切れ！", note: "游戏口语：用意气说法重写" },
+      { source: "这波稳了", literal: "この波は安定だ。", idiomatic: "この流れはもらったな。", note: "社媒/对白：用目标语言玩家的惯用口吻" },
+      { source: "先走一步了", literal: "先に一歩行く。", idiomatic: "お先に失礼！", note: "客套话用目标语言固定表达" }
+    ]
   },
   "ko-KR": {
     flagAsset: "/assets/flag-kr.svg",
     label: "한국어",
     shortLabel: "韩",
     language: "Korean",
-    defaultInstruction: "자연스러운 한국어 어순과 높임말을 사용하고 조사와 띄어쓰기를 정확히 유지한다."
+    defaultInstruction: "자연스러운 한국어 어순과 높임말을 사용하고 조사와 띄어쓰기를 정확히 유지한다.",
+    localizationExamples: [
+      { source: "肝就完了！", literal: "간이 끝났다.", idiomatic: "죽어라 하면 된다!", note: "게임 구어체로 재구성" },
+      { source: "这波稳了", literal: "이 흐름은 안정적이다.", idiomatic: "이번 판은 이겼다!", note: "자연스러운 게임 말투" },
+      { source: "先走一步了", literal: "먼저 한 걸음 간다.", idiomatic: "먼저 가볼게!", note: "목표 언어 관용 표현" }
+    ]
   },
   "zh-Hant-TW": {
     flagAsset: "/assets/flag-tw.svg",
     label: "繁體中文",
     shortLabel: "繁",
     language: "Traditional Chinese (Taiwan)",
-    defaultInstruction: "使用臺灣繁體中文的自然用語，不做機械式簡繁轉換，避免中國大陸慣用詞直接照搬。"
+    defaultInstruction: "使用臺灣繁體中文的自然用語，不做機械式簡繁轉換，避免中國大陸慣用詞直接照搬。",
+    localizationExamples: [
+      { source: "肝就完了！", literal: "肝就完了！", idiomatic: "拼就對了！", note: "遊戲口語用臺灣習慣說法" },
+      { source: "上头了", literal: "上頭了", idiomatic: "玩到停不下來", note: "口語改用臺灣自然表達" },
+      { source: "先走一步了", literal: "先走一步了", idiomatic: "先告辭啦！", note: "客套話用臺灣固定說法" }
+    ]
   },
   "th-TH": {
     flagAsset: "/assets/flag-th.svg",
     label: "ไทย",
     shortLabel: "泰",
     language: "Thai",
-    defaultInstruction: "ใช้ภาษาไทยที่เป็นธรรมชาติ รักษาระดับความสุภาพและการถอดเสียงชื่อเฉพาะให้สม่ำเสมอ"
+    defaultInstruction: "ใช้ภาษาไทยที่เป็นธรรมชาติ รักษาระดับความสุภาพและการถอดเสียงชื่อเฉพาะให้สม่ำเสมอ",
+    localizationExamples: []
   }
 });
 

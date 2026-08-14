@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyContent } from "../src/classifier.mjs";
+import { LOCALES } from "../src/config.mjs";
 import { buildContextPack } from "../src/context-pack.mjs";
 import { refineCorpus } from "../src/corpus.mjs";
 import { matchTerms } from "../src/matcher.mjs";
@@ -132,6 +133,18 @@ test("Context Pack 注入当前范围的翻译技能版本与增量规则", () =
   assert.equal(pack.translationSkill.id, "skill-ja-dialogue-v2");
   assert.equal(pack.translationSkill.version, 2);
   assert.deepEqual(pack.translationSkill.additionalRules, ["称谓必须结合说话人关系判断。"]);
+});
+
+test("各语言本地化示范结构完整且源文一致", () => {
+  for (const locale of ["ja-JP", "ko-KR", "zh-Hant-TW"]) {
+    const examples = LOCALES[locale].localizationExamples || [];
+    assert.ok(examples.length >= 2, `${locale} 应至少有两组示范`);
+    for (const example of examples) {
+      assert.ok(example.source && example.literal && example.idiomatic && example.note, "示例字段必须齐全");
+      assert.notEqual(example.literal, example.idiomatic, "直译与地道译法必须不同，示范才有意义");
+    }
+  }
+  assert.deepEqual(LOCALES["th-TH"].localizationExamples, []);
 });
 
 test("顺口溜/韵文结构检测保守且不误伤普通对话", () => {

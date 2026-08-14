@@ -1,5 +1,5 @@
 import { loadProviderConfig, saveProviderConfig } from "./provider-store.mjs";
-import { CONTENT_TYPES } from "./config.mjs";
+import { CONTENT_TYPES, LOCALES } from "./config.mjs";
 
 const loadedProvider = loadProviderConfig();
 let persistence = loadedProvider.persistence;
@@ -123,7 +123,11 @@ function packPrompt(contextPack) {
   const batchReferenceHint = contextPack.batchReferences?.length
     ? `本批已定稿译文（必须保持句式与风格完全一致，可参考其用词与语气）：${JSON.stringify(contextPack.batchReferences)}\n`
     : "";
-  return `你是专业的亚洲语言游戏本地化译者。请严格从简体中文翻译到 ${contextPack.targetLanguage}。本地化优先：译文必须让目标语言玩家读起来像原生文案——地道、自然、语气准确优先于字面对应。\n\n` +
+  const localeExamples = LOCALES[contextPack.targetLocale]?.localizationExamples || [];
+  const exampleHint = localeExamples.length
+    ? `本地化示范（左：原文 → 直译，右：合格的地道译法。请达到右侧的水平）：\n${localeExamples.map((item) => `· ${item.source} → ${item.literal} ✗ / ${item.idiomatic} ✓（${item.note}）`).join("\n")}\n`
+    : "";
+  return `你是资深游戏本地化写手。你的任务不是逐字翻译，而是把简体中文文案用 ${contextPack.targetLanguage} 玩家最自然的方式重新表达：先读懂这句话在游戏场景里的意图、情绪与角色，再用目标语言母语者会用的说法写出来。只改变表达方式，不改变信息。\n\n` +
     `内容类型：${contextPack.contentTypeLabel}\n` +
     `语体要求：${contextPack.register}\n` +
     `翻译风格：${contextPack.styleProfile?.name || contextPack.contentTypeLabel} · 版本 ${contextPack.styleProfile?.version || 1} · ${contextPack.styleProfile?.instruction || contextPack.register}\n` +
@@ -135,13 +139,14 @@ function packPrompt(contextPack) {
     `历史 AIQA 反例与修订：${JSON.stringify(contextPack.qaGuidance || [])}\n` +
     batchVerseHint +
     batchReferenceHint +
+    exampleHint +
     `目标语言要求：${contextPack.localeInstruction}\n` +
     `领域：${contextPack.domain}\n` +
     `文档上下文（仅用于理解，不得翻译进结果）：\n${formatNeighborContext(contextPack.neighborContext)}\n\n` +
     `强制术语：${JSON.stringify(contextPack.requiredTerms, null, 2)}\n` +
     `参考术语：${JSON.stringify(contextPack.preferredTerms, null, 2)}\n` +
     `必须原样保留：${JSON.stringify(contextPack.protectedTokens)}\n\n` +
-    `规则：\n1. 不得使用其他目标语言的表达。\n2. 不漏译、不增译、不改变数值与事实。\n3. 强制术语必须逐字采用指定目标译法。\n4. 上下文只用于消歧和保持连贯，不得把上文或下文混入译文。\n5. 标有 contextualFallback 或 contentType 不同的历史译例只用于稳定术语与基础表达，不得覆盖当前语体要求。\n6. 避免翻译腔：不逐字直译成语、习语、重复与固定表达，优先目标语言中语义对应、语气一致的自然说法。\n7. 原文含押韵、对仗、重复或口号结构时，必须在目标语言中重现节奏与韵律，允许换用地道表达；语气要与原句一致（如闲散自嘲不得译成命令口吻）。\n8. 只翻译“当前原文”，只输出译文，不解释。\n\n${rhymeHint}当前原文：\n${contextPack.source}`;
+    `规则：\n1. 不得使用其他目标语言的表达。\n2. 信息保真：数字、日期、名称、占位符、强制术语和事实必须完整保留；除此之外，语序、句式、用词、修辞都可以自由改写为地道说法——换一种地道表达不等于漏译或增译。\n3. 强制术语必须逐字采用指定目标译法。\n4. 上下文只用于消歧和保持连贯，不得把上文或下文混入译文。\n5. 标有 contextualFallback 或 contentType 不同的历史译例只用于稳定术语与基础表达，不得覆盖当前语体要求。\n6. 拒绝翻译腔：成语、习语、重复、语气词、客套话一律换成目标语言中语义与语气对等的自然说法；译文读起来必须像目标语言原生文案，而不是中文的逐字影子。\n7. 原文含押韵、对仗、重复或口号结构时，必须在目标语言中重现节奏与韵律，允许换用地道表达；语气要与原句一致（如闲散自嘲不得译成命令口吻）。\n8. 只翻译“当前原文”，只输出译文，不解释。\n\n${rhymeHint}当前原文：\n${contextPack.source}`;
 }
 
 /**
@@ -511,7 +516,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
   const messages = [
     {
       role: "system",
-      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。特别注意：原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
+      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
   ];
@@ -608,7 +613,7 @@ export function parseAiQaLineResponse(content) {
 
 export async function reviseTranslationWithQa({ contextPack, translation, issues, references = [], qaCases = [], onUsage = null }) {
   return chat([
-    { role: "system", content: "你是最终修订译者。只修复 QA 明确指出的问题，保留正确内容、数字、格式、占位符、强制术语和原有信息边界；若原文带韵律结构（contextPack.rhymeLike 为 true），修订必须同时重现节奏与押韵。只输出完整修订译文，不要解释。" },
+    { role: "system", content: "你是最终修订译者。只修复 QA 明确指出的问题，保留正确内容、数字、格式、占位符、强制术语和原有信息边界；若问题涉及表达不地道，就用更地道的说法改写，不要退回逐字直译；若原文带韵律结构（contextPack.rhymeLike 为 true），修订必须同时重现节奏与押韵。只输出完整修订译文，不要解释。" },
     { role: "user", content: JSON.stringify({ contextPack, currentTranslation: translation, issues, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
   ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "AIQA 修订", onUsage });
 }
@@ -740,8 +745,8 @@ export async function classifyWithModel(text) {
 export async function translateWithReflection(contextPack, { reflect = true, onUsage = null } = {}) {
   const rhymeLike = contextPack?.rhymeLike === true;
   const batchVerse = contextPack?.batchVerse?.active === true;
-  // 韵文/批排比走更高温度，给节奏与韵脚的再创作留出空间。
-  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: rhymeLike || batchVerse ? 0.8 : undefined, onUsage });
+  // 温度：普通文本 0.6 给地道表达留空间，韵文/批排比 0.85 给节奏与韵脚再创作。
+  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: rhymeLike || batchVerse ? 0.85 : 0.6, onUsage });
   if (!reflect && !rhymeLike) return { initial, translation: initial, reflection: "" };
   if (rhymeLike) {
     // 韵文本地化专用通道：初译只作参考，要求模型以目标语言玩家视角再创作，

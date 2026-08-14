@@ -41,7 +41,7 @@ test("韵文走专用本地化通道：高温度初译 + 再创作改写", async
   assert.equal(result.translation, "とことこ歩いて、ぶらぶら遊んで、銭のためなら馬にも牛にも。");
   assert.equal(result.reflection, "rhyme-localized");
   assert.equal(requests.length, 2, "初译 + 韵文本地化共两次调用");
-  assert.equal(requests[0].temperature, 0.8, "初译使用高温度");
+  assert.equal(requests[0].temperature, 0.85, "初译使用高温度");
   assert.equal(requests[1].temperature, 0.85, "改写使用高温度");
 });
 
@@ -51,5 +51,5 @@ test("普通文本 reflect=false 时只调用一次并使用默认温度", async
   assert.equal(result.translation, "行け行け行け、さすらえさすらえさすらえ、銭のためなら牛馬にもなろう。");
   assert.equal(result.reflection, "");
   assert.equal(requests.length, before + 1);
-  assert.equal(requests[before].temperature, 0.25);
+  assert.equal(requests[before].temperature, 0.6, "普通文本使用创译温度 0.6");
 });
