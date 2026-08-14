@@ -1,5 +1,5 @@
 import { CONTENT_TYPES, LOCALES } from "./config.mjs";
-import { extractProtectedTokens } from "./text.mjs";
+import { detectRhymeLike, extractProtectedTokens } from "./text.mjs";
 
 function normalizeNeighborContext(neighborContext) {
   if (typeof neighborContext === "string") return { previous: "", next: "", note: neighborContext };
@@ -78,6 +78,7 @@ export function buildContextPack({ source, locale, classification, matches, doma
       note: mode === "exact" ? term.note : `疑似术语，仅供参考，不得未经判断强制替换。${term.note || ""}`
     })),
     protectedTokens: extractProtectedTokens(source),
+    rhymeLike: detectRhymeLike(source),
     qaGuidance: Array.isArray(qaGuidance) ? qaGuidance.slice(0, 3).map((item) => ({
       id: item.id,
       source: item.source,

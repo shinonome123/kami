@@ -42,6 +42,19 @@ export function similarity(a, b) {
   return 1 - levenshtein(a, b) / maxLength;
 }
 
+/**
+ * Conservative detection of doggerel/verse structure (顺口溜、口诀、诗行):
+ * short equal-length clauses separated by commas followed by a longer clause
+ * (3+3+7 / 4+4+7), or a 2-3 character block repeated three times with commas.
+ */
+export function detectRhymeLike(text = "") {
+  const normalized = String(text ?? "").trim();
+  if (!normalized) return false;
+  if (/^[\u4e00-\u9fff]{3}[，,][\u4e00-\u9fff]{3}[，,][\u4e00-\u9fff]{6,12}[。！？!?~～]*$/u.test(normalized)) return true;
+  if (/^[\u4e00-\u9fff]{4}[，,][\u4e00-\u9fff]{4}[，,][\u4e00-\u9fff]{6,12}[。！？!?~～]*$/u.test(normalized)) return true;
+  return /([\u4e00-\u9fff]{2,3})[，,]\1[，,]\1/u.test(normalized);
+}
+
 export function extractProtectedTokens(text = "") {
   const patterns = [
     /https?:\/\/[^\s)）\]】]+/gi,

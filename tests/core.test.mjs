@@ -5,6 +5,7 @@ import { buildContextPack } from "../src/context-pack.mjs";
 import { refineCorpus } from "../src/corpus.mjs";
 import { matchTerms } from "../src/matcher.mjs";
 import { runQa } from "../src/qa.mjs";
+import { detectRhymeLike } from "../src/text.mjs";
 
 const jaAssets = {
   locale: "ja-JP",
@@ -131,6 +132,23 @@ test("Context Pack 注入当前范围的翻译技能版本与增量规则", () =
   assert.equal(pack.translationSkill.id, "skill-ja-dialogue-v2");
   assert.equal(pack.translationSkill.version, 2);
   assert.deepEqual(pack.translationSkill.additionalRules, ["称谓必须结合说话人关系判断。"]);
+});
+
+test("顺口溜/韵文结构检测保守且不误伤普通对话", () => {
+  assert.equal(detectRhymeLike("走走走，游游游，甘为铜钱做马牛。"), true, "3+3+7 顺口溜");
+  assert.equal(detectRhymeLike("一二三四，五六七八，九十百千万事如意。"), true, "4+4+7 口诀");
+  assert.equal(detectRhymeLike("买买买，买买买，买买买"), true, "二字块三连重复");
+  assert.equal(detectRhymeLike("你好，朋友，我们一起玩。"), false, "2+2+5 普通对话不误伤");
+  assert.equal(detectRhymeLike("全新限定皮肤现已上架。"), false);
+  assert.equal(detectRhymeLike(""), false);
+  assert.equal(detectRhymeLike("哈哈哈，太有趣了。"), false);
+});
+
+test("Context Pack 标记韵律结构供提示词与 AIQA 使用", () => {
+  const rhymePack = buildContextPack({ source: "走走走，游游游，甘为铜钱做马牛。", locale: "ja-JP", classification: classifyContent("走走走，游游游，甘为铜钱做马牛。", "dialogue"), matches: [], domain: "game" });
+  assert.equal(rhymePack.rhymeLike, true);
+  const plainPack = buildContextPack({ source: "别怕，我在这儿。", locale: "ja-JP", classification: classifyContent("别怕，我在这儿。", "dialogue"), matches: [], domain: "game" });
+  assert.equal(plainPack.rhymeLike, false);
 });
 
 test("QA 检出缺失强制术语、数字和禁用译法", () => {
