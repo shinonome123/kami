@@ -51,6 +51,8 @@ const server = http.createServer(async (req, res) => {
     ? JSON.stringify({ decisions: [{ index: 0, keep: true, confidence: 0.96, reason: "中日句段对齐" }, { index: 1, keep: true, confidence: 0.95, reason: "中日句段对齐" }] })
     : prompt.includes("术语对齐器")
     ? JSON.stringify({ suggestions: [{ index: 0, currentText: "高級パス", confidence: 0.93, reason: "与疑似源术语语义对应" }] })
+    : prompt.includes("本地化翻译流程改进员")
+    ? JSON.stringify({ name: "候选技能", reason: "高频术语漏用，建议收紧术语提示", strategyPatch: { prompting: { additionalInstruction: "优先核对强制术语", additionalRules: ["输出前逐项核对强制术语"] }, retrieval: { translationMemory: { limit: 8 } }, qa: { minimumScore: 90, maximumRevisionAttempts: 2 } }, evidenceIds: [] })
     : prompt.includes("双语本地化审校")
       ? "PASS"
       : "高級パスが新登場しました。";

@@ -689,6 +689,7 @@ async function saveJsonTranslationSkill(input) {
       evidenceIds: jsonObject(input.evidenceIds ?? existing?.evidenceIds, []),
       promptVersion: String(input.promptVersion ?? existing?.promptVersion ?? ""),
       metrics: jsonObject(input.metrics ?? existing?.metrics),
+      metadata: jsonObject(input.metadata ?? existing?.metadata),
       createdAt: existing?.createdAt || now,
       updatedAt: now
     };

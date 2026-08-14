@@ -470,10 +470,11 @@ const definitions = [
       jsonField("evidence_ids", "来源证据 ID", { sort: 13 }),
       textField("prompt_version", "提示词版本", { width: "half", sort: 14 }),
       jsonField("metrics", "当前指标", { sort: 15 }),
-      uniqueInternalField("version_scope_key", 16),
-      uniqueInternalField("champion_scope_key", 17),
-      dateField("date_created", "创建时间", "date-created", 18),
-      dateField("date_updated", "更新时间", "date-updated", 19)
+      jsonField("metadata", "元数据", { note: "自动候选生成等内部记账信息。", sort: 16 }),
+      uniqueInternalField("version_scope_key", 17),
+      uniqueInternalField("champion_scope_key", 18),
+      dateField("date_created", "创建时间", "date-created", 19),
+      dateField("date_updated", "更新时间", "date-updated", 20)
     ]
   },
   {

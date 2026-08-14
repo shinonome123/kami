@@ -146,6 +146,8 @@ translation_memory_th_th
 
 评测以**后台任务**运行：同一时刻只跑一个评测，界面实时显示逐对进度；每完成一对就落盘检查点（`data/learning/jobs/`），服务重启后任务标记为中断，可续跑剩余样本而不是从头重烧模型调用。评测前会剔除与留出原文同源的翻译记忆、QA 案例与风格/画像正反例，防止标准答案泄漏进评测上下文。
 
+候选生成支持**自动提议**：同一作用域内人工批准的终稿达到阈值（默认 10 条，可用 `KAMI_AUTO_PROPOSE_THRESHOLD` / `KAMI_AUTO_PROPOSE_GROWTH_WINDOW` 调整）且当前没有待评测候选时，系统会在后台自动生成 challenger；评测与激活仍必须人工执行。自动提议的记账信息保存在 Champion 技能的 `metadata` 字段（Directus 模式下需运行 `npm run directus:provision` 创建该字段）。
+
 ## 测试
 
 ```powershell

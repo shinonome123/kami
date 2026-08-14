@@ -1094,6 +1094,7 @@ function mapTranslationSkill(item) {
     evidenceIds: directusJson(item.evidence_ids, []),
     promptVersion: item.prompt_version || "",
     metrics: directusJson(item.metrics),
+    metadata: directusJson(item.metadata),
     createdAt: item.date_created || null,
     updatedAt: item.date_updated || item.date_created || null
   };
@@ -1116,6 +1117,7 @@ function translationSkillBody(input, fallback = {}) {
     evidence_ids: directusJson(input.evidenceIds ?? fallback.evidenceIds, []),
     prompt_version: String(input.promptVersion ?? fallback.promptVersion ?? ""),
     metrics: directusJson(input.metrics ?? fallback.metrics),
+    metadata: directusJson(input.metadata ?? fallback.metadata),
     version_scope_key: translationSkillVersionKey(scope, input.version ?? fallback.version),
     champion_scope_key: input.status === "champion" ? translationSkillScopeKey(scope) : null
   };
@@ -1133,6 +1135,7 @@ function translationSkillPatch(patch) {
   assign("evidenceIds", "evidence_ids", (value) => directusJson(value, []));
   assign("promptVersion", "prompt_version", (value) => String(value ?? ""));
   assign("metrics", "metrics", (value) => directusJson(value));
+  assign("metadata", "metadata", (value) => directusJson(value));
   assign("status", "status", (value) => assertLearningChoice(value, TRANSLATION_SKILL_STATUSES, "translation skill status"));
   return body;
 }

@@ -1750,10 +1750,17 @@ function renderLearningChampion(champion) {
   const evidenceCount = Number(champion.evidenceCount ?? champion.evidence_count ?? champion.trajectoryCount ?? champion.trajectory_count)
     || learningArray(champion.evidenceIds || champion.evidence_ids).length;
   const canRollback = Boolean(champion.parentId || champion.parent_id || Number(champion.version) > 1);
+  const autoPropose = champion.metadata?.autoPropose || champion.metadata?.auto_propose;
+  const autoProposeNote = autoPropose
+    ? (autoPropose.lastError
+      ? `<span class="learning-auto-note error">自动候选生成上次失败：${escapeHtml(autoPropose.lastError)}（新的人工终稿到达后会重试）</span>`
+      : `<span class="learning-auto-note">自动候选生成已启用 · ${escapeHtml(String(autoPropose.lastAcceptedCount ?? ""))} 条人工终稿时触发${autoPropose.lastProposedAt ? ` · ${escapeHtml(formatLearningDate(autoPropose.lastProposedAt))}` : ""}</span>`)
+    : "";
   $("#learningChampionStatus").textContent = `${learningVersion(champion)} · 已启用`;
   container.innerHTML = `<article class="learning-skill-card champion">
     <div class="learning-skill-head"><div><span class="learning-skill-version">${escapeHtml(learningVersion(champion))}</span><h3>${escapeHtml(learningSkillTitle(champion))}</h3><small>${evidenceCount} 条轨迹支撑${champion.activatedAt || champion.activated_at ? ` · ${escapeHtml(formatLearningDate(champion.activatedAt || champion.activated_at))} 启用` : ""}</small></div><span class="learning-status ${statusClass}">${statusLabel}</span></div>
     <p class="learning-skill-summary">${escapeHtml(champion.summary || champion.description || champion.instruction || "当前稳定生产版本。所有新候选都将以此版本作为评测基线。")}</p>
+    ${autoProposeNote}
     ${rules.length ? `<div class="learning-rule-grid">${rules.map((rule, index) => `<div><span>${String(index + 1).padStart(2, "0")}</span><p>${escapeHtml(rule)}</p></div>`).join("")}</div>` : ""}
     <div class="learning-card-footer"><small>回滚会恢复上一已验证版本，并保留本版本审计记录。</small><div class="learning-actions"><button class="button ghost small" type="button" data-learning-action="rollback" data-skill-id="${escapeHtml(learningId(champion))}" ${canRollback ? "" : "disabled"}>${canRollback ? "回滚上一版本" : "无可回滚版本"}</button></div></div>
   </article>`;
@@ -1778,7 +1785,7 @@ function renderLearningCandidates(candidates, evaluations, champion, validTrajec
   $("#learningCandidateCount").textContent = `${candidates.length} 个候选`;
   if (!candidates.length) {
     list.innerHTML = validTrajectoryCount
-      ? '<div class="empty-list learning-empty"><div><strong>当前没有候选技能</strong><span>可使用顶部主操作，从当前语言、语体与领域的有效轨迹中提炼隔离候选；生成不会直接改变生产翻译。</span></div></div>'
+      ? '<div class="empty-list learning-empty"><div><strong>当前没有候选技能</strong><span>可使用顶部主操作从当前范围的有效轨迹中提炼隔离候选，或等人工批准终稿达到阈值后由系统自动提议；生成不会直接改变生产翻译。</span></div></div>'
       : '<div class="empty-list learning-empty"><div><strong>当前范围还没有可学习的完成轨迹</strong><span>请先完成翻译并通过 QA 或进入复核；有最终译文后，系统才会开放候选技能生成。</span></div></div>';
     return;
   }

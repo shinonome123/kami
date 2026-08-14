@@ -7,7 +7,7 @@ import { classifyContent } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { adjudicatePotentialTermsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, evaluateTranslationWithModel, getProviderConfig, proposeTranslationSkillWithModel, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { adjudicatePotentialTermsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, evaluateTranslationWithModel, getProviderConfig, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations } from "./src/store.mjs";
@@ -17,9 +17,11 @@ import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.m
 import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 import { runTaskPool } from "./src/task-pool.mjs";
-import { collectTrainingEvidenceIds, createDefaultTranslationSkill, evaluateSkillPromotion, mergeTranslationSkillPatch, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
+import { createDefaultTranslationSkill, evaluateSkillPromotion, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
 import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
 import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
+import { createAutoProposer } from "./src/auto-proposal.mjs";
+import { proposeChallengerSkill, selectProposalTrajectories } from "./src/skill-proposal.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
@@ -700,6 +702,7 @@ async function apiHandler(req, res, url) {
           events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "human_accepted", at: humanDecision.decidedAt, editDistance: humanDecision.editDistance }]
         });
     }
+    if (trajectory) triggerAutoProposal({ locale, contentType, domain, project });
     return json(res, 201, { memory, demoted, evidence, qaCaseApproved, trajectory });
   }
   if (req.method === "GET" && url.pathname === "/api/style-profiles") {
@@ -839,45 +842,8 @@ async function apiHandler(req, res, url) {
     const scope = learningScope(body);
     const champion = await ensureChampionTranslationSkill(scope);
     const trajectories = await listLearningTrajectories({ ...scope, limit: 100 });
-    const usable = trajectories.filter((item) => ["completed", "review"].includes(item.status) && item.finalTranslation).slice(0, 40);
-    if (!usable.length) {
-      const error = new Error("当前语言和范围还没有可复盘的完成轨迹，请先完成几条翻译或人工采纳");
-      error.statusCode = 409;
-      throw error;
-    }
-    const trainingEvidenceIds = collectTrainingEvidenceIds(usable);
-    const proposed = await proposeTranslationSkillWithModel({ ...scope, champion, trajectories: usable });
-    const merged = mergeTranslationSkillPatch({
-      id: champion.id,
-      version: champion.version,
-      status: champion.status,
-      scope,
-      name: champion.name,
-      description: champion.description,
-      strategy: champion.strategy,
-      metadata: {}
-    }, {
-      name: proposed.name,
-      description: proposed.reason,
-      changeReason: proposed.reason,
-      strategy: proposed.strategyPatch,
-      metadata: { generatedBy: getProviderConfig().model }
-    });
-    const skill = await saveTranslationSkill({
-      ...scope,
-      name: merged.name,
-      description: merged.description,
-      changeReason: merged.changeReason,
-      version: merged.version,
-      parentId: champion.id,
-      status: "challenger",
-      strategy: merged.strategy,
-      // Every trajectory sent to the proposal model is training evidence. Keep
-      // the complete set so none of it can later leak into the holdout pool.
-      evidenceIds: trainingEvidenceIds,
-      promptVersion: TRANSLATION_PROMPT_VERSION,
-      metrics: {}
-    });
+    // 手动与自动提议共用同一实现，保证轨迹筛选、补丁合并与证据隔离完全一致。
+    const skill = await proposeChallengerSkill({ scope, champion, trajectories, promptVersion: TRANSLATION_PROMPT_VERSION });
     return json(res, 201, { skill, candidate: skill });
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/evaluate")) {
@@ -1172,6 +1138,7 @@ async function apiHandler(req, res, url) {
         status: status === "passed" ? "completed" : "review",
         events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "qa_issue_approved", at: decision.decidedAt }]
       });
+      triggerAutoProposal({ locale, contentType, domain, project });
     }
     return json(res, 200, {
       matches, translation, issues: remainingIssues, qaScore: score,
@@ -1375,6 +1342,50 @@ const evaluationJobs = createEvaluationJobRunner({
   }
 });
 await evaluationJobs.initialize();
+
+// 自动候选生成：人工批准终稿达到阈值后，在后台提议 challenger；评测与激活仍走人工闸门。
+const autoProposer = createAutoProposer({
+  threshold: Math.max(1, Number(process.env.KAMI_AUTO_PROPOSE_THRESHOLD) || 10),
+  growthWindow: Math.max(1, Number(process.env.KAMI_AUTO_PROPOSE_GROWTH_WINDOW) || 10),
+  deps: {
+    getCurrentChampion: async (scope) => (await listTranslationSkills({ ...scope, status: "champion", limit: 1 }))[0] || null,
+    countAcceptedTrajectories: async (scope) => {
+      const trajectories = await listLearningTrajectories({ ...scope, limit: 500 });
+      return trajectories.filter((item) => item.status === "completed" && item.humanDecision?.accepted === true && String(item.finalTranslation || "").trim()).length;
+    },
+    listActiveCandidates: async (scope) => {
+      const skills = await listTranslationSkills({ ...scope, limit: 20 });
+      return skills.filter((item) => ["challenger", "draft"].includes(item.status));
+    },
+    listTrajectories: async (scope) => listLearningTrajectories({ ...scope, limit: 200 }),
+    selectTrajectories: (trajectories) => selectProposalTrajectories(trajectories),
+    propose: ({ scope, champion, trajectories }) => proposeChallengerSkill({ scope, champion, trajectories, promptVersion: TRANSLATION_PROMPT_VERSION }),
+    recordMetadata: async (championId, existingMetadata, autoPropose) => {
+      try {
+        await updateTranslationSkill(championId, { metadata: { ...(existingMetadata || {}), autoPropose } });
+      } catch (error) {
+        // Directus 尚未 provision metadata 字段时记账失败不应阻断候选生成本身。
+        console.error(`记录自动候选生成状态失败（可能需要先执行 npm run directus:provision）：${error.message}`);
+      }
+    }
+  }
+});
+
+function triggerAutoProposal(scope) {
+  autoProposer.maybePropose(scope)
+    .then((result) => {
+      if (result?.proposed) {
+        console.log(`已自动生成候选技能：${result.candidateId}（${result.reason}）`);
+        return;
+      }
+      // 阈值未到/窗口防抖/已有候选等是正常不提议；其他原因按异常记录，避免被静默吞掉。
+      const reason = String(result?.reason || "");
+      if (!/^(人工批准终稿|自上次自动提议后|当前作用域已有待评测候选|作用域尚无 Champion|没有可复盘的完成轨迹)/u.test(reason)) {
+        console.error(`自动候选生成检查异常：${reason}`);
+      }
+    })
+    .catch((error) => console.error("自动候选生成检查失败", error));
+}
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
