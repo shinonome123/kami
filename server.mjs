@@ -19,6 +19,7 @@ import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.
 import { runTaskPool } from "./src/task-pool.mjs";
 import { collectTrainingEvidenceIds, createDefaultTranslationSkill, evaluateSkillPromotion, mergeTranslationSkillPatch, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
 import { runPairedSkillBenchmarks } from "./src/learning-benchmark.mjs";
+import { isolateBenchmarkAssets } from "./src/benchmark-isolation.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
@@ -122,7 +123,7 @@ function trajectoryToEvaluationSample(trajectory, { variant = "champion" } = {})
     qaScore: Number.isFinite(Number(metrics.qaScore)) ? Number(metrics.qaScore) : 0,
     humanEditDistance: Number.isFinite(Number(human.editDistance)) ? Number(human.editDistance) : 0,
     humanAccepted: human.accepted === true || trajectory.status === "completed",
-    cost: Number(trajectory.costUsd || 0),
+    cost: Number.isFinite(Number(trajectory.costUsd)) ? Number(trajectory.costUsd) : undefined,
     latencyMs: Number(latency || 0)
   };
 }
@@ -133,7 +134,7 @@ function learningEvaluationUiReport(result) {
     status: result.status,
     conclusion: result.reportZh,
     gates: result.gates,
-    evaluationBasis: "同一人工批准留出集上的 Champion / Challenger 隔离重跑；人工采纳率为相对人工终稿的自动近似指标，不冒充新增人工投票。",
+    evaluationBasis: "同一人工批准留出集上的 Champion / Challenger 隔离重跑；重跑前剔除与留出原文同源的翻译记忆、QA 案例和风格/画像正反例，防止标准答案泄漏进评测上下文；人工采纳率为相对人工终稿的自动近似指标，不冒充新增人工投票；模型调用成本尚未计量，成本门禁暂不参与（requireCost=false）。",
     metrics: [
       { key: "termAccuracy", label: "强制术语正确率", unit: "%", higherIsBetter: true, champion: result.championMetrics.mandatoryTermAccuracy, candidate: result.challengerMetrics.mandatoryTermAccuracy, delta: result.deltas.mandatoryTermAccuracy },
       { key: "hardErrors", label: "硬错误数", unit: "", higherIsBetter: false, champion: result.championMetrics.hardErrorCount, candidate: result.challengerMetrics.hardErrorCount, delta: result.deltas.hardErrorCount },
@@ -168,14 +169,18 @@ async function benchmarkTranslationSkill(skill, trajectory) {
     getMemories(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
     getUserProfile(scope.locale)
   ]);
+  // Clean-room isolation: never feed this holdout case its own final translation
+  // back through memories, QA cases or distilled profile examples. The gold must
+  // stay invisible to both variants or the benchmark measures copying, not skill.
+  const isolated = isolateBenchmarkAssets({ source, memories, qaCases, styleProfile, userProfile });
   const memoryLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.translationMemory?.limit) || 5));
   const qaCaseLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.qaCases?.limit) || 3));
-  const translationReferences = rankTranslationMemories(source, memories, { limit: memoryLimit, queryEmbedding });
-  const qaGuidance = rankQaCases(source, qaCases, { limit: qaCaseLimit, queryEmbedding });
+  const translationReferences = rankTranslationMemories(source, isolated.memories, { limit: memoryLimit, queryEmbedding });
+  const qaGuidance = rankQaCases(source, isolated.qaCases, { limit: qaCaseLimit, queryEmbedding });
   const contextPack = buildContextPack({
     source, locale: scope.locale, classification, matches, domain: scope.domain,
     neighborContext: trajectory.contextPack?.neighborContext || "",
-    styleProfile, translationSkill: skill, qaGuidance, userProfile, translationReferences
+    styleProfile: isolated.styleProfile, translationSkill: skill, qaGuidance, userProfile: isolated.userProfile, translationReferences
   });
   const startedAt = Date.now();
   const translated = await translateWithReflection(contextPack, { reflect: false });
@@ -196,6 +201,7 @@ async function benchmarkTranslationSkill(skill, trajectory) {
     qaScore: score,
     humanEditDistance: editDistance,
     humanAccepted: editDistance <= 0.12 && score >= 90 && !hardIssues.some((issue) => issue.severity === "error"),
+    isolation: isolated.isolation,
     latencyMs: Date.now() - startedAt
   };
 }
@@ -976,7 +982,17 @@ async function apiHandler(req, res, url) {
       requestedPairs: evaluationPool.length,
       completedPairs: championSamples.length,
       failedPairs: benchmarkFailures.length,
-      failures: benchmarkFailures.slice(0, 10)
+      failures: benchmarkFailures.slice(0, 10),
+      isolation: [...championSamples, ...challengerSamples].reduce((summary, sample) => {
+        const isolation = sample?.isolation || {};
+        return {
+          excludedMemories: summary.excludedMemories + (isolation.excludedMemories || 0),
+          excludedQaCases: summary.excludedQaCases + (isolation.excludedQaCases || 0),
+          excludedStyleExamples: summary.excludedStyleExamples + (isolation.excludedStyleExamples || 0),
+          excludedUserProfileExamples: summary.excludedUserProfileExamples + (isolation.excludedUserProfileExamples || 0),
+          totalExcluded: summary.totalExcluded + (isolation.totalExcluded || 0)
+        };
+      }, { excludedMemories: 0, excludedQaCases: 0, excludedStyleExamples: 0, excludedUserProfileExamples: 0, totalExcluded: 0 })
     };
     if (benchmarkFailures.length) {
       report.promotable = false;
