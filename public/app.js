@@ -1991,18 +1991,76 @@ function learningActionBody() {
 
 async function runLearningAction(skillId, action, button) {
   if (!skillId) return toast("技能缺少可操作的版本 ID");
+  if (action === "evaluate") return runSkillEvaluation(skillId, button);
   const prompts = { activate: "确认批准这个候选并替换当前生产冠军？原冠军仍可回滚。", reject: "确认拒绝这个候选技能？它会保留在审计记录中。", rollback: "确认回滚到上一已验证版本？当前版本不会被删除。" };
   if (prompts[action] && !confirm(prompts[action])) return;
   const original = button?.textContent;
-  if (button) { button.disabled = true; button.textContent = action === "evaluate" ? "评测中……" : "处理中……"; }
+  if (button) { button.disabled = true; button.textContent = "处理中……"; }
   try {
     await api(`/api/learning/skills/${encodeURIComponent(skillId)}/${action}`, { method: "POST", body: JSON.stringify(learningActionBody()) });
-    toast({ evaluate: "候选评测已完成", activate: "候选已批准并成为生产冠军", reject: "候选已拒绝", rollback: "已回滚到上一验证版本" }[action] || "操作已完成");
+    toast({ activate: "候选已批准并成为生产冠军", reject: "候选已拒绝", rollback: "已回滚到上一验证版本" }[action] || "操作已完成");
     await loadLearning(state.learningLocale);
   } catch (error) {
     toast(error.message);
     if (button) { button.disabled = false; button.textContent = original; }
   }
+}
+
+async function runSkillEvaluation(skillId, button) {
+  const original = button?.textContent;
+  try {
+    const created = await api(`/api/learning/skills/${encodeURIComponent(skillId)}/evaluate`, { method: "POST", body: JSON.stringify(learningActionBody()) });
+    if (!created.jobId) {
+      // 留出集不足 20 条：服务端已生成可审计的 insufficient 结论，无需模型调用。
+      toast(created.result?.conclusion || "证据不足，暂不能发起真实评测");
+      await loadLearning(state.learningLocale);
+      return;
+    }
+    if (created.alreadyRunning) toast("该候选已有进行中的评测任务，已接续跟踪");
+    await watchEvaluationJob(created.jobId, button, original);
+    await loadLearning(state.learningLocale);
+  } catch (error) {
+    toast(error.message);
+    if (button) { button.disabled = false; button.textContent = original; }
+  }
+}
+
+async function watchEvaluationJob(jobId, button, original) {
+  const deadline = Date.now() + 2 * 60 * 60 * 1000;
+  while (Date.now() < deadline) {
+    let job;
+    try {
+      ({ job } = await api(`/api/learning/evaluation-jobs/${encodeURIComponent(jobId)}`));
+    } catch (error) {
+      toast(error.message);
+      if (button) { button.disabled = false; button.textContent = original; }
+      return;
+    }
+    const { requested, completed, failed } = job.progress;
+    if (button) {
+      button.disabled = true;
+      button.textContent = `评测中 ${completed}/${requested}${failed ? `（${failed} 失败）` : ""}……`;
+    }
+    if (job.status === "interrupted") {
+      try {
+        ({ job } = await api(`/api/learning/evaluation-jobs/${encodeURIComponent(jobId)}/resume`, { method: "POST" }));
+      } catch (error) {
+        toast(`评测任务无法续跑：${error.message}`);
+        return;
+      }
+    }
+    if (["completed", "failed"].includes(job.status)) {
+      if (job.status === "completed") {
+        const report = job.result?.report;
+        toast(report?.promotable ? "候选评测完成并通过晋升门槛，可批准启用" : `候选评测完成：${report?.conclusion || "未通过晋升门槛"}`);
+      } else {
+        toast(`评测任务失败：${job.error || "未知错误"}`);
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  }
+  toast("评测任务长时间未结束，请稍后在学习中心查看");
 }
 
 async function generateLearningSkill() {
@@ -2201,6 +2259,8 @@ function bindEvents() {
     $("#providerForm [name=model]").value = provider.model;
     $("#providerForm [name=embeddingModel]").value = provider.embeddingModel || "";
     $("#providerForm [name=embeddingBaseUrl]").value = provider.embeddingBaseUrl || "";
+    $("#providerForm [name=inputPricePerMTok]").value = provider.inputPricePerMTok || "";
+    $("#providerForm [name=outputPricePerMTok]").value = provider.outputPricePerMTok || "";
     const apiKeyInput = $("#providerForm [name=apiKey]");
     apiKeyInput.value = "";
     apiKeyInput.placeholder = provider.apiKeyConfigured ? "已配置 · 留空保持不变" : "未配置 · 如需鉴权请填写";

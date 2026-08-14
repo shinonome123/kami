@@ -306,6 +306,8 @@
         <label><span>模型名称</span><input name="model" placeholder="qwen3:14b" /></label>
         <label><span>Embedding 模型（可选，留空禁用向量检索）</span><input name="embeddingModel" placeholder="nomic-embed-text" /></label>
         <label><span>Embedding Base URL（留空复用主 Base URL）</span><input name="embeddingBaseUrl" placeholder="http://localhost:11434/v1" /></label>
+        <label><span>输入价格（美元 / 百万 token，用于评测成本门禁）</span><input name="inputPricePerMTok" type="number" step="any" min="0" placeholder="例如 0.27" /></label>
+        <label><span>输出价格（美元 / 百万 token，用于评测成本门禁）</span><input name="outputPricePerMTok" type="number" step="any" min="0" placeholder="例如 1.10" /></label>
         <label><span>Embedding API Key（留空复用主 Key）</span><input name="embeddingApiKey" type="password" autocomplete="off" /></label>
         <label><span>API Key（留空保持现有 Key）</span><input name="apiKey" type="password" autocomplete="off" /></label>
         <p class="provider-security-note" id="providerSecurityNote">保存后使用 Windows 当前用户级加密，不会以明文写入项目。</p>

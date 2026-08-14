@@ -40,12 +40,15 @@ export function saveProviderConfig(config, directory = DEFAULT_PROVIDER_DIRECTOR
   const embeddingBaseUrl = String(config.embeddingBaseUrl || "").replace(/\/$/, "");
   const apiKey = String(config.apiKey || "");
   const embeddingApiKey = String(config.embeddingApiKey || "");
+  const inputPricePerMTok = String(config.inputPricePerMTok ?? "").trim();
+  const outputPricePerMTok = String(config.outputPricePerMTok ?? "").trim();
   if (apiKey) atomicWrite(target.secret, runDpapi("protect", apiKey));
   else if (existsSync(target.secret)) rmSync(target.secret);
   if (embeddingApiKey) atomicWrite(target.embeddingSecret, runDpapi("protect", embeddingApiKey));
   else if (existsSync(target.embeddingSecret)) rmSync(target.embeddingSecret);
   atomicWrite(target.config, JSON.stringify({
     baseUrl, model, embeddingModel, embeddingBaseUrl,
+    inputPricePerMTok, outputPricePerMTok,
     apiKeyConfigured: Boolean(apiKey), embeddingApiKeyConfigured: Boolean(embeddingApiKey),
     updatedAt: new Date().toISOString()
   }, null, 2));
@@ -73,6 +76,8 @@ export function loadProviderConfig(directory = DEFAULT_PROVIDER_DIRECTORY) {
         model: metadata.model || "",
         embeddingModel: metadata.embeddingModel || "",
         embeddingBaseUrl: metadata.embeddingBaseUrl || "",
+        inputPricePerMTok: String(metadata.inputPricePerMTok ?? ""),
+        outputPricePerMTok: String(metadata.outputPricePerMTok ?? ""),
         apiKey,
         embeddingApiKey
       },

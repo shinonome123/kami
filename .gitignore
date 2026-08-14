@@ -1,6 +1,7 @@
 .docx-review-*/
 .reasonix/
 data/corpora/*.json
+data/learning/jobs/
 *.log
 node_modules/
 data/runtime/

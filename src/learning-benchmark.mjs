@@ -6,7 +6,7 @@ import { runTaskPool } from "./task-pool.mjs";
  * admitted when both variants complete; either translation or AIQA failure
  * rejects the complete pair so partial evidence can never influence promotion.
  */
-export async function runPairedSkillBenchmarks({ trajectories, champion, challenger, benchmark, concurrency = 5 } = {}) {
+export async function runPairedSkillBenchmarks({ trajectories, champion, challenger, benchmark, concurrency = 5, onProgress = null } = {}) {
   if (!Array.isArray(trajectories)) throw new TypeError("评测轨迹必须是数组");
   if (typeof benchmark !== "function") throw new TypeError("benchmark 必须是函数");
   const paired = await runTaskPool(trajectories, async (trajectory, caseIndex) => {
@@ -15,7 +15,19 @@ export async function runPairedSkillBenchmarks({ trajectories, champion, challen
       samples[variant] = await benchmark(variant === "champion" ? champion : challenger, trajectory, { variant, caseIndex });
     }
     return samples;
-  }, { concurrency });
+  }, {
+    concurrency,
+    onSettled: (result, index) => {
+      if (typeof onProgress !== "function") return;
+      onProgress({
+        caseId: String(trajectories[index]?.id || ""),
+        status: result.status,
+        championSample: result.status === "fulfilled" ? result.value.champion : null,
+        challengerSample: result.status === "fulfilled" ? result.value.challenger : null,
+        error: result.status === "rejected" ? (result.reason?.message || String(result.reason || "评测失败")) : null
+      }, index);
+    }
+  });
 
   const fulfilled = paired.filter((item) => item.status === "fulfilled").map((item) => item.value);
   const failures = paired.map((item, index) => ({ item, index }))

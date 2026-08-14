@@ -54,7 +54,10 @@ const server = http.createServer(async (req, res) => {
     : prompt.includes("双语本地化审校")
       ? "PASS"
       : "高級パスが新登場しました。";
-  const payload = JSON.stringify({ choices: [{ message: { role: "assistant", content } }] });
+  const payload = JSON.stringify({
+    choices: [{ message: { role: "assistant", content } }],
+    usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 }
+  });
   res.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(payload) });
   res.end(payload);
 });

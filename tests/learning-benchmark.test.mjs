@@ -29,6 +29,31 @@ test("配对评测交错运行先后顺序且只有双侧完成的 case 才进�
   assert.deepEqual(result.challengerSamples.map((item) => item.caseId), trajectories.map((item) => item.id));
 });
 
+test("onProgress 逐对汇报完成与失败，失败对保留准确 caseId", async () => {
+  const trajectories = [{ id: "ok" }, { id: "bad" }, { id: "ok-2" }];
+  const events = [];
+  const result = await runPairedSkillBenchmarks({
+    trajectories,
+    champion: { id: "champion" },
+    challenger: { id: "challenger" },
+    concurrency: 1,
+    benchmark: async (skill, trajectory, { variant }) => {
+      if (trajectory.id === "bad" && variant === "challenger") throw new Error("AIQA 失败");
+      return { caseId: trajectory.id, variant };
+    },
+    onProgress: (progress) => events.push({ caseId: progress.caseId, status: progress.status, error: progress.error })
+  });
+  assert.deepEqual(events.map((item) => item.caseId), ["ok", "bad", "ok-2"]);
+  const bad = events.find((item) => item.caseId === "bad");
+  assert.equal(bad.status, "rejected");
+  assert.equal(bad.error, "AIQA 失败");
+  const ok = events.find((item) => item.caseId === "ok");
+  assert.equal(ok.status, "fulfilled");
+  assert.equal(ok.error, null);
+  assert.equal(result.completedPairs, 2);
+  assert.equal(result.failures.length, 1);
+});
+
 test("任一侧 AIQA 失败时整对样本作废并保留准确 caseId", async () => {
   const trajectories = [{ id: "healthy" }, { id: "qa-failed" }, { id: "healthy-2" }];
   const result = await runPairedSkillBenchmarks({

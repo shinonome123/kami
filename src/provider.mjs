@@ -9,7 +9,9 @@ let runtimeConfig = {
   model: process.env.LLM_MODEL || loadedProvider.config.model || "qwen3:14b",
   embeddingModel: process.env.LLM_EMBEDDING_MODEL || loadedProvider.config.embeddingModel || "",
   embeddingBaseUrl: process.env.LLM_EMBEDDING_BASE_URL || loadedProvider.config.embeddingBaseUrl || "",
-  embeddingApiKey: process.env.LLM_EMBEDDING_API_KEY || loadedProvider.config.embeddingApiKey || ""
+  embeddingApiKey: process.env.LLM_EMBEDDING_API_KEY || loadedProvider.config.embeddingApiKey || "",
+  inputPricePerMTok: process.env.LLM_INPUT_PRICE_PER_MTOK ?? loadedProvider.config.inputPricePerMTok ?? "",
+  outputPricePerMTok: process.env.LLM_OUTPUT_PRICE_PER_MTOK ?? loadedProvider.config.outputPricePerMTok ?? ""
 };
 
 export function getProviderConfig() {
@@ -32,11 +34,62 @@ export function updateProviderConfig(input = {}) {
     model: String(input.model || runtimeConfig.model),
     embeddingModel: Object.hasOwn(input, "embeddingModel") ? String(input.embeddingModel || "").trim() : runtimeConfig.embeddingModel,
     embeddingBaseUrl: Object.hasOwn(input, "embeddingBaseUrl") ? String(input.embeddingBaseUrl || "").replace(/\/$/, "") : runtimeConfig.embeddingBaseUrl,
-    embeddingApiKey: input.clearEmbeddingApiKey === true ? "" : (submittedEmbeddingApiKey || runtimeConfig.embeddingApiKey)
+    embeddingApiKey: input.clearEmbeddingApiKey === true ? "" : (submittedEmbeddingApiKey || runtimeConfig.embeddingApiKey),
+    inputPricePerMTok: Object.hasOwn(input, "inputPricePerMTok") ? String(input.inputPricePerMTok ?? "").trim() : runtimeConfig.inputPricePerMTok,
+    outputPricePerMTok: Object.hasOwn(input, "outputPricePerMTok") ? String(input.outputPricePerMTok ?? "").trim() : runtimeConfig.outputPricePerMTok
   };
   if (input.persist !== false) persistence = saveProviderConfig(nextConfig);
   runtimeConfig = nextConfig;
   return getProviderConfig();
+}
+
+function finitePrice(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+}
+
+/** True when both input and output prices are configured, so real cost gating can engage. */
+export function costPricingConfigured(config = runtimeConfig) {
+  return finitePrice(config.inputPricePerMTok) !== null && finitePrice(config.outputPricePerMTok) !== null;
+}
+
+/**
+ * Estimate USD cost from normalized usage and per-million-token prices.
+ * Returns null when usage or pricing is unavailable — cost is then "unmeasured",
+ * never faked as zero.
+ */
+export function estimateUsageCost(usage, config = runtimeConfig) {
+  const inputPrice = finitePrice(config.inputPricePerMTok);
+  const outputPrice = finitePrice(config.outputPricePerMTok);
+  const promptTokens = Number(usage?.promptTokens);
+  const completionTokens = Number(usage?.completionTokens);
+  if (inputPrice === null || outputPrice === null) return null;
+  if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) || promptTokens < 0 || completionTokens < 0) return null;
+  return (promptTokens / 1_000_000) * inputPrice + (completionTokens / 1_000_000) * outputPrice;
+}
+
+/** Accumulator for per-operation usage collection across several model calls. */
+export function createUsageCollector() {
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let calls = 0;
+  return {
+    onUsage: (usage) => {
+      if (!usage) return;
+      const prompt = Number(usage.promptTokens);
+      const completion = Number(usage.completionTokens);
+      if (!Number.isFinite(prompt) || !Number.isFinite(completion) || prompt < 0 || completion < 0) return;
+      promptTokens += prompt;
+      completionTokens += completion;
+      calls += 1;
+    },
+    snapshot() {
+      return calls ? { promptTokens, completionTokens, calls } : null;
+    }
+  };
 }
 
 function formatNeighborContext(context = {}) {
@@ -113,6 +166,14 @@ async function chat(messages, config = runtimeConfig, options = {}) {
     throw new Error(`模型请求失败 (${response.status})：${detail.slice(0, 500)}`);
   }
   const payload = await response.json();
+  if (typeof normalizedOptions.onUsage === "function") {
+    const usage = payload.usage
+      ? { promptTokens: Number(payload.usage.prompt_tokens) || 0, completionTokens: Number(payload.usage.completion_tokens) || 0 }
+      : (Number.isFinite(payload.prompt_eval_count) || Number.isFinite(payload.eval_count))
+        ? { promptTokens: Number(payload.prompt_eval_count) || 0, completionTokens: Number(payload.eval_count) || 0 }
+        : null;
+    if (usage) normalizedOptions.onUsage(usage);
+  }
   return payload.choices?.[0]?.message?.content?.trim() || "";
 }
 
@@ -406,7 +467,7 @@ export async function proposeTranslationSkillWithModel({ locale, contentType, do
   };
 }
 
-export async function evaluateTranslationWithModel({ contextPack, translation, references = [], qaCases = [] }) {
+export async function evaluateTranslationWithModel({ contextPack, translation, references = [], qaCases = [], onUsage = null }) {
   const messages = [
     {
       role: "system",
@@ -414,7 +475,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
   ];
-  let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "AIQA", responseFormat: { type: "json_object" } });
+  let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "AIQA", responseFormat: { type: "json_object" }, onUsage });
   let payload;
   let lastFormatError = "";
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -428,7 +489,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
         ...messages,
         { role: "assistant", content: content.slice(0, 4000) },
         { role: "user", content: "上一个回答不是可解析的严格 JSON。请只重新输出一个紧凑 JSON 对象，根字段必须是 issues 数组，不要 Markdown、解释或代码围栏。" }
-      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1800, requestLabel: "AIQA 格式重试", responseFormat: { type: "json_object" } });
+      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1800, requestLabel: "AIQA 格式重试", responseFormat: { type: "json_object" }, onUsage });
     }
   }
   if (!payload) {
@@ -438,7 +499,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
         content: "你是本地化 QA。不要输出 JSON。若没有问题只输出 PASS；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|类别|原文片段|译文片段|问题原因|修订建议。不得输出其他内容。"
       },
       { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 3), qaCases: qaCases.slice(0, 2) }) }
-    ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "AIQA 行式降级" });
+    ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "AIQA 行式降级", onUsage });
     try {
       payload = { issues: parseAiQaLineResponse(lineContent) };
     } catch (error) {
@@ -505,14 +566,14 @@ export function parseAiQaLineResponse(content) {
   }];
 }
 
-export async function reviseTranslationWithQa({ contextPack, translation, issues, references = [], qaCases = [] }) {
+export async function reviseTranslationWithQa({ contextPack, translation, issues, references = [], qaCases = [], onUsage = null }) {
   return chat([
     { role: "system", content: "你是最终修订译者。只修复 QA 明确指出的问题，保留正确内容、数字、格式、占位符、强制术语和原有信息边界。只输出完整修订译文，不要解释。" },
     { role: "user", content: JSON.stringify({ contextPack, currentTranslation: translation, issues, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
-  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "AIQA 修订" });
+  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "AIQA 修订", onUsage });
 }
 
-export async function adjudicatePotentialTermsWithModel({ contextPack, translation, issues }) {
+export async function adjudicatePotentialTermsWithModel({ contextPack, translation, issues, onUsage = null }) {
   const candidates = issues.slice(0, 12).map((issue) => ({
     matchedSource: issue.matchedSource || "",
     officialSource: issue.sourceTerm || "",
@@ -525,7 +586,7 @@ export async function adjudicatePotentialTermsWithModel({ contextPack, translati
       content: "你是游戏本地化术语裁决译者。逐项判断当前原文中的疑似表达是否与术语库正式源词表示同一概念。若是，必须在完整译文中自然地采用 officialTarget；若不是，不得强行替换。保留全部事实、格式、数字和其他正确内容。reason 必须使用简体中文，便于中文项目成员审核。输出严格 JSON：{\"translation\":\"裁决后的完整译文\",\"decisions\":[{\"officialSource\":\"正式源词\",\"matchedSource\":\"当前表达\",\"officialTarget\":\"正式译法\",\"decision\":\"apply|not_applicable\",\"reason\":\"简体中文简短理由\"}]}"
     },
     { role: "user", content: JSON.stringify({ contextPack, currentTranslation: translation, candidates }) }
-  ], runtimeConfig, { temperature: 0.05, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "术语自动裁决", responseFormat: { type: "json_object" } });
+  ], runtimeConfig, { temperature: 0.05, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "术语自动裁决", responseFormat: { type: "json_object" }, onUsage });
   const start = content.indexOf("{");
   const end = content.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("术语裁决模型未返回 JSON");
@@ -636,17 +697,17 @@ export async function classifyWithModel(text) {
   return { ...JSON.parse(match[0]), source: "model" };
 }
 
-export async function translateWithReflection(contextPack, { reflect = true } = {}) {
-  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译" });
+export async function translateWithReflection(contextPack, { reflect = true, onUsage = null } = {}) {
+  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", onUsage });
   if (!reflect) return { initial, translation: initial, reflection: "" };
   const reflection = await chat([
     { role: "system", content: "你是严格的双语本地化审校。只指出漏译、误译、术语、事实、语体和目标语言自然度问题；没有问题则回答 PASS。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：\n${initial}` }
-  ], runtimeConfig, { temperature: 0.35, timeoutMs: 60_000, requestLabel: "翻译自检" });
+  ], runtimeConfig, { temperature: 0.35, timeoutMs: 60_000, requestLabel: "翻译自检", onUsage });
   if (/^PASS[。.!]?$/i.test(reflection)) return { initial, translation: initial, reflection };
   const translation = await chat([
     { role: "system", content: "你是最终修订译者。根据审校意见做最小必要修改，严格保留事实、格式和指定术语。只输出最终译文。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：${initial}\n\n审校意见：${reflection}` }
-  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "翻译修订" });
+  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "翻译修订", onUsage });
   return { initial, translation, reflection };
 }

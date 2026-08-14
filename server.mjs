@@ -7,10 +7,10 @@ import { classifyContent } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { adjudicatePotentialTermsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, evaluateTranslationWithModel, getProviderConfig, proposeTranslationSkillWithModel, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { adjudicatePotentialTermsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, evaluateTranslationWithModel, getProviderConfig, proposeTranslationSkillWithModel, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
-import { completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
@@ -18,8 +18,8 @@ import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 import { runTaskPool } from "./src/task-pool.mjs";
 import { collectTrainingEvidenceIds, createDefaultTranslationSkill, evaluateSkillPromotion, mergeTranslationSkillPatch, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
-import { runPairedSkillBenchmarks } from "./src/learning-benchmark.mjs";
-import { isolateBenchmarkAssets } from "./src/benchmark-isolation.mjs";
+import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
+import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
@@ -153,57 +153,6 @@ function assertCurrentCandidate(candidate, currentChampion, evaluation = null, {
     throw error;
   }
   return state;
-}
-
-async function benchmarkTranslationSkill(skill, trajectory) {
-  const scope = learningScope(skill);
-  const source = String(trajectory.source || "");
-  const classification = await classify({ text: source, hint: scope.contentType, useModel: false });
-  classification.contentType = scope.contentType;
-  const assets = await getAssets(scope.locale);
-  const matches = matchTerms(source, assets, { contentType: scope.contentType, domain: scope.domain });
-  const queryEmbedding = await embedSource(source);
-  const [styleProfile, qaCases, memories, userProfile] = await Promise.all([
-    getStyleProfile(scope.locale, scope.contentType, scope.domain),
-    getQaCases(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
-    getMemories(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
-    getUserProfile(scope.locale)
-  ]);
-  // Clean-room isolation: never feed this holdout case its own final translation
-  // back through memories, QA cases or distilled profile examples. The gold must
-  // stay invisible to both variants or the benchmark measures copying, not skill.
-  const isolated = isolateBenchmarkAssets({ source, memories, qaCases, styleProfile, userProfile });
-  const memoryLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.translationMemory?.limit) || 5));
-  const qaCaseLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.qaCases?.limit) || 3));
-  const translationReferences = rankTranslationMemories(source, isolated.memories, { limit: memoryLimit, queryEmbedding });
-  const qaGuidance = rankQaCases(source, isolated.qaCases, { limit: qaCaseLimit, queryEmbedding });
-  const contextPack = buildContextPack({
-    source, locale: scope.locale, classification, matches, domain: scope.domain,
-    neighborContext: trajectory.contextPack?.neighborContext || "",
-    styleProfile: isolated.styleProfile, translationSkill: skill, qaGuidance, userProfile: isolated.userProfile, translationReferences
-  });
-  const startedAt = Date.now();
-  const translated = await translateWithReflection(contextPack, { reflect: false });
-  const hardIssues = runQa({ source, translation: translated.translation, matches });
-  const aiIssues = await evaluateTranslationWithModel({ contextPack, translation: translated.translation, references: translationReferences, qaCases: qaGuidance });
-  const score = calculateQaScore({ hardIssues, aiIssues });
-  const required = matches.filter((item) => item.mode === "exact" && item.term?.enforcement === "required");
-  const requiredTermHits = required.filter(({ term }) => String(translated.translation).includes(String(term.target || ""))).length;
-  const gold = String(trajectory.humanDecision?.finalTranslation || trajectory.finalTranslation || "");
-  const editDistance = normalizedEditDistance(translated.translation, gold);
-  return {
-    caseId: trajectory.id,
-    scope,
-    translation: translated.translation,
-    requiredTermHits,
-    requiredTermTotal: required.length,
-    hardErrorCount: hardIssues.filter((issue) => issue.severity === "error").length,
-    qaScore: score,
-    humanEditDistance: editDistance,
-    humanAccepted: editDistance <= 0.12 && score >= 90 && !hardIssues.some((issue) => issue.severity === "error"),
-    isolation: isolated.isolation,
-    latencyMs: Date.now() - startedAt
-  };
 }
 
 async function readJsonBody(req) {
@@ -944,81 +893,92 @@ async function apiHandler(req, res, url) {
     assertCurrentCandidate(challenger, champion);
     const trajectories = await listLearningTrajectories({ ...scope, limit: 500 });
     const evaluationPool = selectSkillHoldout(trajectories, { scope, trainingEvidenceIds: challenger.evidenceIds || [], limit: 60 });
-    let championSamples;
-    let challengerSamples;
-    let benchmarkFailures = [];
-    if (evaluationPool.length >= 20) {
-      const paired = await runPairedSkillBenchmarks({
-        trajectories: evaluationPool,
-        champion,
-        challenger,
-        benchmark: benchmarkTranslationSkill,
-        concurrency: 5
-      });
-      benchmarkFailures = paired.failures;
-      championSamples = paired.championSamples;
-      challengerSamples = paired.challengerSamples;
-    } else {
-      // Keep an auditable insufficient result without spending model calls or
-      // pretending that historical post-QA output came from the challenger.
-      championSamples = evaluationPool.map((item) => trajectoryToEvaluationSample(item, { variant: "champion" }));
-      challengerSamples = evaluationPool.map((item) => trajectoryToEvaluationSample(item, { variant: "champion" }));
-    }
-    const result = evaluateSkillPromotion({
-      scope,
-      champion: { id: champion.id, scope, samples: championSamples },
-      challenger: { id: challenger.id, scope, samples: challengerSamples },
-      // Once a real benchmark starts, every paired case must complete. A single
-      // translation or independent AIQA failure therefore makes it insufficient.
-      minSamples: evaluationPool.length >= 20 ? evaluationPool.length : 20,
-      minimumCoverage: 0.8,
-      guardrails: { requireCost: false }
-    });
-    const report = learningEvaluationUiReport(result);
     if (evaluationPool.length < 20) {
+      // 证据不足：不发起任何模型调用，直接生成可审计的 insufficient 结论。
+      const championSamples = evaluationPool.map((item) => trajectoryToEvaluationSample(item, { variant: "champion" }));
+      const challengerSamples = evaluationPool.map((item) => trajectoryToEvaluationSample(item, { variant: "champion" }));
+      const result = evaluateSkillPromotion({
+        scope,
+        champion: { id: champion.id, scope, samples: championSamples },
+        challenger: { id: challenger.id, scope, samples: challengerSamples },
+        minSamples: 20,
+        minimumCoverage: 0.8,
+        guardrails: { requireCost: false }
+      });
+      const report = learningEvaluationUiReport(result);
       report.conclusion = `证据不足：当前只有 ${evaluationPool.length} 条未参与本候选学习的人工批准终稿，至少需要 20 条才会真正重跑 Champion / Challenger 并开放晋升。`;
+      report.benchmark = {
+        requestedPairs: evaluationPool.length,
+        completedPairs: 0,
+        failedPairs: 0,
+        failures: [],
+        isolation: { excludedMemories: 0, excludedQaCases: 0, excludedStyleExamples: 0, excludedUserProfileExamples: 0, totalExcluded: 0 }
+      };
+      const evaluation = await saveSkillEvaluation({
+        ...scope,
+        championSkillId: champion.id,
+        challengerSkillId: challenger.id,
+        sampleCount: championSamples.length,
+        championMetrics: result.championMetrics,
+        challengerMetrics: result.challengerMetrics,
+        metricDeltas: result.deltas,
+        decision: "needs_review",
+        report,
+        evaluator: "kami-learning-engine-v1"
+      });
+      return json(res, 200, { evaluation: { ...evaluation, result: report }, result: report });
     }
-    report.benchmark = {
-      requestedPairs: evaluationPool.length,
-      completedPairs: championSamples.length,
-      failedPairs: benchmarkFailures.length,
-      failures: benchmarkFailures.slice(0, 10),
-      isolation: [...championSamples, ...challengerSamples].reduce((summary, sample) => {
-        const isolation = sample?.isolation || {};
-        return {
-          excludedMemories: summary.excludedMemories + (isolation.excludedMemories || 0),
-          excludedQaCases: summary.excludedQaCases + (isolation.excludedQaCases || 0),
-          excludedStyleExamples: summary.excludedStyleExamples + (isolation.excludedStyleExamples || 0),
-          excludedUserProfileExamples: summary.excludedUserProfileExamples + (isolation.excludedUserProfileExamples || 0),
-          totalExcluded: summary.totalExcluded + (isolation.totalExcluded || 0)
-        };
-      }, { excludedMemories: 0, excludedQaCases: 0, excludedStyleExamples: 0, excludedUserProfileExamples: 0, totalExcluded: 0 })
-    };
-    if (benchmarkFailures.length) {
-      report.promotable = false;
-      report.status = "insufficient";
-      report.conclusion = `评测未完成：${benchmarkFailures.length} 组 Champion / Challenger 对照在翻译或独立 AIQA 阶段失败。失败样本不会按“零问题”计分，本次结果禁止晋升。`;
-    }
-
-    // Revalidate after the potentially long benchmark. Another candidate may
-    // have become champion while model calls were in flight.
-    const refreshedCandidate = await getTranslationSkill(challenger.id);
-    const [refreshedChampion] = await listTranslationSkills({ ...scope, status: "champion", limit: 1 });
-    assertCurrentCandidate(refreshedCandidate, refreshedChampion);
-    const evaluation = await saveSkillEvaluation({
-      ...scope,
-      championSkillId: refreshedChampion.id,
-      challengerSkillId: refreshedCandidate.id,
-      sampleCount: championSamples.length,
-      championMetrics: result.championMetrics,
-      challengerMetrics: result.challengerMetrics,
-      metricDeltas: result.deltas,
-      decision: result.status === "promote" ? "promote" : result.status === "reject" ? "reject" : "needs_review",
-      report,
-      evaluator: "kami-learning-engine-v1"
+    // 评测转入后台任务：同一候选已有排队/运行中的任务时直接复用，避免重复烧钱。
+    const active = evaluationJobs.findActiveForChallenger(challenger.id);
+    if (active) return json(res, 200, { jobId: active.jobId, job: active, alreadyRunning: true });
+    const job = await evaluationJobs.create({
+      scope,
+      champion,
+      challenger,
+      trajectories: evaluationPool,
+      // 定价配置完整时启用真实成本门禁；否则保持跳过，避免空数据锁死晋升。
+      requireCost: costPricingConfigured()
     });
-    await updateTranslationSkill(refreshedCandidate.id, { metrics: result.challengerMetrics });
-    return json(res, 200, { evaluation: { ...evaluation, result: report }, result: report });
+    return json(res, 202, { jobId: job.jobId, job });
+  }
+  if (req.method === "GET" && url.pathname === "/api/learning/evaluation-jobs") {
+    const scope = url.searchParams.get("locale")
+      ? learningScope({
+        locale: url.searchParams.get("locale"),
+        contentType: url.searchParams.get("contentType") || "general",
+        domain: url.searchParams.get("domain") || "general",
+        project: url.searchParams.get("project") || "default"
+      })
+      : null;
+    return json(res, 200, { jobs: evaluationJobs.list(scope) });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/learning/evaluation-jobs/") && url.pathname.endsWith("/resume")) {
+    const jobId = decodeURIComponent(url.pathname.slice("/api/learning/evaluation-jobs/".length, -("/resume".length)));
+    const job = evaluationJobs.get(jobId);
+    if (!job) {
+      const error = new Error("未找到评测任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    const candidate = await getTranslationSkill(job.challengerId);
+    const [currentChampion] = await listTranslationSkills({ ...learningScope(job.scope), status: "champion", limit: 1 });
+    try {
+      assertCurrentCandidate(candidate, currentChampion);
+    } catch (error) {
+      return json(res, 409, { error: `无法续跑：${error.message}` });
+    }
+    await evaluationJobs.resume(jobId);
+    return json(res, 200, { job: evaluationJobs.get(jobId) });
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/learning/evaluation-jobs/")) {
+    const jobId = decodeURIComponent(url.pathname.slice("/api/learning/evaluation-jobs/".length));
+    const job = evaluationJobs.get(jobId);
+    if (!job) {
+      const error = new Error("未找到评测任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { job });
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/activate")) {
     const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/activate".length));
@@ -1399,6 +1359,22 @@ async function serveStatic(req, res, url) {
 }
 
 await initializeStore();
+
+// 技能评测后台任务队列：同一时刻只跑一个评测，逐对持久化检查点，重启后可续跑。
+const evaluationJobs = createEvaluationJobRunner({
+  benchmark: benchmarkTranslationSkill,
+  jobsDirectory: join(DATA_ROOT, "learning", "jobs"),
+  concurrency: 5,
+  deps: {
+    getSkill: getTranslationSkill,
+    getCurrentChampion: async (scope) => (await listTranslationSkills({ ...scope, status: "champion", limit: 1 }))[0] || null,
+    validatePromotionState: (input) => validateCandidatePromotionState(input),
+    saveEvaluation: saveSkillEvaluation,
+    updateSkillMetrics: (id, metrics) => updateTranslationSkill(id, { metrics }),
+    buildUiReport: learningEvaluationUiReport
+  }
+});
+await evaluationJobs.initialize();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
