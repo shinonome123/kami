@@ -837,6 +837,8 @@ async function runBatch() {
       segmentCount: segments.length
     };
     try {
+      // 本批已定稿译文作为风格锚点：后续各行严格仿照同一句式与用词。
+      const batchReferences = segments.slice(0, position).filter((item) => item.translation).slice(-3).map((item) => ({ source: item.source, target: item.translation }));
       const result = await api("/api/translate", { method: "POST", body: JSON.stringify({
         source: segment.source,
         locale: state.workbenchLocale,
@@ -845,6 +847,8 @@ async function runBatch() {
         neighborContext: context,
         styleProfile: state.batchStyleProfile,
         batchId: state.batchPreview.batchId || state.batchPreview.filename,
+        segmentId: segment.id,
+        batchReferences,
         reflect: $("#reflect").checked,
         useModelClassification: false
       }) });

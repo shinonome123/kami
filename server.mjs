@@ -20,6 +20,7 @@ import { runTaskPool } from "./src/task-pool.mjs";
 import { createDefaultTranslationSkill, evaluateSkillPromotion, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
 import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
 import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
+import { detectBatchVerse } from "./src/batch-verse.mjs";
 import { createAutoProposer } from "./src/auto-proposal.mjs";
 import { proposeChallengerSkill, selectProposalTrajectories } from "./src/skill-proposal.mjs";
 
@@ -1197,6 +1198,15 @@ async function apiHandler(req, res, url) {
     ]);
     const qaGuidance = rankQaCases(body.source, allQaCases, { limit: qaCaseLimit, queryEmbedding });
     const translationReferences = rankTranslationMemories(body.source, allMemories, { limit: memoryLimit, queryEmbedding });
+    // 批次排比/韵文检测：同一批次的多行共用一种句式时，注入模板约束；
+    // 客户端顺序翻译时还会带上本批已定稿译文作为风格锚点。
+    let batchVerse = null;
+    if (body.batchId) {
+      try {
+        const batchRun = await getBatchRun(String(body.batchId));
+        batchVerse = detectBatchVerse(batchRun?.segments || []);
+      } catch { /* 批次记录不可用不影响翻译 */ }
+    }
     const contextPack = buildContextPack({
       source: body.source,
       locale,
@@ -1208,7 +1218,9 @@ async function apiHandler(req, res, url) {
       translationSkill,
       qaGuidance,
       userProfile,
-      translationReferences
+      translationReferences,
+      batchVerse,
+      batchReferences: body.batchReferences || []
     });
     const startedAt = Date.now();
     let trajectory = null;

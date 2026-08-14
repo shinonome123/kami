@@ -117,6 +117,12 @@ function packPrompt(contextPack) {
   const rhymeHint = contextPack.rhymeLike
     ? "⚠️ 本条原文带有顺口溜/韵文结构（短句对仗 + 长句收尾，可能押韵）：必须用目标语言自然重现节奏与押韵，可以调整语序、换用拟态词、谚语与地道说法，严禁机械逐字重复原文的字数结构。\n"
     : "";
+  const batchVerseHint = contextPack.batchVerse?.active
+    ? `⚠️ 本批为排比韵文：所有行共用「${contextPack.batchVerse.shape}」句式（短句 + 长句）。每一行都必须使用同一句式、节奏、语体与韵脚风格；如果本批已有定稿译文，后续各行必须严格仿照其句式与用词。\n`
+    : "";
+  const batchReferenceHint = contextPack.batchReferences?.length
+    ? `本批已定稿译文（必须保持句式与风格完全一致，可参考其用词与语气）：${JSON.stringify(contextPack.batchReferences)}\n`
+    : "";
   return `你是专业的亚洲语言游戏本地化译者。请严格从简体中文翻译到 ${contextPack.targetLanguage}。本地化优先：译文必须让目标语言玩家读起来像原生文案——地道、自然、语气准确优先于字面对应。\n\n` +
     `内容类型：${contextPack.contentTypeLabel}\n` +
     `语体要求：${contextPack.register}\n` +
@@ -127,6 +133,8 @@ function packPrompt(contextPack) {
     `译者长期偏好画像（跨语体全局习惯，版本 ${contextPack.userProfile?.version || "无"}）：${contextPack.userProfile ? JSON.stringify({ instruction: contextPack.userProfile.instruction, examples: contextPack.userProfile.examples }) : "无"}\n` +
     `历史译例（同语言、相似度与人工可信度排序）：${JSON.stringify(contextPack.translationReferences || [])}\n` +
     `历史 AIQA 反例与修订：${JSON.stringify(contextPack.qaGuidance || [])}\n` +
+    batchVerseHint +
+    batchReferenceHint +
     `目标语言要求：${contextPack.localeInstruction}\n` +
     `领域：${contextPack.domain}\n` +
     `文档上下文（仅用于理解，不得翻译进结果）：\n${formatNeighborContext(contextPack.neighborContext)}\n\n` +
@@ -503,7 +511,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
   const messages = [
     {
       role: "system",
-      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。特别注意：原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
+      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。特别注意：原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
   ];
@@ -731,8 +739,9 @@ export async function classifyWithModel(text) {
 
 export async function translateWithReflection(contextPack, { reflect = true, onUsage = null } = {}) {
   const rhymeLike = contextPack?.rhymeLike === true;
-  // 韵文走更高温度，给节奏与韵脚的再创作留出空间。
-  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: rhymeLike ? 0.8 : undefined, onUsage });
+  const batchVerse = contextPack?.batchVerse?.active === true;
+  // 韵文/批排比走更高温度，给节奏与韵脚的再创作留出空间。
+  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: rhymeLike || batchVerse ? 0.8 : undefined, onUsage });
   if (!reflect && !rhymeLike) return { initial, translation: initial, reflection: "" };
   if (rhymeLike) {
     // 韵文本地化专用通道：初译只作参考，要求模型以目标语言玩家视角再创作，
@@ -744,7 +753,7 @@ export async function translateWithReflection(contextPack, { reflect = true, onU
     return { initial, translation: localized, reflection: "rhyme-localized" };
   }
   const reflection = await chat([
-    { role: "system", content: "你是严格的双语本地化审校。只指出漏译、误译、术语、事实、语体、翻译腔和韵律/重复结构丢失问题（原文押韵、对仗或口号式重复时，译文须自然重现节奏与语气）；没有问题则回答 PASS。" },
+    { role: "system", content: "你是严格的双语本地化审校。只指出漏译、误译、术语、事实、语体、翻译腔和韵律/重复结构丢失问题（原文押韵、对仗或口号式重复时，译文须自然重现节奏与语气）；若上下文带有同批已定稿译文，还要检查句式与风格是否保持一致；没有问题则回答 PASS。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：\n${initial}` }
   ], runtimeConfig, { temperature: 0.35, timeoutMs: 60_000, requestLabel: "翻译自检", onUsage });
   if (/^PASS[。.!]?$/i.test(reflection)) return { initial, translation: initial, reflection };

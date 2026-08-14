@@ -1,5 +1,6 @@
 import { CONTENT_TYPES, LOCALES } from "./config.mjs";
 import { detectRhymeLike, extractProtectedTokens } from "./text.mjs";
+import { normalizeBatchReferences } from "./batch-verse.mjs";
 
 function normalizeNeighborContext(neighborContext) {
   if (typeof neighborContext === "string") return { previous: "", next: "", note: neighborContext };
@@ -23,7 +24,7 @@ function normalizeNeighborContext(neighborContext) {
   };
 }
 
-export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, translationSkill = null, qaGuidance = [], userProfile = null, translationReferences = [] }) {
+export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, translationSkill = null, qaGuidance = [], userProfile = null, translationReferences = [], batchVerse = null, batchReferences = [] }) {
   const required = matches.filter((item) => item.mode === "exact" && item.term.enforcement === "required");
   const preferred = matches.filter((item) => item.mode !== "exact" || item.term.enforcement !== "required");
   const defaultRegister = CONTENT_TYPES[classification.contentType].register;
@@ -79,6 +80,8 @@ export function buildContextPack({ source, locale, classification, matches, doma
     })),
     protectedTokens: extractProtectedTokens(source),
     rhymeLike: detectRhymeLike(source),
+    batchVerse: batchVerse?.active ? { active: true, shape: String(batchVerse.shape || ""), matchingCount: Math.max(0, Number(batchVerse.matchingCount) || 0) } : null,
+    batchReferences: normalizeBatchReferences(batchReferences),
     qaGuidance: Array.isArray(qaGuidance) ? qaGuidance.slice(0, 3).map((item) => ({
       id: item.id,
       source: item.source,
