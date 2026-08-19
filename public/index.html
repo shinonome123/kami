@@ -15,7 +15,9 @@
         <div class="brand"><img class="brand-logo" src="/assets/kami-sidebar-logo-v2.png" alt="Kami 本地化语言工作台" /></div>
         <nav class="nav" aria-label="主导航">
           <button class="nav-item active" data-view="workbench"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h9M7.5 3v2c0 4-1.8 7-4.5 9M5 9c1.4 2.1 3.2 3.7 5.5 5M14 20l4-10 4 10M15.5 16h5" /></svg></span><span>翻译</span></button>
+          <button class="nav-item" data-view="autoqa"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z" /><path d="M8.5 12l2.2 2.2 4.8-5" /></svg></span><span>Auto QA</span></button>
           <button class="nav-item" data-view="tasks"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6M9 3h6v3H9zM7 5H5.5A1.5 1.5 0 0 0 4 6.5v13A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 18.5 5H17M8 11l1.5 1.5L12 10M14 12h3M8 16l1.5 1.5L12 15M14 17h3" /></svg></span><span>任务中心</span></button>
+          <button class="nav-item" data-view="feedback"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5zM9 10h6M9 13h4" /></svg></span><span>反馈中心</span><span class="nav-badge" id="feedbackNavBadge" hidden>0</span></button>
           <button class="nav-item" data-view="import"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5zM17.5 2v5M15.5 5l2 2 2-2" /></svg></span><span>术语导入</span></button>
           <button class="nav-item" data-view="assets"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.5 5.5A3.5 3.5 0 0 1 7 4h4a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H7a3.5 3.5 0 0 0-3.5 1.5v-14zM20.5 5.5A3.5 3.5 0 0 0 17 4h-2a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h2a3.5 3.5 0 0 1 3.5 1.5v-14z" /></svg></span><span>术语库</span></button>
           <button class="nav-item" data-view="styles"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20c4.5-1 8.5-4.2 11-8.5L19 4l1 1-7.5 4C8.2 11.5 5 15.5 4 20zM9 15l-2-2M17.5 13.5v4M15.5 15.5h4" /></svg></span><span>风格指导</span></button>
@@ -36,6 +38,12 @@
           </div>
           <div class="command-dock" aria-label="页面操作">
             <div class="system-actions">
+              <div class="feedback-bell-wrap">
+                <button class="icon-button feedback-bell" id="feedbackBell" title="同事反馈" aria-label="同事反馈">
+                  <svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 4.5 1.7 6.2 2 6.4H4c.3-.2 2-1.9 2-6.4zM10 19a2 2 0 0 0 4 0" /></svg>
+                </button>
+                <span class="feedback-bell-badge" id="feedbackBellBadge" hidden>0</span>
+              </div>
               <a class="text-action" id="openAdmin" href="http://127.0.0.1:8055/admin/content/terms_ja_jp" target="_blank" rel="noreferrer">Directus 后台</a>
               <button class="text-action" id="openProvider">模型设置</button>
             </div>
@@ -110,10 +118,34 @@
           </div>
         </section>
 
+        <section class="view" id="view-autoqa">
+          <div class="locale-strip" id="autoQaLocales" aria-label="质检语言"></div>
+          <div class="control-row compact-controls">
+            <label><span>内容语体</span><select id="autoQaContentType"><option value="auto">自动识别</option></select></label>
+            <label><span>业务领域</span><select id="autoQaDomain"><option value="game">游戏</option><option value="general">通用</option><option value="marketing">市场营销</option><option value="community">社区运营</option></select></label>
+            <p class="autoqa-scope-note">逐句切分、语义对齐后分层审查；只检查，不修改译文、不写入学习轨迹。</p>
+          </div>
+          <div class="translation-grid autoqa-grid">
+            <article class="editor-card source-card">
+              <div class="card-head"><div><span class="card-kicker">SOURCE · ZH-CN</span><h2>中文原文</h2></div><span class="count" id="autoQaSourceCount">0 字</span></div>
+              <textarea id="autoQaSource" placeholder="粘贴中文原文，例如：全新高级通行证现已登场！"></textarea>
+            </article>
+            <article class="editor-card target-card">
+              <div class="card-head"><div><span class="card-kicker" id="autoQaTargetKicker">TARGET · JA-JP</span><h2 id="autoQaTargetTitle">日本語译文</h2></div><span class="badge neutral" id="autoQaState">等待质检</span></div>
+              <textarea id="autoQaTarget" placeholder="粘贴目标语言译文，Ctrl + Enter 运行质检"></textarea>
+            </article>
+          </div>
+          <article class="panel autoqa-report" id="autoQaReport" hidden>
+            <div class="autoqa-score-row" id="autoQaScores"></div>
+            <div id="autoQaIssues"></div>
+          </article>
+        </section>
+
         <section class="view" id="view-tasks">
           <article class="panel task-center-panel">
             <div class="panel-head"><div><span class="card-kicker">PERSISTENT WORK QUEUE</span><h2>历史翻译任务</h2></div><div class="asset-count" id="taskCount">0 个任务</div></div>
             <div class="task-toolbar">
+              <label><span>任务类型</span><select id="taskType"><option value="">全部类型</option><option value="batch">翻译批次</option><option value="autoqa">Auto QA 报告</option></select></label>
               <label><span>目标语言</span><select id="taskLocale"><option value="">全部语言</option></select></label>
               <label><span>任务状态</span><select id="taskStatus"><option value="">全部状态</option><option value="in_progress">进行中</option><option value="review">QA 待处理</option><option value="needs_attention">存在失败</option><option value="completed">已完成</option></select></label>
               <label class="task-search"><span>搜索任务</span><input id="taskSearch" placeholder="文件名或任务名称" /></label>
@@ -121,6 +153,17 @@
             </div>
             <div class="task-summary" id="taskSummary"></div>
             <div class="task-list" id="taskList"><div class="empty-list">正在读取历史任务……</div></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-feedback">
+          <article class="panel feedback-center-panel">
+            <div class="panel-head"><div><span class="card-kicker">COLLEAGUE FEEDBACK</span><h2>同事反馈</h2><p class="panel-caption">同事在分享验证页提出的要求。批准后进入风格证据池，满 8 条自动生成风格草稿（仍需你在风格指导页激活）。</p></div><div class="asset-count" id="feedbackPageCount">0 条</div></div>
+            <div class="task-toolbar">
+              <label><span>状态</span><select id="feedbackStatusFilter"><option value="pending">待批准</option><option value="all">全部</option><option value="adopted">已批准入风格</option><option value="ignored">已忽略</option></select></label>
+              <button class="button secondary" id="refreshFeedback">刷新反馈</button>
+            </div>
+            <div class="feedback-page-list" id="feedbackPageList"><div class="empty-list">正在读取同事反馈……</div></div>
           </article>
         </section>
 
@@ -325,6 +368,25 @@
         <div class="dialog-actions"><button class="button ghost" type="button" data-close="termSuggestionDialog">保留当前表达</button><button class="button primary" type="button" id="confirmTermReplace">采用正式译法</button></div>
       </div>
     </dialog>
+    <dialog id="shareLinkDialog">
+      <div class="dialog-card share-link-card">
+        <div class="dialog-head"><div><span class="card-kicker">SHARE FOR REVIEW</span><h2>分享验证链接</h2></div><button class="icon-button" type="button" data-close="shareLinkDialog" aria-label="关闭">×</button></div>
+        <p class="panel-caption">把下面的链接发给同事（需与你的电脑在同一局域网）。同事可查看每段的语素拆解、直译与评分，并逐段提出要求；采纳后沉淀为风格证据。</p>
+        <div class="share-url-list" id="shareUrlList"></div>
+        <p class="share-gloss-note" id="shareGlossNote"></p>
+        <div class="dialog-actions"><button class="button ghost" type="button" data-close="shareLinkDialog">关闭</button></div>
+      </div>
+    </dialog>
+
+    <dialog id="shareFeedbackDialog">
+      <div class="dialog-card share-feedback-card">
+        <div class="dialog-head"><div><span class="card-kicker">COLLEAGUE FEEDBACK</span><h2>同事反馈队列</h2></div><button class="icon-button" type="button" data-close="shareFeedbackDialog" aria-label="关闭">×</button></div>
+        <p class="panel-caption">采纳后写入当前语言、语体与领域的风格证据池，满 8 条自动生成风格草稿（仍需你在风格指导页激活）。</p>
+        <div class="share-feedback-list" id="shareFeedbackList"><div class="empty-list">正在读取反馈……</div></div>
+        <div class="dialog-actions"><button class="button ghost" type="button" data-close="shareFeedbackDialog">关闭</button></div>
+      </div>
+    </dialog>
+
     <div class="toast" id="toast" role="status"></div>
     <script type="module" src="/app.js"></script>
   </body>

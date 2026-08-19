@@ -799,6 +799,142 @@ export async function listDirectusBatchRuns({ locale = "", status = "", search =
   return status ? summaries.filter((item) => item.status === status) : summaries;
 }
 
+export async function saveDirectusQaTask(input) {
+  const id = String(input.id || randomUUID());
+  const body = {
+    title: String(input.title || String(input.sourceText || "").slice(0, 40) || "未命名质检"),
+    target_locale: assertLocale(input.locale),
+    content_type: String(input.contentType || "general"),
+    domain: String(input.domain || "general"),
+    source_text: String(input.sourceText || ""),
+    translation_text: String(input.translationText || ""),
+    source_count: Number(input.segmentCounts?.source) || 0,
+    translation_count: Number(input.segmentCounts?.translation) || 0,
+    overall_score: input.overallScore ?? null,
+    dimension_scores: input.dimensionScores ?? null,
+    summary: input.summary ?? null,
+    alignment_note: String(input.alignmentNote || ""),
+    model: String(input.model || ""),
+    report: input.report ?? null
+  };
+  const params = new URLSearchParams({ limit: "1", fields: "id" });
+  params.set("filter[id][_eq]", id);
+  const existing = await request(`/items/qa_tasks?${params}`);
+  if (existing[0]?.id) await request(`/items/qa_tasks/${encodeURIComponent(id)}`, { method: "PATCH", body });
+  else await request("/items/qa_tasks", { method: "POST", body: { ...body, id } });
+  return { id, ...body };
+}
+
+export async function getDirectusQaTask(id) {
+  try {
+    const item = await request(`/items/qa_tasks/${encodeURIComponent(String(id))}?fields=id,title,target_locale,content_type,domain,source_text,translation_text,source_count,translation_count,overall_score,dimension_scores,summary,alignment_note,model,report,date_created,date_updated`);
+    return {
+      id: item.id, title: item.title || "", locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
+      sourceText: item.source_text || "", translationText: item.translation_text || "",
+      segmentCounts: { source: Number(item.source_count) || 0, translation: Number(item.translation_count) || 0 },
+      overallScore: item.overall_score ?? null, dimensionScores: item.dimension_scores ?? null,
+      summary: item.summary ?? null, alignmentNote: item.alignment_note || "", model: item.model || "",
+      report: item.report ?? null, createdAt: item.date_created || null, updatedAt: item.date_updated || null
+    };
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function listDirectusQaTasks({ locale = "", status = "", search = "", limit = 200 } = {}) {
+  const params = new URLSearchParams({ limit: String(Math.min(500, Math.max(1, Number(limit) || 200))), sort: "-date_updated,-date_created", fields: "id,title,target_locale,content_type,domain,source_count,overall_score,summary,date_created,date_updated" });
+  if (locale) params.set("filter[target_locale][_eq]", assertLocale(locale));
+  if (search) params.set("filter[title][_icontains]", String(search).slice(0, 120));
+  const items = await request(`/items/qa_tasks?${params}`);
+  const summaries = items.map((item) => ({
+    id: item.id, type: "autoqa", title: item.title || "未命名质检", locale: item.target_locale || "",
+    contentType: item.content_type || "general", domain: item.domain || "general",
+    status: Number.isFinite(item.overall_score) ? (item.overall_score >= 90 ? "completed" : "review") : "completed",
+    overallScore: Number.isFinite(item.overall_score) ? item.overall_score : null,
+    totalSegments: Number(item.source_count) || 0, completedSegments: 0, failedSegments: 0,
+    qaPending: Object.values(item.summary || {}).reduce((sum, entry) => sum + (Number(entry?.total) || 0), 0),
+    createdAt: item.date_created || null, updatedAt: item.date_updated || item.date_created || null
+  }));
+  return status ? summaries.filter((item) => item.status === status) : summaries;
+}
+
+export async function deleteDirectusQaTask(id) {
+  try {
+    await request(`/items/qa_tasks/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    return true;
+  } catch (error) {
+    if (error.statusCode === 404) return false;
+    throw error;
+  }
+}
+
+export async function saveDirectusShare(input) {
+  const token = String(input.token || randomUUID().replace(/-/g, ""));
+  const body = {
+    token,
+    batch_id: String(input.batchId || ""),
+    qa_task_id: String(input.qaTaskId || ""),
+    filename: String(input.filename || "未命名分享"),
+    target_locale: assertLocale(input.locale),
+    content_type: String(input.contentType || "general"),
+    domain: String(input.domain || "general"),
+    meta: input.meta ?? null,
+    segments: Array.isArray(input.segments) ? input.segments.slice(0, 2_000) : [],
+    feedbacks: Array.isArray(input.feedbacks) ? input.feedbacks : []
+  };
+  const params = new URLSearchParams({ limit: "1", fields: "id" });
+  params.set("filter[token][_eq]", token);
+  const existing = await request(`/items/shares?${params}`);
+  if (existing[0]?.id) await request(`/items/shares/${encodeURIComponent(existing[0].id)}`, { method: "PATCH", body });
+  else await request("/items/shares", { method: "POST", body });
+  return { token, ...body };
+}
+
+export async function getDirectusShare(token) {
+  try {
+    const params = new URLSearchParams({ limit: "1", fields: "id,token,batch_id,qa_task_id,filename,target_locale,content_type,domain,meta,segments,feedbacks,date_created,date_updated" });
+    params.set("filter[token][_eq]", String(token));
+    const items = await request(`/items/shares?${params}`);
+    const item = items[0];
+    if (!item) return null;
+    return {
+      token: item.token, batchId: item.batch_id || "", qaTaskId: item.qa_task_id || "", filename: item.filename || "",
+      locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
+      meta: item.meta ?? null, segments: arrayValue(item.segments), feedbacks: arrayValue(item.feedbacks),
+      createdAt: item.date_created || null, updatedAt: item.date_updated || null
+    };
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function listDirectusShares({ batchId = "", qaTaskId = "", limit = 100 } = {}) {
+  const params = new URLSearchParams({ limit: String(Math.min(500, Math.max(1, Number(limit) || 100))), sort: "-date_updated", fields: "id,token,batch_id,qa_task_id,filename,target_locale,content_type,domain,meta,segments,feedbacks,date_created,date_updated" });
+  if (batchId) params.set("filter[batch_id][_eq]", String(batchId));
+  if (qaTaskId) params.set("filter[qa_task_id][_eq]", String(qaTaskId));
+  const items = await request(`/items/shares?${params}`);
+  return items.map((item) => ({
+    token: item.token, batchId: item.batch_id || "", qaTaskId: item.qa_task_id || "", filename: item.filename || "",
+    locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
+    meta: item.meta ?? null, segments: arrayValue(item.segments), feedbacks: arrayValue(item.feedbacks),
+    createdAt: item.date_created || null, updatedAt: item.date_updated || null
+  }));
+}
+
+export async function updateDirectusShare(token, updater) {
+  const current = await getDirectusShare(token);
+  if (!current) return null;
+  const next = typeof updater === "function" ? updater(current) : { ...current, ...updater };
+  const params = new URLSearchParams({ limit: "1", fields: "id" });
+  params.set("filter[token][_eq]", String(token));
+  const existing = await request(`/items/shares?${params}`);
+  if (!existing[0]?.id) return null;
+  await request(`/items/shares/${encodeURIComponent(existing[0].id)}`, { method: "PATCH", body: { filename: next.filename, segments: next.segments, feedbacks: next.feedbacks } });
+  return next;
+}
+
 export async function listDirectusStyleProfiles(locale, status) {
   assertLocale(locale);
   const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,status,date_updated" });

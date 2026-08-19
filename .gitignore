@@ -7,3 +7,14 @@ node_modules/
 data/runtime/
 directus/.env
 tmp/
+
+# 本地测试/调试临时产物
+/*.exe
+/*.bin
+/*_test.ps1
+/sxs*.ps1
+/sxstrace_run.ps1
+/sdb_query.ps1
+/pe_manifest_dump.ps1
+/sx_stdout.txt
+/sx_stderr.txt

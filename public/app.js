@@ -9,10 +9,16 @@ const state = {
   assetLocale: "ja-JP",
   styleLocale: "ja-JP",
   learningLocale: "ja-JP",
+  autoQaLocale: "ja-JP",
   learningData: null,
   learningLoading: false,
   learningSelectedSkillId: "",
   tasks: [],
+  shareFeedbackScope: null,
+  feedbackPending: [],
+  feedbackLastCount: 0,
+  feedbackAll: [],
+  feedbackStatusFilter: "pending",
   styleData: null,
   assets: {},
   lastResult: null,
@@ -122,6 +128,8 @@ function pageCopy(view) {
   if (view === "learning") return ["LEARNING CENTER", "学习中心", "将翻译轨迹沉淀为可评测、可批准、可回滚的翻译技能。"];
   return {
     workbench: ["TRANSLATION", "翻译", "按目标语言调用独立术语库，并自动识别语体。"],
+    autoqa: ["AUTO QA", "Auto QA", "逐句切分对齐后，按基本检查、语义忠实性（着重）与 nuance 一致性三层独立审查。"],
+    feedback: ["FEEDBACK CENTER", "反馈中心", "同事在分享验证页提出的要求：逐条批准入风格或忽略。"],
     tasks: ["TASK CENTER", "任务中心", "查看、恢复、审校并导出所有历史翻译任务。"],
     import: ["TERM INGESTION", "术语导入", "只需拖入中外文表格，系统会自动分类并生成待确认结果。"],
     assets: ["TERM ASSETS", "术语库", "查看四个物理隔离的目标语言术语集合。"],
@@ -174,6 +182,15 @@ function refreshActions() {
     primary.textContent = "刷新任务";
   } else if (state.view === "styles") {
     primary.textContent = "刷新风格";
+  } else if (state.view === "autoqa") {
+    primary.textContent = "运行 Auto QA";
+    primary.disabled = !$("#autoQaSource")?.value.trim() || !$("#autoQaTarget")?.value.trim();
+    if ($("#autoQaSource")?.value.trim() || $("#autoQaTarget")?.value.trim()) {
+      secondary.hidden = false;
+      secondary.textContent = "清空";
+    }
+  } else if (state.view === "feedback") {
+    primary.textContent = "刷新反馈";
   }
   if (state.view === "learning") {
     primary.textContent = state.learningLoading ? "正在读取学习轨迹……" : "根据近期轨迹生成候选技能";
@@ -212,6 +229,8 @@ function switchView(view) {
   if (view === "styles") loadStyleGuidance(state.styleLocale).catch((error) => toast(error.message));
   if (view === "workbench") setTranslationMode(state.translationMode);
   if (view === "learning") loadLearning(state.learningLocale);
+  if (view === "autoqa") updateAutoQaLocale(state.autoQaLocale);
+  if (view === "feedback") loadFeedbackPage().catch((error) => toast(error.message));
   refreshActions();
 }
 
@@ -280,6 +299,162 @@ function renderQa(result) {
   const fallback = result.aiQa?.fallbackReason ? `<div class="qa-item warning">AIQA 暂未完成：${escapeHtml(result.aiQa.fallbackReason)}</div>` : "";
   $("#qaList").innerHTML = `${reflection}${retrieval}${qaCases}${humanDecisions}${fallback}${issues || (!fallback ? '<div class="qa-item">硬规则与检索式 AIQA 均通过</div>' : '')}`;
   $$(".single-qa-action").forEach((button) => button.addEventListener("click", () => resolveSingleQaIssue(Number(button.dataset.issueIndex), button.dataset.action, button)));
+}
+
+const AUTO_QA_DIMENSIONS = [
+  ["basic", "基本检查", "语言正确性专项（拼写/语法/标点，模型）+ 品牌名、格式与句内一致性（本地规则）"],
+  ["fidelity", "语义忠实性", "漏译、增译、错译与语义偏差，着重检查项"],
+  ["nuance", "Nuance 一致性", "敬语级别、语气词、正式度与句式节奏的细微差异"]
+];
+
+function updateAutoQaLocale(locale) {
+  state.autoQaLocale = locale;
+  renderLocaleStrip($("#autoQaLocales"), locale, updateAutoQaLocale);
+  const details = state.bootstrap.locales[locale];
+  $("#autoQaTargetKicker").textContent = `TARGET · ${locale.toUpperCase()}`;
+  $("#autoQaTargetTitle").textContent = `${details.label}译文`;
+  $("#autoQaState").textContent = "等待质检";
+  $("#autoQaState").className = "badge neutral";
+  $("#autoQaReport").hidden = true;
+  refreshActions();
+}
+
+function clearAutoQa() {
+  $("#autoQaSource").value = "";
+  $("#autoQaTarget").value = "";
+  $("#autoQaSourceCount").textContent = "0 字";
+  $("#autoQaState").textContent = "等待质检";
+  $("#autoQaState").className = "badge neutral";
+  $("#autoQaReport").hidden = true;
+  refreshActions();
+}
+
+async function runAutoQa() {
+  const source = $("#autoQaSource").value.trim();
+  const translation = $("#autoQaTarget").value.trim();
+  if (!source || !translation) {
+    toast("请同时填写中文原文与译文");
+    return;
+  }
+  setBusy(true, "Auto QA 质检中…");
+  $("#autoQaState").textContent = "质检中…";
+  $("#autoQaState").className = "badge warning";
+  try {
+    const payload = await api("/api/auto-qa", {
+      method: "POST",
+      body: JSON.stringify({
+        source, translation,
+        locale: state.autoQaLocale,
+        contentType: $("#autoQaContentType").value,
+        domain: $("#autoQaDomain").value
+      })
+    });
+    renderAutoQaReport(payload);
+    toast(`质检完成：${payload.scores.overall} 分 · 已保存到任务中心`);
+  } catch (error) {
+    $("#autoQaState").textContent = "质检失败";
+    $("#autoQaState").className = "badge error";
+    toast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function autoQaScoreTone(score) {
+  return score >= 90 ? "good" : score >= 70 ? "warn" : "bad";
+}
+
+function renderAutoQaReport(payload) {
+  const { scores, summary, segments = [], alignmentIssues = [], alignmentNote, tagsStripped, segmentCounts, fallbackReason, references, qaCases, classification, styleProfile } = payload;
+  const scoreCard = (score, label, caption, tone) => `
+    <div class="autoqa-score-card ${tone}"><strong>${score}</strong><span>${escapeHtml(label)}</span><small>${escapeHtml(caption)}</small></div>`;
+  $("#autoQaScores").innerHTML =
+    scoreCard(scores.overall, "综合分", "基本 20% · 忠实性 50% · Nuance 30%", "overall")
+    + AUTO_QA_DIMENSIONS.map(([dimension, label]) => {
+      const value = scores.dimensions[dimension];
+      const stats = summary[dimension] || {};
+      const counts = stats.total
+        ? `${stats.total} 条问题 · 阻断 ${stats.error} · 主要 ${stats.major} · 轻微 ${stats.minor}`
+        : "未发现问题";
+      return scoreCard(value, label, counts, autoQaScoreTone(value));
+    }).join("");
+
+  const evidenceLines = [];
+  if (styleProfile?.name) evidenceLines.push(`风格规范：${styleProfile.name} v${styleProfile.version || 1}`);
+  if (references?.length) evidenceLines.push(`已批准译例 ${references.length} 条`);
+  if (qaCases?.length) evidenceLines.push(`历史 QA 反例 ${qaCases.length} 条`);
+  if (classification?.contentType) evidenceLines.push(`识别语体：${classification.contentType}`);
+  const evidenceBox = evidenceLines.length
+    ? `<div class="reflection-box"><strong>Nuance 对照证据</strong>\n${escapeHtml(evidenceLines.join("\n"))}</div>`
+    : "";
+  const notes = [];
+  if (tagsStripped) notes.push("输入含 HTML 标签，已剥离后分析。");
+  if (alignmentNote) notes.push(alignmentNote);
+  const noteBox = notes.length ? `<div class="reflection-box"><strong>逐句对齐说明</strong>\n${escapeHtml(notes.join("\n"))}</div>` : "";
+  const fallback = fallbackReason
+    ? `<div class="qa-item error">部分句子模型层质检未完成：${escapeHtml(fallbackReason)}</div>`
+    : "";
+  const alignmentBlock = alignmentIssues.length
+    ? `<section class="autoqa-dimension">
+        <div class="autoqa-dimension-head"><div><span class="card-kicker">SENTENCE ALIGNMENT</span><h3>整句级问题</h3><small>按语义向量逐句对齐时发现的疑似漏译 / 增译</small></div><span class="asset-count">${alignmentIssues.length} 条</span></div>
+        ${alignmentIssues.map(renderAutoQaIssue).join("")}
+      </section>`
+    : "";
+  const openByDefault = segments.length <= 6;
+  const segmentCards = segments.map((segment, index) => renderAutoQaSegment(segment, openByDefault || index < 2)).join("");
+  $("#autoQaIssues").innerHTML = `
+    ${evidenceBox}${noteBox}${fallback}${alignmentBlock}
+    <section class="autoqa-dimension">
+      <div class="autoqa-dimension-head"><div><span class="card-kicker">PER-SENTENCE CHECKS</span><h3>逐句检查</h3><small>原文 ${segmentCounts?.source ?? segments.length} 句 / 译文 ${segmentCounts?.translation ?? segments.length} 句，每一句按三个维度独立审查</small></div><span class="asset-count subtle">${segments.length} 组</span></div>
+      ${segmentCards || `<div class="qa-item warning">未能配对任何句子，请检查输入内容。</div>`}
+    </section>`;
+  $("#autoQaReport").hidden = false;
+
+  const overall = scores.overall;
+  $("#autoQaState").textContent = fallbackReason ? "部分模型检查失败" : `${overall} 分`;
+  $("#autoQaState").className = `badge ${overall >= 90 ? "success" : overall >= 70 ? "warning" : "error"}`;
+}
+
+function renderAutoQaSegment(segment, open) {
+  const { index, sourceIndices, translationIndices, source, translation, issues, scores, fallbackReason: segmentFallback } = segment;
+  const metrics = AUTO_QA_DIMENSIONS.map(([dimension, label]) =>
+    `<span class="autoqa-segment-metric ${autoQaScoreTone(scores.dimensions[dimension])}"><i>${scores.dimensions[dimension]}</i>${label}</span>`).join("");
+  const sourceLabel = sourceIndices.length > 1 ? `原文第 ${sourceIndices.join("、")} 句合并` : `原文第 ${sourceIndices[0] || index} 句`;
+  const translationLabel = translationIndices.length > 1 ? `译文第 ${translationIndices.join("、")} 句合并` : `译文第 ${translationIndices[0] || index} 句`;
+  const segmentFailure = segmentFallback ? `<div class="qa-item warning">本组模型检查失败：${escapeHtml(segmentFallback)}，仅展示本地基本检查。</div>` : "";
+  const body = `<div class="autoqa-segment-body">
+      <div class="autoqa-segment-pair">
+        <div><span>${escapeHtml(sourceLabel)}</span><p>${escapeHtml(source)}</p></div>
+        <div><span>${escapeHtml(translationLabel)}</span><p>${escapeHtml(translation)}</p></div>
+      </div>
+      ${segmentFailure}
+      ${issues.length ? issues.map(renderAutoQaIssue).join("") : `<div class="qa-item">本句三层检查通过</div>`}
+    </div>`;
+  return `<details class="autoqa-segment"${open ? " open" : ""}>
+    <summary>
+      <span class="autoqa-segment-index">#${index}</span>
+      <span class="autoqa-segment-score ${autoQaScoreTone(scores.overall)}">${scores.overall}</span>
+      ${metrics}
+      <span class="autoqa-segment-text">${escapeHtml(source.length > 42 ? `${source.slice(0, 42)}…` : source)}</span>
+    </summary>
+    ${body}
+  </details>`;
+}
+
+function renderAutoQaIssue(issue) {
+  const severityLabel = issue.severity === "critical" || issue.severity === "error" ? "阻断"
+    : issue.severity === "major" ? "主要" : "轻微";
+  const spans = issue.sourceSpan || issue.targetSpan
+    ? `<div class="autoqa-span-pair">${issue.sourceSpan ? `<span>原文「${escapeHtml(issue.sourceSpan)}」</span>` : ""}${issue.targetSpan ? `<span>译文「${escapeHtml(issue.targetSpan)}」</span>` : ""}</div>`
+    : "";
+  const suggestion = issue.suggestion ? `<small class="autoqa-suggestion">建议：${escapeHtml(issue.suggestion)}</small>` : "";
+  const confidence = Number.isFinite(Number(issue.confidence))
+    ? `<span class="autoqa-confidence">置信 ${Math.round(Number(issue.confidence) * 100)}%</span>`
+    : "";
+  return `<div class="autoqa-issue ${issue.severity}">
+    <div class="autoqa-issue-head"><span class="autoqa-category">${escapeHtml(issue.category || "other")}</span><span class="autoqa-severity ${issue.severity}">${severityLabel}</span>${confidence}</div>
+    <p>${escapeHtml(issue.message)}</p>${spans}${suggestion}
+  </div>`;
 }
 
 function compactQaReferences(aiQa = {}) {
@@ -917,6 +1092,7 @@ function formatTaskTime(value) {
 
 async function loadTasks() {
   const query = new URLSearchParams();
+  if ($("#taskType")?.value) query.set("type", $("#taskType").value);
   if ($("#taskLocale")?.value) query.set("locale", $("#taskLocale").value);
   if ($("#taskStatus")?.value) query.set("status", $("#taskStatus").value);
   if ($("#taskSearch")?.value.trim()) query.set("search", $("#taskSearch").value.trim());
@@ -930,22 +1106,237 @@ function renderTasks() {
   const completed = tasks.filter((item) => item.status === "completed").length;
   const review = tasks.filter((item) => item.status === "review" || item.status === "needs_attention").length;
   const pending = tasks.filter((item) => item.status === "in_progress").length;
-  $("#taskSummary").innerHTML = `<span>进行中 ${pending}</span><span>待处理 QA ${review}</span><span>已完成 ${completed}</span><span>共 ${tasks.reduce((sum, item) => sum + item.totalSegments, 0)} 个翻译单元</span>`;
-  $("#taskList").innerHTML = tasks.length ? tasks.map((task) => {
-    const locale = state.bootstrap.locales[task.locale];
-    const progress = task.totalSegments ? Math.round(task.completedSegments / task.totalSegments * 100) : 0;
-    return `<article class="task-row" data-task-id="${escapeHtml(task.batchId)}">
-      <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.filename)}</strong><span class="task-status ${escapeHtml(task.status)}">${taskStatusLabel(task.status)}</span></div><small>${escapeHtml(locale?.label || task.locale)} · ${escapeHtml(contentTypeLabel(task.contentType))} · ${escapeHtml(task.domain)} · ${formatTaskTime(task.updatedAt)}</small></div>
-      <div class="task-progress"><div><i style="width:${progress}%"></i></div><span>${task.completedSegments} / ${task.totalSegments}</span></div>
-      <div class="task-qa"><strong>${task.qaPending ? `${task.qaPending} 条待处理` : "QA 已清"}</strong>${task.failedSegments ? `<small>${task.failedSegments} 段失败</small>` : `<small>${task.format || "text"}</small>`}</div>
-      <div class="task-actions"><button class="button ghost small" data-action="open-task">打开任务</button><button class="button secondary small" data-action="export-task">导出 Excel</button></div>
-    </article>`;
-  }).join("") : '<div class="empty-list task-empty">没有符合当前筛选条件的历史任务</div>';
+  const unitCount = tasks.reduce((sum, item) => sum + (item.totalSegments || 0), 0);
+  $("#taskSummary").innerHTML = `<span>进行中 ${pending}</span><span>待处理 QA ${review}</span><span>已完成 ${completed}</span><span>共 ${tasks.length} 个任务 · ${unitCount} 个翻译单元</span>`;
+  $("#taskList").innerHTML = tasks.length ? tasks.map((task) => task.type === "autoqa" ? renderQaTaskRow(task) : renderBatchTaskRow(task)).join("") : '<div class="empty-list task-empty">没有符合当前筛选条件的历史任务</div>';
   $$(".task-row [data-action]").forEach((button) => button.addEventListener("click", () => {
     const id = button.closest(".task-row").dataset.taskId;
-    if (button.dataset.action === "open-task") openTask(id);
-    else exportTaskExcel(id, button);
+    const action = button.dataset.action;
+    if (action === "open-task") openTask(id);
+    else if (action === "export-task") exportTaskExcel(id, button);
+    else if (action === "share-task") createBatchShare(id, button);
+    else if (action === "share-qa-task") createQaTaskShare(id, button);
+    else if (action === "feedback-task") openShareFeedbackDialog({ batchId: id });
+    else if (action === "feedback-qa-task") openShareFeedbackDialog({ qaTaskId: id });
+    else if (action === "open-qa-task") openQaTask(id);
+    else if (action === "delete-qa-task") deleteQaTaskRow(id, button);
   }));
+}
+
+function renderBatchTaskRow(task) {
+  const locale = state.bootstrap.locales[task.locale];
+  const progress = task.totalSegments ? Math.round(task.completedSegments / task.totalSegments * 100) : 0;
+  return `<article class="task-row" data-task-id="${escapeHtml(task.batchId)}">
+    <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.filename)}</strong><span class="task-status ${escapeHtml(task.status)}">${taskStatusLabel(task.status)}</span><span class="task-type-chip">批次</span></div><small>${escapeHtml(locale?.label || task.locale)} · ${escapeHtml(contentTypeLabel(task.contentType))} · ${escapeHtml(task.domain)} · ${formatTaskTime(task.updatedAt)}</small></div>
+    <div class="task-progress"><div><i style="width:${progress}%"></i></div><span>${task.completedSegments} / ${task.totalSegments}</span></div>
+    <div class="task-qa"><strong>${task.qaPending ? `${task.qaPending} 条待处理` : "QA 已清"}</strong>${task.failedSegments ? `<small>${task.failedSegments} 段失败</small>` : `<small>${task.format || "text"}</small>`}</div>
+    <div class="task-actions"><button class="button ghost small" data-action="open-task">打开任务</button><button class="button ghost small" data-action="share-task">分享验证</button><button class="button ghost small" data-action="feedback-task">反馈</button><button class="button secondary small" data-action="export-task">导出 Excel</button></div>
+  </article>`;
+}
+
+function renderQaTaskRow(task) {
+  const locale = state.bootstrap.locales[task.locale];
+  const scoreTone = task.overallScore == null ? "neutral" : task.overallScore >= 90 ? "success" : task.overallScore >= 70 ? "warning" : "error";
+  return `<article class="task-row" data-task-id="${escapeHtml(task.id)}">
+    <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.title)}</strong><span class="badge ${scoreTone}">${task.overallScore == null ? "未评分" : `${task.overallScore} 分`}</span><span class="task-type-chip">Auto QA</span></div><small>${escapeHtml(locale?.label || task.locale)} · ${escapeHtml(contentTypeLabel(task.contentType))} · ${escapeHtml(task.domain)} · ${formatTaskTime(task.updatedAt)}</small></div>
+    <div class="task-progress"><div><i style="width:100%"></i></div><span>${task.totalSegments} 句原文</span></div>
+    <div class="task-qa"><strong>${task.qaPending ? `${task.qaPending} 个问题` : "未发现问题"}</strong><small>${escapeHtml(task.status === "review" ? "需要复核" : "已通过")}</small></div>
+    <div class="task-actions"><button class="button secondary small" data-action="open-qa-task">查看报告</button><button class="button ghost small" data-action="share-qa-task">分享验证</button><button class="button ghost small" data-action="feedback-qa-task">反馈</button><button class="button ghost small" data-action="delete-qa-task">删除</button></div>
+  </article>`;
+}
+
+async function openQaTask(id) {
+  try {
+    const payload = await api(`/api/qa-tasks/${encodeURIComponent(id)}`);
+    const { task, report } = payload;
+    $("#autoQaSource").value = task.sourceText || "";
+    $("#autoQaTarget").value = task.translationText || "";
+    $("#autoQaSourceCount").textContent = `${[...(task.sourceText || "")].length} 字`;
+    state.autoQaLocale = task.locale;
+    renderLocaleStrip($("#autoQaLocales"), state.autoQaLocale, updateAutoQaLocale);
+    $("#autoQaTargetKicker").textContent = `TARGET · ${task.locale.toUpperCase()}`;
+    $("#autoQaTargetTitle").textContent = `${state.bootstrap.locales[task.locale]?.label || task.locale}译文`;
+    switchView("autoqa");
+    renderAutoQaReport(report);
+    toast("已回放质检报告（未重新调用模型）");
+  } catch (error) { toast(error.message); }
+}
+
+async function deleteQaTaskRow(id, button) {
+  if (!confirm("确认删除这条质检任务？删除后无法恢复。")) return;
+  button.disabled = true;
+  button.textContent = "删除中…";
+  try {
+    await api(`/api/qa-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await loadTasks();
+    toast("已删除质检任务");
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "删除";
+    toast(error.message);
+  }
+}
+
+async function createBatchShare(batchId, button) {
+  button.disabled = true;
+  button.textContent = "生成中…";
+  try {
+    const payload = await api(`/api/tasks/${encodeURIComponent(batchId)}/share`, { method: "POST" });
+    showShareLinkDialog(payload);
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.textContent = "分享验证"; }
+}
+
+function showShareLinkDialog(payload) {
+  const primary = `${location.origin}${payload.sharePath}`;
+  const urls = [...new Set([primary, ...(payload.shareUrls || [])])];
+  $("#shareUrlList").innerHTML = urls.map((url) => `
+    <div class="share-url-row"><input readonly value="${escapeHtml(url)}" /><button class="button ghost small share-copy" data-url="${escapeHtml(url)}">复制</button></div>`).join("");
+  $("#shareGlossNote").textContent = `已为 ${payload.glossedSegments} / ${payload.totalSegments} 段生成语素拆解与直译${payload.glossedSegments < payload.totalSegments ? "（超出 30 段的部分未生成）" : ""}。`;
+  $$(".share-copy").forEach((copyButton) => copyButton.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(copyButton.dataset.url);
+    toast("链接已复制");
+  }));
+  $("#shareLinkDialog").showModal();
+}
+
+async function createQaTaskShare(id, button) {
+  button.disabled = true;
+  button.textContent = "生成中…";
+  try {
+    const payload = await api(`/api/qa-tasks/${encodeURIComponent(id)}/share`, { method: "POST" });
+    showShareLinkDialog(payload);
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.textContent = "分享验证"; }
+}
+
+async function openShareFeedbackDialog(scope = {}) {
+  state.shareFeedbackScope = scope;
+  $("#shareFeedbackDialog").showModal();
+  $("#shareFeedbackList").innerHTML = '<div class="empty-list">正在读取反馈……</div>';
+  try {
+    const query = new URLSearchParams();
+    if (scope.batchId) query.set("batchId", scope.batchId);
+    if (scope.qaTaskId) query.set("qaTaskId", scope.qaTaskId);
+    const shares = await api(`/api/shares?${query}`);
+    const feedbacks = shares.flatMap((share) => (share.feedbacks || []).map((feedback) => ({ ...feedback, token: share.token, filename: share.filename })));
+    if (!feedbacks.length) {
+      $("#shareFeedbackList").innerHTML = '<div class="empty-list">该任务还没有同事反馈。生成分享链接发给同事后，反馈会出现在这里。</div>';
+      return;
+    }
+    $("#shareFeedbackList").innerHTML = feedbacks.map((feedback) => {
+      const statusLabel = feedback.status === "adopted" ? "已采纳" : feedback.status === "ignored" ? "已忽略" : "待采纳";
+      const statusClass = feedback.status === "adopted" ? "success" : feedback.status === "ignored" ? "neutral" : "warning";
+      return `<article class="share-feedback-item ${feedback.status}">
+        <div class="share-feedback-head"><span class="badge ${statusClass}">${statusLabel}</span><strong>第 ${feedback.segmentIndex} 段</strong><small>${escapeHtml(feedback.reviewer || "匿名")} · ${formatTaskTime(feedback.createdAt)}</small></div>
+        <p class="share-feedback-request">${escapeHtml(feedback.request)}</p>
+        ${feedback.suggestedTranslation ? `<p class="share-feedback-suggestion">建议译法：${escapeHtml(feedback.suggestedTranslation)}</p>` : ""}
+        ${feedback.status === "pending" ? `<div class="task-actions"><button class="button secondary small" data-feedback-action="adopt" data-token="${escapeHtml(feedback.token)}" data-feedback-id="${escapeHtml(feedback.id)}">采纳 → 风格证据</button><button class="button ghost small" data-feedback-action="ignore" data-token="${escapeHtml(feedback.token)}" data-feedback-id="${escapeHtml(feedback.id)}">忽略</button></div>` : ""}
+      </article>`;
+    }).join("");
+    $$(".share-feedback-item [data-feedback-action]").forEach((button) => button.addEventListener("click", () =>
+      resolveShareFeedback(button.dataset.token, button.dataset.feedbackId, button.dataset.feedbackAction, button)));
+  } catch (error) {
+    $("#shareFeedbackList").innerHTML = `<div class="qa-item error">读取失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function resolveShareFeedback(token, feedbackId, action, button) {
+  if (action === "adopt" && !confirm("采纳后写入风格证据池（满 8 条会生成风格草稿），确认采纳这条意见？")) return;
+  button.disabled = true;
+  try {
+    await api(`/api/share/${encodeURIComponent(token)}/resolve`, { method: "POST", body: JSON.stringify({ feedbackId, action }) });
+    toast(action === "adopt" ? "已采纳并写入风格证据" : "已忽略该意见");
+    if (state.shareFeedbackScope) await openShareFeedbackDialog(state.shareFeedbackScope);
+    loadTasks().catch(() => {});
+    loadPendingFeedback({ silent: true });
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+  }
+}
+
+// ---------- 右上角反馈铃铛 + 反馈中心整页 ----------
+
+async function loadPendingFeedback({ silent = false } = {}) {
+  try {
+    const pending = await api("/api/feedback/pending");
+    state.feedbackPending = Array.isArray(pending) ? pending : [];
+    const count = state.feedbackPending.length;
+    for (const badge of [$("#feedbackBellBadge"), $("#feedbackNavBadge")]) {
+      if (!badge) continue;
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.hidden = count === 0;
+    }
+    if (!silent && count > state.feedbackLastCount) {
+      toast(`收到 ${count - state.feedbackLastCount} 条新同事反馈，点击右上角铃铛处理`);
+      const bell = $("#feedbackBell");
+      bell.classList.add("has-new");
+      setTimeout(() => bell.classList.remove("has-new"), 2500);
+    }
+    state.feedbackLastCount = count;
+  } catch {
+    // 轮询失败保持静默，避免反复打扰
+  }
+}
+
+function startFeedbackPolling() {
+  loadPendingFeedback({ silent: true });
+  setInterval(() => {
+    if (document.visibilityState === "visible") loadPendingFeedback();
+  }, 15_000);
+}
+
+async function loadFeedbackPage() {
+  try {
+    state.feedbackAll = await api("/api/feedback");
+    renderFeedbackPage();
+  } catch (error) {
+    $("#feedbackPageList").innerHTML = `<div class="qa-item error">读取失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderFeedbackPage() {
+  const all = state.feedbackAll || [];
+  const filter = state.feedbackStatusFilter;
+  const list = filter === "all" ? all : all.filter((item) => item.status === filter);
+  $("#feedbackPageCount").textContent = `${list.length} 条`;
+  if (!list.length) {
+    $("#feedbackPageList").innerHTML = filter === "pending"
+      ? '<div class="empty-list">暂时没有待批准的反馈。把分享链接发给同事后，新反馈会自动出现在这里。</div>'
+      : '<div class="empty-list">该状态下没有反馈。</div>';
+    return;
+  }
+  $("#feedbackPageList").innerHTML = list.map((feedback) => {
+    const statusLabel = feedback.status === "adopted" ? "已批准入风格" : feedback.status === "ignored" ? "已忽略" : "待批准";
+    const statusClass = feedback.status === "adopted" ? "success" : feedback.status === "ignored" ? "neutral" : "warning";
+    const locale = state.bootstrap.locales[feedback.locale];
+    return `<article class="share-feedback-item ${feedback.status}">
+      <div class="share-feedback-head"><span class="badge ${statusClass}">${statusLabel}</span><strong>${escapeHtml(feedback.filename)} · 第 ${feedback.segmentIndex} 段</strong><small>${escapeHtml(feedback.reviewer)} · ${formatTaskTime(feedback.createdAt)}${feedback.resolvedAt ? ` · 处理于 ${formatTaskTime(feedback.resolvedAt)}` : ""}${locale ? ` · ${escapeHtml(locale.label)}` : ""}</small></div>
+      <div class="feedback-bell-pair">
+        <p><span>原文</span>${escapeHtml(feedback.source)}</p>
+        <p><span>当前译文</span>${escapeHtml(feedback.translation)}</p>
+      </div>
+      <p class="share-feedback-request"><strong>要求：</strong>${escapeHtml(feedback.request)}</p>
+      ${feedback.suggestedTranslation ? `<p class="share-feedback-suggestion">建议译法：${escapeHtml(feedback.suggestedTranslation)}</p>` : ""}
+      ${feedback.status === "pending" ? `<div class="task-actions"><button class="button secondary small" data-bell-action="adopt" data-token="${escapeHtml(feedback.token)}" data-feedback-id="${escapeHtml(feedback.id)}">批准入风格</button><button class="button ghost small" data-bell-action="ignore" data-token="${escapeHtml(feedback.token)}" data-feedback-id="${escapeHtml(feedback.id)}">忽略</button></div>` : ""}
+    </article>`;
+  }).join("");
+  $$("#feedbackPageList [data-bell-action]").forEach((button) => button.addEventListener("click", () =>
+    resolveFeedbackOnPage(button.dataset.token, button.dataset.feedbackId, button.dataset.bellAction, button)));
+}
+
+async function resolveFeedbackOnPage(token, feedbackId, action, button) {
+  if (action === "adopt" && !confirm("批准后进入风格证据池（满 8 条会生成风格草稿），确认批准这条反馈？")) return;
+  button.disabled = true;
+  try {
+    await api(`/api/share/${encodeURIComponent(token)}/resolve`, { method: "POST", body: JSON.stringify({ feedbackId, action }) });
+    toast(action === "adopt" ? "已批准并进入风格证据池" : "已忽略该反馈");
+    await Promise.all([loadFeedbackPage(), loadPendingFeedback({ silent: true })]);
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+  }
 }
 
 async function exportTaskExcel(batchId, button) {
@@ -2160,6 +2551,7 @@ function populateSelects() {
   $("#contentType").insertAdjacentHTML("beforeend", contentOptions);
   $("#assetForm select[name=contentType]").innerHTML = contentOptions;
   $("#learningContentType").innerHTML = contentOptions;
+  $("#autoQaContentType").insertAdjacentHTML("beforeend", contentOptions);
   if ([...$("#learningContentType").options].some((option) => option.value === "general")) $("#learningContentType").value = "general";
   $("#taskLocale").insertAdjacentHTML("beforeend", Object.entries(state.bootstrap.locales).map(([locale, details]) => `<option value="${locale}">${details.label}</option>`).join(""));
 }
@@ -2179,9 +2571,14 @@ function bindEvents() {
     else if (state.view === "tasks") loadTasks().catch((error) => toast(error.message));
     else if (state.view === "styles") loadStyleGuidance(state.styleLocale).catch((error) => toast(error.message));
     else if (state.view === "learning") generateLearningSkill();
+    else if (state.view === "autoqa") runAutoQa().catch((error) => toast(error.message));
+    else if (state.view === "feedback") loadFeedbackPage().catch((error) => toast(error.message));
     else $("#assetDialog").showModal();
   });
-  $("#secondaryAction").addEventListener("click", () => state.view === "workbench" ? (state.translationMode === "batch" ? resetBatch() : clearTranslation()) : resetImport());
+  $("#secondaryAction").addEventListener("click", () => {
+    if (state.view === "autoqa") return clearAutoQa();
+    return state.view === "workbench" ? (state.translationMode === "batch" ? resetBatch() : clearTranslation()) : resetImport();
+  });
   $("#tertiaryAction").addEventListener("click", async () => {
     if (state.view === "workbench" && state.translationMode === "batch") return exportBatch();
     await navigator.clipboard.writeText(state.lastResult.translation);
@@ -2202,6 +2599,20 @@ function bindEvents() {
     previewClassificationAndMatches();
     invalidateBatchTranslations("批次领域已改变，请重新运行翻译");
   });
+  $("#autoQaSource").addEventListener("input", () => {
+    $("#autoQaSourceCount").textContent = `${[...$("#autoQaSource").value].length} 字`;
+    $("#autoQaState").textContent = "等待质检";
+    $("#autoQaState").className = "badge neutral";
+    refreshActions();
+  });
+  $("#autoQaTarget").addEventListener("input", () => {
+    $("#autoQaState").textContent = "等待质检";
+    $("#autoQaState").className = "badge neutral";
+    refreshActions();
+  });
+  ["autoQaSource", "autoQaTarget"].forEach((id) => $(`#${id}`).addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) runAutoQa().catch((error) => toast(error.message));
+  }));
   $("#batchPasteText").addEventListener("input", () => {
     if ($("#batchPasteText").value.trim()) {
       state.batchFile = null;
@@ -2239,6 +2650,7 @@ function bindEvents() {
   $("#assetSearch").addEventListener("input", renderAssets);
   $("#taskLocale").addEventListener("change", loadTasks);
   $("#taskStatus").addEventListener("change", loadTasks);
+  $("#taskType").addEventListener("change", loadTasks);
   $("#taskSearch").addEventListener("input", () => { clearTimeout(state.taskSearchTimer); state.taskSearchTimer = setTimeout(() => loadTasks().catch((error) => toast(error.message)), 250); });
   $("#refreshTasks").addEventListener("click", () => loadTasks().catch((error) => toast(error.message)));
   $("#styleStatus").addEventListener("change", renderStyleGuidance);
@@ -2269,9 +2681,17 @@ function bindEvents() {
       toast(`已保存到${state.bootstrap.locales[state.assetLocale].label}术语库`);
     } catch (error) { toast(error.message); }
   });
+  $("#feedbackBell").addEventListener("click", () => {
+    switchView("feedback");
+    loadFeedbackPage().catch((error) => toast(error.message));
+  });
+  $("#refreshFeedback").addEventListener("click", () => loadFeedbackPage().catch((error) => toast(error.message)));
+  $("#feedbackStatusFilter").addEventListener("change", () => {
+    state.feedbackStatusFilter = $("#feedbackStatusFilter").value;
+    renderFeedbackPage();
+  });
   $("#openProvider").addEventListener("click", () => {
-    const provider = state.bootstrap.provider;
-    $("#providerForm [name=baseUrl]").value = provider.baseUrl;
+    const provider = state.bootstrap.provider;    $("#providerForm [name=baseUrl]").value = provider.baseUrl;
     $("#providerForm [name=model]").value = provider.model;
     $("#providerForm [name=embeddingModel]").value = provider.embeddingModel || "";
     $("#providerForm [name=embeddingBaseUrl]").value = provider.embeddingBaseUrl || "";
@@ -2333,10 +2753,13 @@ async function initialize() {
     renderLocaleStrip($("#assetLocales"), state.assetLocale, updateAssetLocale);
     renderLocaleStrip($("#styleLocales"), state.styleLocale, updateStyleLocale);
     renderLocaleStrip($("#learningLocales"), state.learningLocale, loadLearning);
+    renderLocaleStrip($("#autoQaLocales"), state.autoQaLocale, updateAutoQaLocale);
     bindEvents();
     setTranslationMode("single");
     await loadAssets(state.assetLocale);
     updateWorkbenchLocale(state.workbenchLocale);
+    updateAutoQaLocale(state.autoQaLocale);
+    startFeedbackPolling();
     refreshActions();
     await restoreBatchProgress();
   } catch (error) {

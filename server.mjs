@@ -1,4 +1,6 @@
 import http from "node:http";
+import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,10 +9,11 @@ import { classifyContent } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { adjudicatePotentialTermsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, evaluateTranslationWithModel, getProviderConfig, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, embed, evaluateAutoQaWithModel, evaluateGrammarWithModel, evaluateTranslationWithModel, getProviderConfig, glossTranslationWithModel, isEmbeddingConfigured, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations } from "./src/store.mjs";
+import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, dedupeIssues, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
@@ -49,6 +52,39 @@ function json(res, status, payload) {
     "cache-control": "no-store"
   });
   res.end(body);
+}
+
+/** 本机局域网 IPv4 候选分享地址（同事在同一网络内可访问）。 */
+function lanShareUrls(token) {
+  const urls = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family === "IPv4" && !entry.internal) urls.push(`http://${entry.address}:${PORT}/share/${token}`);
+    }
+  }
+  return [...new Set(urls)];
+}
+
+/** 把分享记录里的一条反馈组装成跨分享的统一条目。 */
+function feedbackEntry(share, feedback) {
+  const segment = (share.segments || []).find((item) => item.index === feedback.segmentIndex);
+  return {
+    id: feedback.id,
+    token: share.token,
+    filename: share.filename,
+    locale: share.locale,
+    contentType: share.contentType,
+    domain: share.domain,
+    segmentIndex: feedback.segmentIndex,
+    source: segment?.source || "",
+    translation: segment?.translation || "",
+    request: feedback.request,
+    suggestedTranslation: feedback.suggestedTranslation || "",
+    reviewer: feedback.reviewer || "匿名",
+    status: feedback.status || "pending",
+    createdAt: feedback.createdAt,
+    resolvedAt: feedback.resolvedAt || ""
+  };
 }
 
 function learningScope({ locale, contentType = "general", domain = "general", project = "default" }) {
@@ -988,12 +1024,17 @@ async function apiHandler(req, res, url) {
     return json(res, 200, saved);
   }
   if (req.method === "GET" && url.pathname === "/api/tasks") {
-    return json(res, 200, await listBatchRuns({
-      locale: url.searchParams.get("locale") || "",
-      status: url.searchParams.get("status") || "",
-      search: url.searchParams.get("search") || "",
-      limit: Number(url.searchParams.get("limit")) || 200
-    }));
+    const type = url.searchParams.get("type") || "";
+    const locale = url.searchParams.get("locale") || "";
+    const status = url.searchParams.get("status") || "";
+    const search = url.searchParams.get("search") || "";
+    const limit = Number(url.searchParams.get("limit")) || 200;
+    const batches = type === "autoqa" ? [] : await listBatchRuns({ locale, status, search, limit });
+    const qaTasks = type === "batch" ? [] : await listQaTasks({ locale, status, search, limit });
+    const merged = [...batches.map((item) => ({ ...item, type: "batch" })), ...qaTasks]
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+      .slice(0, limit);
+    return json(res, 200, merged);
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/tasks/") && url.pathname.endsWith("/export")) {
     const batchId = decodeURIComponent(url.pathname.slice("/api/tasks/".length, -"/export".length));
@@ -1168,6 +1209,473 @@ async function apiHandler(req, res, url) {
     const aiQa = await runAiQaLoop({ contextPack, initialTranslation: body.translation || "", matches, locale, contentType, domain, batchId: body.batchId || "manual-recheck" });
     return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, styleProfile: contextPack.styleProfile });
   }
+  if (req.method === "POST" && url.pathname === "/api/auto-qa") {
+    const body = await readJsonBody(req);
+    const locale = assertLocale(body.locale);
+    const source = String(body.source || "").trim();
+    const translation = String(body.translation || "").trim();
+    if (!source || !translation) {
+      const error = new Error("请同时提供中文原文与译文");
+      error.statusCode = 400;
+      throw error;
+    }
+    const contentType = body.contentType || "general";
+    const domain = body.domain || "game";
+    // 网页粘贴常带 HTML 标签：剥离后参与分析，避免标签差异淹没真实问题
+    const stripTags = (value) => String(value).replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
+    const tagsStripped = /<[^>]*>/u.test(source) || /<[^>]*>/u.test(translation);
+    const cleanSource = stripTags(source);
+    const cleanTranslation = stripTags(translation);
+    if (!cleanSource || !cleanTranslation) {
+      const error = new Error("剥离 HTML 标签后没有可用文本");
+      error.statusCode = 400;
+      throw error;
+    }
+    const assets = await getAssets(locale);
+    const matches = matchTerms(cleanSource, assets, { contentType, domain });
+    const classification = await classify({ text: cleanSource, hint: contentType, useModel: false });
+    const scopeContentType = classification.contentType || "general";
+    const styleProfile = await getStyleProfile(locale, scopeContentType, domain);
+    const queryEmbedding = await embedSource(cleanSource);
+    const references = rankTranslationMemories(cleanSource, await getMemories(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
+    const qaCases = rankQaCases(cleanSource, await getQaCases(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 3, queryEmbedding });
+    const evidence = await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 6 });
+    const sourceSegments = splitQaSegments(cleanSource);
+    const translationSegments = splitQaSegments(cleanTranslation);
+
+    // 逐句对齐三级降级：语义向量 DP 对齐（支持 1:N / N:1 合并）→ 模型逐句对齐 → 按位置近似配对。
+    // 本地词面向量跨语言无意义，绝不能拿来做中↔外对齐。
+    let alignmentNote = "";
+    let pairPlan = null;
+    let alignmentMethod = "position";
+    if (isEmbeddingConfigured() && (sourceSegments.length + translationSegments.length) <= 24) {
+      try {
+        await embed("对齐探针");
+        const [sourceEmbeddings, translationEmbeddings] = await Promise.all([
+          Promise.all(sourceSegments.map((segment) => embedSource(segment))),
+          Promise.all(translationSegments.map((segment) => embedSource(segment)))
+        ]);
+        if ([...sourceEmbeddings, ...translationEmbeddings].every((embedding) => embedding && !embedding.local)) {
+          const scoreMatrix = sourceEmbeddings.map((sourceEmbedding) =>
+            translationEmbeddings.map((translationEmbedding) => cosineSimilarity(sourceEmbedding?.vector, translationEmbedding?.vector)));
+          const maxScore = Math.max(0, ...scoreMatrix.flat());
+          if (maxScore >= 0.1) {
+            pairPlan = alignSegmentPairs(sourceSegments.length, translationSegments.length, (i, j) => scoreMatrix[i][j]);
+            alignmentMethod = "embedding";
+          }
+        }
+      } catch {
+        // Embedding 服务异常，继续降级
+      }
+    }
+    if (!pairPlan && sourceSegments.length !== translationSegments.length) {
+      try {
+        const plan = await alignSegmentsWithModel({ sourceSegments, translationSegments, locale });
+        if (plan) {
+          pairPlan = plan;
+          alignmentMethod = "model";
+        }
+      } catch {
+        // 模型对齐失败，按位置配对
+      }
+    }
+    if (!pairPlan) pairPlan = alignSegmentPairs(sourceSegments.length, translationSegments.length, null);
+    if (sourceSegments.length !== translationSegments.length) {
+      const counts = `原文 ${sourceSegments.length} 句 / 译文 ${translationSegments.length} 句`;
+      alignmentNote = alignmentMethod === "embedding"
+        ? `${counts}，已按语义向量自动对齐（可合并相邻句）。`
+        : alignmentMethod === "model"
+          ? `${counts}，Embedding 不可用，已由模型逐句对齐（可合并相邻句）。`
+          : `${counts}，自动对齐不可用，已按顺序近似配对，请人工核对。`;
+    }
+
+    // 每个对齐组独立执行：语言正确性专项（拼写/语法）+ 三层检查，两路并行（并发 2 组）
+    const pairTasks = pairPlan.pairs.map((pair) => async () => {
+      const pairSource = pair.sourceIndices.map((index) => sourceSegments[index]).join("\n");
+      const pairTranslation = pair.translationIndices.map((index) => translationSegments[index]).join("\n");
+      const segmentMatches = matchTerms(pairSource, assets, { contentType: scopeContentType, domain });
+      const basicIssues = runBasicQa({ source: pairSource, translation: pairTranslation, matches: segmentMatches });
+      const [grammarResult, aiResult] = await Promise.allSettled([
+        evaluateGrammarWithModel({ translation: pairTranslation, locale, contentType: scopeContentType }),
+        evaluateAutoQaWithModel({
+          source: pairSource, translation: pairTranslation, locale, contentType: scopeContentType, domain,
+          styleProfile, references, qaCases, evidence
+        })
+      ]);
+      const failures = [];
+      let grammarIssues = [];
+      if (grammarResult.status === "fulfilled") grammarIssues = grammarResult.value;
+      else failures.push(`语法专项失败：${String(grammarResult.reason?.message || grammarResult.reason)}`);
+      let aiIssues = [];
+      if (aiResult.status === "fulfilled") aiIssues = aiResult.value;
+      else failures.push(`三层检查失败：${String(aiResult.reason?.message || aiResult.reason)}`);
+      const issues = dedupeIssues([...grammarIssues, ...basicIssues, ...aiIssues]);
+      return {
+        index: 0,
+        sourceIndices: pair.sourceIndices,
+        translationIndices: pair.translationIndices,
+        source: pairSource,
+        translation: pairTranslation,
+        issues,
+        scores: calculateAutoQaScores(issues),
+        summary: summarizeIssues(issues),
+        fallbackReason: failures.join("；")
+      };
+    });
+    const settled = await runTaskPool(pairTasks, (task) => task(), { concurrency: 2 });
+    const segments = settled
+      .filter((result) => result.status === "fulfilled")
+      .map((result, index) => ({ ...result.value, index: index + 1 }));
+    const alignmentIssues = buildAlignmentIssues({
+      sourceSegments, translationSegments,
+      unmatchedSource: pairPlan.unmatchedSource,
+      unmatchedTranslation: pairPlan.unmatchedTranslation
+    });
+    const allIssues = [...segments.flatMap((segment) => segment.issues), ...alignmentIssues];
+    const scores = calculateAutoQaScores(allIssues);
+    const summary = summarizeIssues(allIssues);
+    const fallbackReason = segments
+      .filter((segment) => segment.fallbackReason)
+      .map((segment) => `第 ${segment.index} 组模型检查失败：${segment.fallbackReason}`)
+      .join("；");
+    const report = {
+      locale, matches, tagsStripped, alignmentNote,
+      segmentCounts: { source: sourceSegments.length, translation: translationSegments.length },
+      segments, alignmentIssues,
+      scores, summary,
+      classification, styleProfile,
+      references: references.filter((item) => item.kind !== "qa_case"),
+      qaCases,
+      fallbackReason
+    };
+    const task = await saveQaTask({
+      locale,
+      contentType: scopeContentType,
+      domain,
+      sourceText: cleanSource,
+      translationText: cleanTranslation,
+      title: cleanSource.slice(0, 40),
+      segmentCounts: report.segmentCounts,
+      overallScore: scores.overall,
+      dimensionScores: scores.dimensions,
+      summary,
+      alignmentNote,
+      model: getProviderConfig().model,
+      report
+    });
+    return json(res, 200, { ...report, taskId: task.id });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/qa-tasks/") && url.pathname.endsWith("/share")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/qa-tasks/".length, -"/share".length));
+    const task = await getQaTask(id);
+    if (!task) {
+      const error = new Error("未找到该质检任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    const report = task.report || {};
+    const reportSegments = Array.isArray(report.segments) ? report.segments : [];
+    if (!reportSegments.length) {
+      const error = new Error("该质检报告没有可分享的句子");
+      error.statusCode = 400;
+      throw error;
+    }
+    const GLOSS_LIMIT = 30;
+    const glossTargets = reportSegments.slice(0, GLOSS_LIMIT);
+    const glossSettled = await runTaskPool(glossTargets.map((segment) => ({ translation: segment.translation, locale: task.locale })), async (target) => {
+      try {
+        return await glossTranslationWithModel({ translation: target.translation, locale: target.locale });
+      } catch {
+        return null;
+      }
+    }, { concurrency: 2 });
+    const glossByTarget = new Map(glossSettled.map((result, index) => [index, result.status === "fulfilled" ? result.value : null]));
+    const segments = reportSegments.map((segment, index) => ({
+      index: index + 1,
+      source: segment.source,
+      translation: segment.translation,
+      sourceIndices: segment.sourceIndices || [],
+      translationIndices: segment.translationIndices || [],
+      qaScore: Number.isFinite(segment.scores?.overall) ? segment.scores.overall : null,
+      dimensionScores: segment.scores?.dimensions || null,
+      issues: (segment.issues || []).slice(0, 30).map((issue) => ({
+        severity: issue.severity || "warning",
+        type: issue.type || "qa",
+        category: issue.category || "other",
+        dimension: issue.dimension || "basic",
+        message: String(issue.message || ""),
+        suggestion: String(issue.suggestion || ""),
+        sourceSpan: String(issue.sourceSpan || ""),
+        targetSpan: String(issue.targetSpan || "")
+      })),
+      gloss: index < glossTargets.length ? glossByTarget.get(index) : null
+    }));
+    const meta = {
+      source: "autoqa",
+      overallScore: Number.isFinite(report.scores?.overall) ? report.scores.overall : null,
+      dimensionScores: report.scores?.dimensions || null,
+      summary: report.summary || null,
+      alignmentNote: String(report.alignmentNote || ""),
+      alignmentIssues: Array.isArray(report.alignmentIssues) ? report.alignmentIssues : [],
+      segmentCounts: report.segmentCounts || {},
+      tagsStripped: Boolean(report.tagsStripped),
+      fallbackReason: String(report.fallbackReason || "")
+    };
+    const share = await saveShare({
+      qaTaskId: id,
+      filename: `Auto QA · ${task.title || "未命名质检"}`,
+      locale: task.locale,
+      contentType: task.contentType || "general",
+      domain: task.domain || "general",
+      meta,
+      segments
+    });
+    return json(res, 200, {
+      token: share.token,
+      sharePath: `/share/${share.token}`,
+      shareUrls: lanShareUrls(share.token),
+      glossedSegments: Math.min(reportSegments.length, GLOSS_LIMIT),
+      totalSegments: reportSegments.length
+    });
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/qa-tasks/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/qa-tasks/".length));
+    const task = await getQaTask(id);
+    if (!task) {
+      const error = new Error("未找到该质检任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, {
+      task: {
+        id: task.id, title: task.title, locale: task.locale, contentType: task.contentType, domain: task.domain,
+        sourceText: task.sourceText, translationText: task.translationText, segmentCounts: task.segmentCounts,
+        overallScore: task.overallScore, dimensionScores: task.dimensionScores, summary: task.summary,
+        alignmentNote: task.alignmentNote, model: task.model, createdAt: task.createdAt, updatedAt: task.updatedAt
+      },
+      report: task.report
+    });
+  }
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/qa-tasks/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/qa-tasks/".length));
+    const deleted = await deleteQaTask(id);
+    if (!deleted) {
+      const error = new Error("未找到该质检任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { ok: true });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/tasks/") && url.pathname.endsWith("/share")) {
+    const batchId = decodeURIComponent(url.pathname.slice("/api/tasks/".length, -"/share".length));
+    const run = await getBatchRun(batchId);
+    if (!run) {
+      const error = new Error("未找到该翻译任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    const doneSegments = (run.segments || []).filter((segment) => segment.selected !== false && segment.status === "done" && segment.translation);
+    if (!doneSegments.length) {
+      const error = new Error("该任务还没有已完成的译文段落，无法分享");
+      error.statusCode = 400;
+      throw error;
+    }
+    // 语素拆解 + 直译：最多生成 30 段，避免长文分享烧光 token
+    const GLOSS_LIMIT = 30;
+    const glossTargets = doneSegments.slice(0, GLOSS_LIMIT);
+    const glossSettled = await runTaskPool(glossTargets.map((segment) => ({ translation: segment.translation, locale: run.locale })), async (target) => {
+      try {
+        return await glossTranslationWithModel({ translation: target.translation, locale: target.locale });
+      } catch {
+        return null;
+      }
+    }, { concurrency: 2 });
+    const glossByTarget = new Map(glossSettled.map((result, index) => [index, result.status === "fulfilled" ? result.value : null]));
+    const segments = doneSegments.map((segment, index) => ({
+      index: index + 1,
+      source: segment.source,
+      translation: segment.translation,
+      locator: segment.locator || "",
+      context: segment.context || "",
+      qaScore: Number.isFinite(segment.result?.qaScore) ? segment.result.qaScore : null,
+      issues: (segment.result?.issues || []).slice(0, 30).map((issue) => ({
+        severity: issue.severity || "warning",
+        type: issue.type || "qa",
+        category: issue.category || "other",
+        message: String(issue.message || ""),
+        suggestion: String(issue.suggestion || "")
+      })),
+      gloss: index < glossTargets.length ? glossByTarget.get(index) : null
+    }));
+    const share = await saveShare({
+      batchId, filename: run.filename, locale: run.locale, contentType: run.contentType || "general", domain: run.domain || "general", segments
+    });
+    return json(res, 200, {
+      token: share.token,
+      sharePath: `/share/${share.token}`,
+      shareUrls: lanShareUrls(share.token),
+      glossedSegments: Math.min(doneSegments.length, GLOSS_LIMIT),
+      totalSegments: doneSegments.length
+    });
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/share/")) {
+    const token = decodeURIComponent(url.pathname.slice("/api/share/".length));
+    const share = await getShare(token);
+    if (!share) {
+      const error = new Error("分享链接无效或已删除");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, {
+      token: share.token,
+      filename: share.filename,
+      locale: share.locale,
+      contentType: share.contentType,
+      domain: share.domain,
+      qaTaskId: share.qaTaskId || "",
+      meta: share.meta || null,
+      segments: share.segments,
+      feedbackCount: share.feedbacks.length,
+      createdAt: share.createdAt
+    });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/share/") && url.pathname.endsWith("/feedback")) {
+    const token = decodeURIComponent(url.pathname.slice("/api/share/".length, -"/feedback".length));
+    const share = await getShare(token);
+    if (!share) {
+      const error = new Error("分享链接无效或已删除");
+      error.statusCode = 404;
+      throw error;
+    }
+    const body = await readJsonBody(req);
+    const segmentIndex = Number(body.segmentIndex);
+    const request = String(body.request || "").trim().slice(0, 2_000);
+    if (!request) {
+      const error = new Error("请填写具体要求");
+      error.statusCode = 400;
+      throw error;
+    }
+    const segment = (share.segments || []).find((item) => item.index === segmentIndex);
+    if (!segment) {
+      const error = new Error("段落不存在");
+      error.statusCode = 400;
+      throw error;
+    }
+    const feedback = {
+      id: randomUUID(),
+      segmentIndex,
+      request,
+      suggestedTranslation: String(body.suggestedTranslation || "").trim().slice(0, 2_000),
+      reviewer: String(body.reviewer || "匿名").trim().slice(0, 80),
+      status: "pending",
+      createdAt: new Date().toISOString()
+    };
+    await updateShare(token, (item) => ({ ...item, feedbacks: [...(item.feedbacks || []), feedback] }));
+    return json(res, 200, { ok: true, message: "已提交，感谢反馈！" });
+  }
+  if (req.method === "GET" && url.pathname === "/api/feedback/pending") {
+    const shares = await listShares({});
+    const pending = [];
+    for (const share of shares) {
+      for (const feedback of share.feedbacks || []) {
+        if (feedback.status !== "pending") continue;
+        pending.push(feedbackEntry(share, feedback));
+      }
+    }
+    pending.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    return json(res, 200, pending);
+  }
+  if (req.method === "GET" && url.pathname === "/api/feedback") {
+    const status = url.searchParams.get("status") || "";
+    const shares = await listShares({});
+    const entries = [];
+    for (const share of shares) {
+      for (const feedback of share.feedbacks || []) {
+        if (status && feedback.status !== status) continue;
+        entries.push(feedbackEntry(share, feedback));
+      }
+    }
+    entries.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    return json(res, 200, entries.slice(0, Number(url.searchParams.get("limit")) || 500));
+  }
+  if (req.method === "GET" && url.pathname === "/api/shares") {
+    const batchId = url.searchParams.get("batchId") || "";
+    const qaTaskId = url.searchParams.get("qaTaskId") || "";
+    const shares = await listShares({ batchId, qaTaskId });
+    return json(res, 200, shares.map((share) => ({
+      token: share.token,
+      batchId: share.batchId,
+      qaTaskId: share.qaTaskId || "",
+      filename: share.filename,
+      locale: share.locale,
+      contentType: share.contentType,
+      domain: share.domain,
+      meta: share.meta || null,
+      segmentCount: share.segments.length,
+      feedbacks: share.feedbacks || [],
+      createdAt: share.createdAt,
+      updatedAt: share.updatedAt
+    })));
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/share/") && url.pathname.endsWith("/resolve")) {
+    const token = decodeURIComponent(url.pathname.slice("/api/share/".length, -"/resolve".length));
+    const share = await getShare(token);
+    if (!share) {
+      const error = new Error("分享链接无效或已删除");
+      error.statusCode = 404;
+      throw error;
+    }
+    const body = await readJsonBody(req);
+    const feedbackId = String(body.feedbackId || "");
+    const action = body.action === "adopt" ? "adopt" : body.action === "ignore" ? "ignore" : "";
+    if (!feedbackId || !action) {
+      const error = new Error("缺少意见 ID 或有效操作");
+      error.statusCode = 400;
+      throw error;
+    }
+    const index = (share.feedbacks || []).findIndex((item) => item.id === feedbackId);
+    if (index < 0) {
+      const error = new Error("该意见不存在");
+      error.statusCode = 404;
+      throw error;
+    }
+    const feedback = share.feedbacks[index];
+    if (feedback.status !== "pending") {
+      const error = new Error("该意见已处理过");
+      error.statusCode = 409;
+      throw error;
+    }
+    if (action === "adopt") {
+      const segment = (share.segments || []).find((item) => item.index === feedback.segmentIndex);
+      await saveStyleEvidence({
+        locale: share.locale,
+        contentType: share.contentType,
+        domain: share.domain,
+        source: segment?.source || "",
+        target: feedback.suggestedTranslation || segment?.translation || "",
+        batchId: share.batchId,
+        provenance: "human-accept",
+        status: "accepted"
+      });
+      try {
+        const { distilled } = await distillStyleProfileIfReady({
+          locale: share.locale,
+          contentType: share.contentType,
+          domain: share.domain,
+          sourceBatchId: share.batchId
+        });
+        if (distilled) await saveStyleProfile(distilled);
+      } catch {
+        // 未达阈值或蒸馏失败不阻断采纳
+      }
+    }
+    const resolvedAt = new Date().toISOString();
+    await updateShare(token, (item) => ({
+      ...item,
+      feedbacks: item.feedbacks.map((entry) => entry.id === feedbackId ? { ...entry, status: action === "adopt" ? "adopted" : "ignored", resolvedAt } : entry)
+    }));
+    return json(res, 200, { ok: true, status: action === "adopt" ? "adopted" : "ignored" });
+  }
   if (req.method === "POST" && url.pathname === "/api/translate") {
     const body = await readJsonBody(req);
     const locale = assertLocale(body.locale);
@@ -1318,6 +1826,8 @@ async function apiHandler(req, res, url) {
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
+  // 分享验证页：/share 与 /share/<token> 都渲染独立的轻量页面
+  if (pathname === "/share" || pathname.startsWith("/share/")) pathname = "/share.html";
   const safePath = normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, "");
   const path = join(PUBLIC_ROOT, safePath);
   if (!path.startsWith(PUBLIC_ROOT)) return false;
@@ -1414,6 +1924,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
+const HOST = process.env.KAMI_HOST || "127.0.0.1";
+server.listen(PORT, HOST, () => {
   console.log(`Kami Localization Workbench: http://127.0.0.1:${PORT}`);
+  if (HOST !== "127.0.0.1" && HOST !== "localhost") {
+    for (const address of lanShareUrls("")) console.log(`局域网访问（分享给同事可用）：http://${address.replace("/share/", "")}${PORT === 80 ? "" : `:${PORT}`}`);
+  }
 });

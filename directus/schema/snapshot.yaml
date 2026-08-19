@@ -220,6 +220,62 @@ collections:
       versioning: false
     schema:
       name: qa_runs
+  - collection: qa_tasks
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: qa_tasks
+      color: null
+      display_template: '{{title}} · {{target_locale}}'
+      group: localization_pipeline
+      hidden: false
+      icon: fact_check
+      item_duplication_fields: null
+      note: Auto QA 页的逐句质检报告快照，用于任务中心回放与留档。
+      preview_url: null
+      singleton: false
+      sort: 12
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: Auto QA 质检任务
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: qa_tasks
+  - collection: shares
+    meta:
+      accountability: all
+      archive_app_filter: true
+      archive_field: null
+      archive_value: null
+      autosave_revision_interval: null
+      collapse: open
+      collection: shares
+      color: null
+      display_template: '{{filename}}'
+      group: localization_pipeline
+      hidden: false
+      icon: share
+      item_duplication_fields: null
+      note: 批次分享验证快照：语素拆解、评分与同事反馈队列。
+      preview_url: null
+      singleton: false
+      sort: 13
+      sort_field: null
+      status: active
+      translations:
+        - language: zh-CN
+          translation: 分享验证页
+      unarchive_value: null
+      versioning: false
+    schema:
+      name: shares
   - collection: skill_evaluations
     meta:
       accountability: all
@@ -4322,6 +4378,1386 @@ fields:
     schema:
       name: human_decisions
       table: qa_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: id
+    type: uuid
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: qa_tasks
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: title
+    type: string
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: title
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 任务标题
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: title
+      table: qa_tasks
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: target_locale
+    type: string
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: qa_tasks
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: content_type
+    type: string
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: qa_tasks
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: domain
+    type: string
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: qa_tasks
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: source_text
+    type: text
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: source_text
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 中文原文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: source_text
+      table: qa_tasks
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: translation_text
+    type: text
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: translation_text
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言译文
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: translation_text
+      table: qa_tasks
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: source_count
+    type: integer
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: source_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 8
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 原文句数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: source_count
+      table: qa_tasks
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: translation_count
+    type: integer
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: translation_count
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 9
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 译文句数
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: translation_count
+      table: qa_tasks
+      data_type: integer
+      default_value: null
+      max_length: null
+      numeric_precision: 32
+      numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: overall_score
+    type: float
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: overall_score
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 10
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 综合分
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: overall_score
+      table: qa_tasks
+      data_type: real
+      default_value: null
+      max_length: null
+      numeric_precision: 24
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: dimension_scores
+    type: json
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: dimension_scores
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 11
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 三维评分
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: dimension_scores
+      table: qa_tasks
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: summary
+    type: json
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: summary
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 12
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 问题统计
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: summary
+      table: qa_tasks
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: alignment_note
+    type: text
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: alignment_note
+      group: null
+      hidden: false
+      interface: input-multiline
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 13
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 对齐说明
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: alignment_note
+      table: qa_tasks
+      data_type: text
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: model
+    type: string
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: model
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 14
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 审校模型
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: model
+      table: qa_tasks
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: report
+    type: json
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: report
+      group: null
+      hidden: false
+      interface: tags
+      note: 逐句检查明细，用于报告回放。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 完整报告快照
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: report
+      table: qa_tasks
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: date_created
+    type: timestamp
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 16
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: qa_tasks
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: qa_tasks
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: qa_tasks
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 17
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: qa_tasks
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: id
+    type: uuid
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: id
+      group: null
+      hidden: true
+      interface: input
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 1
+      special:
+        - uuid
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: id
+      table: shares
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: true
+      is_indexed: false
+      is_primary_key: true
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: token
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: token
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 2
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 分享令牌
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: token
+      table: shares
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: batch_id
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: batch_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 3
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源批次 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: batch_id
+      table: shares
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: filename
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: filename
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: true
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源文件
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: filename
+      table: shares
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: target_locale
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      field: target_locale
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: ja-JP
+            value: ja-JP
+          - text: ko-KR
+            value: ko-KR
+          - text: zh-Hant-TW
+            value: zh-Hant-TW
+          - text: th-TH
+            value: th-TH
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 目标语言
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: target_locale
+      table: shares
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: content_type
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: labels
+      display_options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      field: content_type
+      group: null
+      hidden: false
+      interface: select-dropdown
+      note: null
+      options:
+        choices:
+          - text: 宣发文案
+            value: marketing
+          - text: 正式公告
+            value: announcement
+          - text: 游戏内道具名
+            value: item_name
+          - text: 游戏内道具描述
+            value: item_description
+          - text: UI / 系统提示
+            value: ui
+          - text: 活动规则
+            value: rules
+          - text: 剧情对白
+            value: dialogue
+          - text: 社媒短文案
+            value: social
+          - text: 通用文本
+            value: general
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 内容语体
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: content_type
+      table: shares
+      data_type: character varying
+      default_value: general
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: false
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: domain
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: domain
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 业务领域
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: domain
+      table: shares
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: segments
+    type: json
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: segments
+      group: null
+      hidden: false
+      interface: tags
+      note: 每段的原文、译文、评分与语素拆解。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 分享段落快照
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: segments
+      table: shares
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: feedbacks
+    type: json
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: feedbacks
+      group: null
+      hidden: false
+      interface: tags
+      note: pending 待采纳 / adopted 已入风格证据 / ignored 已忽略。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 同事反馈队列
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: feedbacks
+      table: shares
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: date_created
+    type: timestamp
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: date_created
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 10
+      special:
+        - date-created
+      translations:
+        - language: zh-CN
+          translation: 创建时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_created
+      table: shares
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: date_updated
+    type: timestamp
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: date_updated
+      group: null
+      hidden: false
+      interface: datetime
+      note: null
+      options: null
+      readonly: true
+      required: false
+      searchable: true
+      sort: 11
+      special:
+        - date-updated
+      translations:
+        - language: zh-CN
+          translation: 更新时间
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: date_updated
+      table: shares
+      data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: qa_task_id
+    type: string
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: qa_task_id
+      group: null
+      hidden: false
+      interface: input
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special: null
+      translations:
+        - language: zh-CN
+          translation: 来源质检任务 ID
+      validation: null
+      validation_message: null
+      width: half
+    schema:
+      name: qa_task_id
+      table: shares
+      data_type: character varying
+      default_value: null
+      max_length: 255
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: shares
+    field: meta
+    type: json
+    meta:
+      collection: shares
+      conditions: null
+      display: null
+      display_options: null
+      field: meta
+      group: null
+      hidden: false
+      interface: tags
+      note: Auto QA 分享的综合分、三维评分、对齐说明与整句级问题。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 9
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 质检摘要
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: meta
+      table: shares
       data_type: json
       default_value: null
       max_length: null

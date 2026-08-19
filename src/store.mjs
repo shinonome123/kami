@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,14 @@ import {
   saveDirectusBatchRun,
   getDirectusBatchRun,
   listDirectusBatchRuns,
+  saveDirectusQaTask,
+  getDirectusQaTask,
+  listDirectusQaTasks,
+  deleteDirectusQaTask,
+  saveDirectusShare,
+  getDirectusShare,
+  listDirectusShares,
+  updateDirectusShare,
   saveDirectusMemory,
   saveDirectusQaCase,
   saveDirectusQaRun,
@@ -462,8 +470,111 @@ async function listJsonBatchRuns({ locale = "", status = "", search = "", limit 
   }).filter((item) => (!locale || item.locale === locale) && (!status || item.status === status) && (!search || item.filename.toLowerCase().includes(String(search).toLowerCase()))).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, limit);
 }
 
-async function rebuildJsonEmbeddings(locale, currentModel) {  const stats = { memories: 0, qaCases: 0, evidence: 0, errors: [] };
-  const targets = [
+async function saveJsonQaTask(input) {
+  const id = String(input.id || randomUUID());
+  const existing = await readJson(join(ROOT, "qa-tasks", `${id}.json`), null);
+  const now = new Date().toISOString();
+  const item = {
+    id,
+    title: String(input.title || String(input.sourceText || "").slice(0, 40) || "未命名质检"),
+    locale: assertLocale(input.locale),
+    contentType: String(input.contentType || "general"),
+    domain: String(input.domain || "general"),
+    sourceText: String(input.sourceText || ""),
+    translationText: String(input.translationText || ""),
+    segmentCounts: input.segmentCounts ?? { source: 0, translation: 0 },
+    overallScore: input.overallScore ?? null,
+    dimensionScores: input.dimensionScores ?? null,
+    summary: input.summary ?? null,
+    alignmentNote: String(input.alignmentNote || ""),
+    model: String(input.model || ""),
+    report: input.report ?? null,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+  await writeJsonAtomic(join(ROOT, "qa-tasks", `${id}.json`), item);
+  return item;
+}
+
+async function getJsonQaTask(id) {
+  return readJson(join(ROOT, "qa-tasks", `${String(id)}.json`), null);
+}
+
+async function listJsonQaTasks({ locale = "", status = "", search = "", limit = 200 } = {}) {
+  let files = [];
+  try { files = await readdir(join(ROOT, "qa-tasks")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  const tasks = (await Promise.all(files.filter((file) => file.endsWith(".json")).map((file) => readJson(join(ROOT, "qa-tasks", file), null)))).filter(Boolean);
+  return tasks.map((task) => ({
+    id: task.id,
+    type: "autoqa",
+    title: task.title || "未命名质检",
+    locale: task.locale,
+    contentType: task.contentType || "general",
+    domain: task.domain || "general",
+    status: Number.isFinite(task.overallScore) ? (task.overallScore >= 90 ? "completed" : "review") : "completed",
+    overallScore: Number.isFinite(task.overallScore) ? task.overallScore : null,
+    totalSegments: Number(task.segmentCounts?.source) || 0,
+    completedSegments: 0,
+    failedSegments: 0,
+    qaPending: task.summary ? Object.values(task.summary).reduce((sum, item) => sum + (Number(item?.total) || 0), 0) : 0,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt
+  })).filter((item) => (!locale || item.locale === locale) && (!status || item.status === status) && (!search || item.title.toLowerCase().includes(String(search).toLowerCase()))).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, limit);
+}
+
+async function deleteJsonQaTask(id) {
+  try {
+    await rm(join(ROOT, "qa-tasks", `${String(id)}.json`), { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function saveJsonShare(input) {
+  const token = String(input.token || randomUUID().replace(/-/g, ""));
+  const existing = await readJson(join(ROOT, "shares", `${token}.json`), null);
+  const now = new Date().toISOString();
+  const item = {
+    token,
+    batchId: String(input.batchId || ""),
+    qaTaskId: String(input.qaTaskId || ""),
+    filename: String(input.filename || "未命名分享"),
+    locale: assertLocale(input.locale),
+    contentType: String(input.contentType || "general"),
+    domain: String(input.domain || "general"),
+    meta: input.meta ?? null,
+    segments: Array.isArray(input.segments) ? input.segments.slice(0, 2_000) : [],
+    feedbacks: Array.isArray(existing?.feedbacks) ? existing.feedbacks : [],
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+  await writeJsonAtomic(join(ROOT, "shares", `${token}.json`), item);
+  return item;
+}
+
+async function getJsonShare(token) {
+  return readJson(join(ROOT, "shares", `${String(token)}.json`), null);
+}
+
+async function listJsonShares({ batchId = "", qaTaskId = "", limit = 100 } = {}) {
+  let files = [];
+  try { files = await readdir(join(ROOT, "shares")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  const shares = (await Promise.all(files.filter((file) => file.endsWith(".json")).map((file) => readJson(join(ROOT, "shares", file), null)))).filter(Boolean);
+  return shares.filter((share) => (!batchId || share.batchId === batchId) && (!qaTaskId || share.qaTaskId === qaTaskId)).sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, limit);
+}
+
+async function updateJsonShare(token, updater) {
+  const path = join(ROOT, "shares", `${String(token)}.json`);
+  const item = await readJson(path, null);
+  if (!item) return null;
+  const next = typeof updater === "function" ? updater(item) : { ...item, ...updater };
+  const updated = { ...next, updatedAt: new Date().toISOString() };
+  await writeJsonAtomic(path, updated);
+  return updated;
+}
+
+async function rebuildJsonEmbeddings(locale, currentModel) {  const stats = { memories: 0, qaCases: 0, evidence: 0, errors: [] };  const targets = [
     { path: join(ROOT, "memories", `${assertLocale(locale)}.json`), kind: "memories" },
     { path: join(ROOT, "qa", "cases.json"), kind: "qaCases", filter: (item) => item.locale === locale },
     { path: join(ROOT, "styles", "evidence.json"), kind: "evidence", filter: (item) => item.locale === locale }
@@ -963,6 +1074,38 @@ export async function getBatchRun(batchId) {
 
 export async function listBatchRuns(options) {
   return usesDirectus() ? listDirectusBatchRuns(options) : listJsonBatchRuns(options);
+}
+
+export async function saveQaTask(input) {
+  return usesDirectus() ? saveDirectusQaTask(input) : saveJsonQaTask(input);
+}
+
+export async function getQaTask(id) {
+  return usesDirectus() ? getDirectusQaTask(id) : getJsonQaTask(id);
+}
+
+export async function listQaTasks(options) {
+  return usesDirectus() ? listDirectusQaTasks(options) : listJsonQaTasks(options);
+}
+
+export async function deleteQaTask(id) {
+  return usesDirectus() ? deleteDirectusQaTask(id) : deleteJsonQaTask(id);
+}
+
+export async function saveShare(input) {
+  return usesDirectus() ? saveDirectusShare(input) : saveJsonShare(input);
+}
+
+export async function getShare(token) {
+  return usesDirectus() ? getDirectusShare(token) : getJsonShare(token);
+}
+
+export async function listShares(options) {
+  return usesDirectus() ? listDirectusShares(options) : listJsonShares(options);
+}
+
+export async function updateShare(token, updater) {
+  return usesDirectus() ? updateDirectusShare(token, updater) : updateJsonShare(token, updater);
 }
 
 export async function listStyleProfiles(locale, status) {

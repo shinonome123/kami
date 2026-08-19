@@ -553,6 +553,50 @@ const definitions = [
       jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 12 }),
       dateField("date_created", "创建时间", "date-created", 13)
     ]
+  },
+  {
+    collection: "qa_tasks",
+    meta: { icon: "fact_check", note: "Auto QA 页的逐句质检报告快照，用于任务中心回放与留档。", display_template: "{{title}} · {{target_locale}}", group: "localization_pipeline", sort: 12, accountability: "all", translations: label("Auto QA 质检任务") },
+    schema: {},
+    fields: [
+      uuidField(),
+      textField("title", "任务标题", { required: true, sort: 2 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 3 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 4 }),
+      textField("domain", "业务领域", { width: "half", sort: 5 }),
+      textField("source_text", "中文原文", { required: true, multiline: true, sort: 6 }),
+      textField("translation_text", "目标语言译文", { required: true, multiline: true, sort: 7 }),
+      { field: "source_count", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 8, translations: label("原文句数") }, schema: { is_nullable: true } },
+      { field: "translation_count", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 9, translations: label("译文句数") }, schema: { is_nullable: true } },
+      { field: "overall_score", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 10, translations: label("综合分") }, schema: { is_nullable: true } },
+      jsonField("dimension_scores", "三维评分", { sort: 11 }),
+      jsonField("summary", "问题统计", { sort: 12 }),
+      textField("alignment_note", "对齐说明", { multiline: true, sort: 13 }),
+      textField("model", "审校模型", { width: "half", sort: 14 }),
+      jsonField("report", "完整报告快照", { note: "逐句检查明细，用于报告回放。", sort: 15 }),
+      dateField("date_created", "创建时间", "date-created", 16),
+      dateField("date_updated", "更新时间", "date-updated", 17)
+    ]
+  },
+  {
+    collection: "shares",
+    meta: { icon: "share", note: "批次分享验证快照：语素拆解、评分与同事反馈队列。", display_template: "{{filename}}", group: "localization_pipeline", sort: 13, accountability: "all", translations: label("分享验证页") },
+    schema: {},
+    fields: [
+      uuidField(),
+      textField("token", "分享令牌", { required: true, width: "half", sort: 2 }),
+      textField("batch_id", "来源批次 ID", { width: "half", sort: 3 }),
+      textField("qa_task_id", "来源质检任务 ID", { width: "half", sort: 4 }),
+      textField("filename", "来源文件", { required: true, sort: 5 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 6 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 7 }),
+      textField("domain", "业务领域", { width: "half", sort: 8 }),
+      jsonField("meta", "质检摘要", { note: "Auto QA 分享的综合分、三维评分、对齐说明与整句级问题。", sort: 9 }),
+      jsonField("segments", "分享段落快照", { note: "每段的原文、译文、评分与语素拆解。", sort: 10 }),
+      jsonField("feedbacks", "同事反馈队列", { note: "pending 待采纳 / adopted 已入风格证据 / ignored 已忽略。", sort: 11 }),
+      dateField("date_created", "创建时间", "date-created", 12),
+      dateField("date_updated", "更新时间", "date-updated", 13)
+    ]
   }
 ];
 
@@ -706,7 +750,9 @@ async function ensureServiceAccount() {
     ...["create", "read", "update"].map((action) => ["translation_skills", action]),
     ...["create", "read", "update"].map((action) => ["skill_evaluations", action]),
     ...["create", "read"].map((action) => ["qa_runs", action]),
-    ...["create", "read", "update", "delete"].map((action) => ["qa_cases", action])
+    ...["create", "read", "update", "delete"].map((action) => ["qa_cases", action]),
+    ...["create", "read", "update", "delete"].map((action) => ["qa_tasks", action]),
+    ...["create", "read", "update", "delete"].map((action) => ["shares", action])
   ];
   const currentPermissions = await api(`/permissions?filter[policy][_eq]=${policy.id}&limit=-1`);
   const existingPermissionKeys = new Set(currentPermissions.map((permission) => `${permission.collection}:${permission.action}`));

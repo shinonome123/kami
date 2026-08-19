@@ -1,5 +1,6 @@
 import { loadProviderConfig, saveProviderConfig } from "./provider-store.mjs";
 import { CONTENT_TYPES, LOCALES } from "./config.mjs";
+import { glossCoverage, validateGlossTokens } from "./auto-qa.mjs";
 
 const loadedProvider = loadProviderConfig();
 let persistence = loadedProvider.persistence;
@@ -195,33 +196,52 @@ async function chat(messages, config = runtimeConfig, options = {}) {
   const temperature = normalizedOptions.temperature ?? 0.25;
   const timeoutMs = normalizedOptions.timeoutMs ?? 60_000;
   const requestLabel = normalizedOptions.requestLabel || "模型";
-  const { response, text } = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {})
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      temperature,
-      ...(normalizedOptions.maxTokens ? { max_tokens: normalizedOptions.maxTokens } : {}),
-      ...(normalizedOptions.responseFormat ? { response_format: normalizedOptions.responseFormat } : {})
-    })
-  }, { timeoutMs, label: requestLabel, retries: 1 });
-  if (!response.ok) {
-    throw new Error(`模型请求失败 (${response.status})：${(text || "").slice(0, 500)}`);
+  let maxTokens = normalizedOptions.maxTokens;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { response, text } = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {})
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        temperature,
+        ...(maxTokens ? { max_tokens: maxTokens } : {}),
+        ...(normalizedOptions.responseFormat ? { response_format: normalizedOptions.responseFormat } : {}),
+        ...(normalizedOptions.reasoningEffort ? { reasoning_effort: normalizedOptions.reasoningEffort } : {})
+      })
+    }, { timeoutMs, label: requestLabel, retries: 1 });
+    if (!response.ok) {
+      throw new Error(`模型请求失败 (${response.status})：${(text || "").slice(0, 500)}`);
+    }
+    const payload = JSON.parse(text || "{}");
+    if (typeof normalizedOptions.onUsage === "function") {
+      const usage = payload.usage
+        ? { promptTokens: Number(payload.usage.prompt_tokens) || 0, completionTokens: Number(payload.usage.completion_tokens) || 0 }
+        : (Number.isFinite(payload.prompt_eval_count) || Number.isFinite(payload.eval_count))
+          ? { promptTokens: Number(payload.prompt_eval_count) || 0, completionTokens: Number(payload.eval_count) || 0 }
+          : null;
+      if (usage) normalizedOptions.onUsage(usage);
+    }
+    const message = payload.choices?.[0]?.message || {};
+    let content = String(message.content || "").trim();
+    // 推理模型在“结论为空”的简单场景可能把最终 JSON 留在推理轨迹里：取轨迹尾部最后一个 JSON 片段
+    if (!content && typeof message.reasoning_content === "string") {
+      const candidates = [...(message.reasoning_content.match(/\[[\s\S]*\]/g) || []), ...(message.reasoning_content.match(/\{[\s\S]*\}/g) || [])];
+      const tail = candidates[candidates.length - 1];
+      if (tail) content = tail.trim();
+    }
+    // 推理预算耗尽导致输出被截断为空：加大预算重试一次，避免把“思考超长”误判为“无问题”
+    const truncated = payload.choices?.[0]?.finish_reason === "length";
+    if (!content && truncated && attempt === 0) {
+      maxTokens = maxTokens ? Math.min(8000, Math.ceil(maxTokens * 2)) : 4000;
+      continue;
+    }
+    return content;
   }
-  const payload = JSON.parse(text || "{}");
-  if (typeof normalizedOptions.onUsage === "function") {
-    const usage = payload.usage
-      ? { promptTokens: Number(payload.usage.prompt_tokens) || 0, completionTokens: Number(payload.usage.completion_tokens) || 0 }
-      : (Number.isFinite(payload.prompt_eval_count) || Number.isFinite(payload.eval_count))
-        ? { promptTokens: Number(payload.prompt_eval_count) || 0, completionTokens: Number(payload.eval_count) || 0 }
-        : null;
-    if (usage) normalizedOptions.onUsage(usage);
-  }
-  return payload.choices?.[0]?.message?.content?.trim() || "";
+  return "";
 }
 
 export function isEmbeddingConfigured() {
@@ -562,6 +582,336 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
     confidence: Math.max(0, Math.min(1, Number(issue.confidence) || 0.5)),
     source: "aiqa"
   }));
+}
+
+/**
+ * Auto QA 三层模型审校：basic 基本检查、fidelity 语义忠实性（着重）、nuance 细微一致性。
+ * 单次调用返回带 dimension 的问题列表；解析失败走行式降级，最终失败抛错由调用方记录。
+ */
+export async function evaluateAutoQaWithModel({ source, translation, locale, contentType = "general", domain = "general", styleProfile = null, references = [], qaCases = [], evidence = [], onUsage = null }) {
+  const evidencePayload = {
+    source, translation, locale, contentType, domain,
+    styleProfile: styleProfile ? { name: styleProfile.name, version: styleProfile.version, instruction: styleProfile.instruction, examples: styleProfile.examples } : null,
+    references: references.slice(0, 5),
+    qaCases: qaCases.slice(0, 3),
+    evidence: evidence.slice(0, 6)
+  };
+  const messages = [
+    {
+      role: "system",
+      content: `你是独立于译者的亚洲语言本地化 Auto QA 审校员，对一条已完成译文做三层审查，语义忠实性是最高优先级。只报告可定位的问题，不要给总分：
+
+1) basic 基本检查：目标语言拼写错误、语法错误、数字/日期/符号与原文不符、专名与品牌名在句内前后不一致。
+2) fidelity 语义忠实性（着重检查项）：漏译、增译、错译、语义偏差。必须同时给出原文片段 sourceSpan 与译文片段 targetSpan 作为证据；只有语义确实丢失或凭空添加事实时 severity 才能是 critical；调整语序、换用同义地道表达不是问题。
+3) nuance 细微一致性：敬语级别、语气词、正式度、句式节奏是否与提供的风格规范、已批准译例、历史风格证据一致。有证据时优先对照证据判断；没有证据时按目标语言自然习惯判断。细微差异记 minor，明显违反记 major。
+
+severity 只能是 critical、major、minor；dimension 只能是 basic、fidelity、nuance。没有问题必须返回 {"issues":[]}；禁止输出空白、纯文本说明或 Markdown。输出严格 JSON：{"issues":[{"dimension":"fidelity","severity":"critical","category":"omission","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","confidence":0.9}]}`
+    },
+    { role: "user", content: JSON.stringify(evidencePayload) }
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "Auto QA", responseFormat: { type: "json_object" }, onUsage });
+  let payload;
+  let lastFormatError = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      payload = parseAiQaResponse(content);
+      break;
+    } catch (error) {
+      lastFormatError = error.message;
+      if (attempt === 1) break;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: content.slice(0, 4_000) || "(空白)" },
+        { role: "user", content: "上一个回答不是可解析的严格 JSON。请只重新输出一个紧凑 JSON 对象，根字段必须是 issues 数组；若没有问题输出 {\"issues\":[]}。不要输出空白、Markdown、解释或代码围栏。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1800, requestLabel: "Auto QA 格式重试", responseFormat: { type: "json_object" }, onUsage });
+    }
+  }
+  if (!payload) {
+    // 针对“返回空白”的抢救：明确要求必须产出 JSON
+    content = await chat([
+      ...messages,
+      { role: "assistant", content: content.slice(0, 200) || "(空白)" },
+      { role: "user", content: "你上一次的回复是空白。必须输出一个 JSON 对象；若没有问题，输出 {\"issues\":[]}。禁止输出空白。" }
+    ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1200, requestLabel: "Auto QA 空白抢救", responseFormat: { type: "json_object" }, onUsage });
+    if (!String(content).trim()) {
+      // 推理模型在“无问题”场景下可能只返回空白：空白按无问题处理
+      payload = { issues: [] };
+    } else {
+      try {
+        payload = parseAiQaResponse(content);
+      } catch (error) {
+        lastFormatError = error.message;
+      }
+    }
+  }
+  if (!payload) {
+    const lineContent = await chat([
+      {
+        role: "system",
+        content: "你是本地化 Auto QA。不要输出 JSON。若没有问题必须只输出 PASS 这一行；若有问题，每个问题单独一行，严格使用：ISSUE|dimension|critical/major/minor|类别|原文片段|译文片段|问题原因|修订建议。dimension 只能是 basic、fidelity、nuance。禁止输出空白或任何其他内容。"
+      },
+      { role: "user", content: JSON.stringify({ source, translation, locale, contentType, domain, references: references.slice(0, 3), qaCases: qaCases.slice(0, 2), evidence: evidence.slice(0, 4) }) }
+    ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "Auto QA 行式降级", onUsage });
+    if (!String(lineContent).trim()) {
+      payload = { issues: [] };
+    } else {
+      try {
+        payload = { issues: parseAutoQaLineResponse(lineContent) };
+      } catch (error) {
+        throw new Error(`Auto QA 返回无法解析（JSON：${lastFormatError || "未知"}；行式：${error.message}）`);
+      }
+    }
+  }
+  return payload.issues.slice(0, 40).map((issue) => ({
+    dimension: ["basic", "fidelity", "nuance"].includes(issue.dimension)
+      ? issue.dimension
+      : String(issue.category || "").startsWith("basic") ? "basic" : String(issue.category || "").startsWith("nuance") ? "nuance" : "fidelity",
+    severity: ["critical", "major", "minor"].includes(issue.severity) ? issue.severity : "major",
+    category: String(issue.category || "other"),
+    sourceSpan: String(issue.sourceSpan || ""),
+    targetSpan: String(issue.targetSpan || ""),
+    message: String(issue.message || "未说明问题"),
+    suggestion: String(issue.suggestion || ""),
+    confidence: Math.max(0, Math.min(1, Number(issue.confidence) || 0.5)),
+    source: "autoqa"
+  }));
+}
+
+export function parseAutoQaLineResponse(content) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed) throw new Error("模型返回空内容");
+  if (noIssueResponse(trimmed)) return [];
+  const issues = trimmed.split(/\r?\n/u).map((line) => line.trim().replace(/^[-*•\d.)、\s]+/u, "")).filter((line) => /^ISSUE\s*[|｜]/iu.test(line)).map((line) => {
+    const [, dimension = "fidelity", severity = "major", category = "other", sourceSpan = "", targetSpan = "", message = "", suggestion = ""] = line.split(/[|｜]/u).map((item) => item.trim());
+    return { dimension, severity, category, sourceSpan, targetSpan, message, suggestion, confidence: 0.8 };
+  }).filter((issue) => issue.message);
+  if (issues.length) return issues;
+  return [{
+    dimension: "fidelity",
+    severity: "major",
+    category: "unstructured_review",
+    sourceSpan: "",
+    targetSpan: "",
+    message: trimmed.slice(0, 800),
+    suggestion: "根据该审校意见进行修订",
+    confidence: 0.65
+  }];
+}
+
+/**
+ * 校验模型返回的对齐方案：每个原文索引与译文索引必须恰好出现一次。
+ * 返回规范化的 { pairs, unmatchedSource, unmatchedTranslation }，无效则返回 null。
+ */
+export function validateAlignmentPlan(plan, sourceCount, translationCount) {
+  const n = Number(sourceCount) || 0;
+  const m = Number(translationCount) || 0;
+  if (!plan || typeof plan !== "object") return null;
+  const pairs = Array.isArray(plan.pairs) ? plan.pairs : [];
+  const unmatchedSource = Array.isArray(plan.unmatchedSource) ? plan.unmatchedSource : [];
+  const unmatchedTranslation = Array.isArray(plan.unmatchedTranslation) ? plan.unmatchedTranslation : [];
+  const seenSource = new Set();
+  const seenTranslation = new Set();
+  const cleanPairs = [];
+  for (const pair of pairs) {
+    const sourceIndices = Array.isArray(pair?.sourceIndices) ? pair.sourceIndices.map(Number) : [];
+    const translationIndices = Array.isArray(pair?.translationIndices) ? pair.translationIndices.map(Number) : [];
+    if (!sourceIndices.length || !translationIndices.length) return null;
+    for (const index of [...sourceIndices, ...translationIndices]) {
+      if (!Number.isInteger(index)) return null;
+    }
+    if (sourceIndices.some((index) => index < 0 || index >= n)) return null;
+    if (translationIndices.some((index) => index < 0 || index >= m)) return null;
+    for (const index of sourceIndices) {
+      if (seenSource.has(index)) return null;
+      seenSource.add(index);
+    }
+    for (const index of translationIndices) {
+      if (seenTranslation.has(index)) return null;
+      seenTranslation.add(index);
+    }
+    cleanPairs.push({ sourceIndices: [...new Set(sourceIndices)].sort((a, b) => a - b), translationIndices: [...new Set(translationIndices)].sort((a, b) => a - b) });
+  }
+  for (const index of unmatchedSource.map(Number)) {
+    if (!Number.isInteger(index) || index < 0 || index >= n || seenSource.has(index)) return null;
+    seenSource.add(index);
+  }
+  for (const index of unmatchedTranslation.map(Number)) {
+    if (!Number.isInteger(index) || index < 0 || index >= m || seenTranslation.has(index)) return null;
+    seenTranslation.add(index);
+  }
+  if (seenSource.size !== n || seenTranslation.size !== m) return null;
+  cleanPairs.sort((a, b) => Math.min(...a.sourceIndices) - Math.min(...b.sourceIndices));
+  return {
+    pairs: cleanPairs,
+    unmatchedSource: unmatchedSource.map(Number).sort((a, b) => a - b),
+    unmatchedTranslation: unmatchedTranslation.map(Number).sort((a, b) => a - b)
+  };
+}
+
+/**
+ * 用模型做逐句对齐（Embedding 不可用时的回退方案），返回与 alignSegmentPairs 相同的结构。
+ * 失败或结果无效时返回 null，由调用方继续降级到按位置配对。
+ */
+export async function alignSegmentsWithModel({ sourceSegments, translationSegments, locale, onUsage = null }) {
+  const messages = [
+    {
+      role: "system",
+      content: "你是双语逐句对齐助手。原文已按句拆成 sourceSegments，译文已按句拆成 translationSegments（数组元素带 index 与 text）。请把表达相同内容的片段配对：一个原文片段可对应多个连续译文片段（译文拆句），多个连续原文片段也可对应一个译文片段（合并）；在原文中没有对应内容的译文片段记入 unmatchedTranslation（疑似增译），在译文中没有对应内容的原文片段记入 unmatchedSource（疑似漏译）。每个索引必须恰好出现一次。只输出严格 JSON：{\"pairs\":[{\"sourceIndices\":[0],\"translationIndices\":[0]}],\"unmatchedSource\":[],\"unmatchedTranslation\":[]}。禁止空白、解释或 Markdown。"
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        locale,
+        sourceSegments: sourceSegments.map((text, index) => ({ index, text })),
+        translationSegments: translationSegments.map((text, index) => ({ index, text }))
+      })
+    }
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0, timeoutMs: 75_000, maxTokens: 1600, requestLabel: "Auto QA 句对齐", responseFormat: { type: "json_object" }, onUsage });
+  let plan = null;
+  for (let attempt = 0; attempt < 3 && !plan; attempt += 1) {
+    try {
+      const match = String(content).match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("未返回 JSON 对象");
+      plan = validateAlignmentPlan(JSON.parse(match[0]), sourceSegments.length, translationSegments.length);
+      if (!plan) throw new Error("对齐方案索引无效");
+    } catch (error) {
+      if (attempt === 2) return null;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: String(content || "").slice(0, 2_000) || "(空白)" },
+        { role: "user", content: "上一个回答无效或无法解析。请重新输出一个完整 JSON 对象：pairs / unmatchedSource / unmatchedTranslation 三处必须恰好覆盖全部索引，禁止空白。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1600, requestLabel: "Auto QA 句对齐重试", responseFormat: { type: "json_object" }, onUsage });
+    }
+  }
+  return plan;
+}
+
+/**
+ * 语言正确性专项审查：只看译文本身，不对比原文、不评价翻译质量。
+ * 检查拼写、语法（助词/时态/敬语一致/语序）、标点与空格，输出归入 basic 维度。
+ */
+export async function evaluateGrammarWithModel({ translation, locale, contentType = "general", onUsage = null }) {
+  const language = LOCALE_NAMES[locale] || locale;
+  const messages = [
+    {
+      role: "system",
+      content: `你是${language}母语级语言审校员。只检查译文本身的语言正确性，不对比原文、不评价翻译质量、不讨论用词偏好。逐项检查：拼写/错字、语法错误（助词、时态、敬语一致、语序）、标点错误、空格错误。每一条给出错误片段 span、原因 message、可执行修改建议 suggestion。severity 只能是 critical、major、minor：句子完全无法理解或根本不是${language}才记 critical，明确语法/拼写错误记 major，其他不自然处记 minor。没有问题必须返回 {"issues":[]}；禁止输出空白、纯文本说明或 Markdown。输出严格 JSON：{"issues":[{"severity":"major","category":"grammar","span":"错误片段","message":"问题原因","suggestion":"修改建议","confidence":0.9}]}`
+    },
+    { role: "user", content: JSON.stringify({ translation, locale, contentType }) }
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0.05, timeoutMs: 60_000, maxTokens: 1400, requestLabel: "Auto QA 语法专项", responseFormat: { type: "json_object" }, onUsage });
+  let payload;
+  let lastFormatError = "";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      payload = parseAiQaResponse(content);
+      break;
+    } catch (error) {
+      lastFormatError = error.message;
+      if (attempt === 1) break;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: content.slice(0, 3_000) || "(空白)" },
+        { role: "user", content: "上一个回答不是可解析的严格 JSON。请只重新输出一个紧凑 JSON 对象，根字段必须是 issues 数组；若没有问题输出 {\"issues\":[]}。禁止空白。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1400, requestLabel: "Auto QA 语法专项重试", responseFormat: { type: "json_object" }, onUsage });
+    }
+  }
+  if (!payload) {
+    const lineContent = await chat([
+      {
+        role: "system",
+        content: `你是${language}语言审校。不要输出 JSON。若没有问题必须只输出 PASS 这一行；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|类别|错误片段|问题原因|修改建议。禁止输出空白或其他内容。`
+      },
+      { role: "user", content: JSON.stringify({ translation, locale, contentType }) }
+    ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1200, requestLabel: "Auto QA 语法行式降级", onUsage });
+    if (!String(lineContent).trim()) {
+      payload = { issues: [] };
+    } else {
+      try {
+        payload = { issues: parseGrammarLineResponse(lineContent) };
+      } catch (error) {
+        throw new Error(`语法专项返回无法解析（JSON：${lastFormatError || "未知"}；行式：${error.message}）`);
+      }
+    }
+  }
+  return payload.issues.slice(0, 20).map((issue) => ({
+    dimension: "basic",
+    severity: ["critical", "major", "minor"].includes(issue.severity) ? issue.severity : "major",
+    category: ["grammar", "spelling", "punctuation", "orthography", "spacing"].includes(issue.category) ? issue.category : "grammar",
+    sourceSpan: "",
+    targetSpan: String(issue.span || issue.targetSpan || ""),
+    message: String(issue.message || "未说明问题"),
+    suggestion: String(issue.suggestion || ""),
+    confidence: Math.max(0, Math.min(1, Number(issue.confidence) || 0.5)),
+    source: "grammar"
+  }));
+}
+
+export function parseGrammarLineResponse(content) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed) throw new Error("模型返回空内容");
+  if (noIssueResponse(trimmed)) return [];
+  const issues = trimmed.split(/\r?\n/u).map((line) => line.trim().replace(/^[-*•\d.)、\s]+/u, "")).filter((line) => /^ISSUE\s*[|｜]/iu.test(line)).map((line) => {
+    const [, severity = "major", category = "grammar", span = "", message = "", suggestion = ""] = line.split(/[|｜]/u).map((item) => item.trim());
+    return { severity, category, span, message, suggestion, confidence: 0.8 };
+  }).filter((issue) => issue.message);
+  if (issues.length) return issues;
+  return [{
+    severity: "major",
+    category: "grammar",
+    span: "",
+    message: trimmed.slice(0, 800),
+    suggestion: "根据该语言审校意见修订",
+    confidence: 0.65
+  }];
+}
+
+/**
+ * 语素拆解 + 直译：帮助不懂目标语言的中文读者理解译文。
+ * 词块 surface 必须完整覆盖译文（由调用方用 validateGlossTokens 校验的版本在这里直接校验），
+ * 失败返回 null，由调用方降级为“无拆解”。
+ */
+export async function glossTranslationWithModel({ translation, locale, onUsage = null }) {
+  const language = LOCALE_NAMES[locale] || locale;
+  const messages = [
+    {
+      role: "system",
+      content: `你是${language}语言学教师。把译文逐词/逐语素拆解，帮助不懂${language}的中文读者理解：tokens 数组必须按译文顺序列出每个词块；surface 尽量取自译文里原样出现的连续片段（全部 surface 按顺序拼接并去掉空白后应尽量等于译文本身）；pos 是简短词性/语法标签（如 助词/动词/名词/形容词/敬语/助动词）；gloss 是该词块的中文对译；literal 是整句逐词直译的中文（保持原文语序，允许不通顺）；note 可选，一句话说明关键语法点。按常见教材切分即可，不要纠结语言学争议、不要长篇推演、不要思考过程，直接输出。只输出严格 JSON：{"tokens":[{"surface":"新しい","pos":"形容词","gloss":"新的"}],"literal":"新的 通行证 主格 登场 了","note":"が 是主格助词"}，禁止空白或 Markdown。`
+    },
+    { role: "user", content: JSON.stringify({ translation, locale }) }
+  ];
+  let content = await chat(messages, runtimeConfig, { temperature: 0.05, timeoutMs: 120_000, maxTokens: 3200, requestLabel: "Auto QA 语素拆解", responseFormat: { type: "json_object" }, reasoningEffort: "low", onUsage });
+  let result = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const match = String(content || "").match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("未返回 JSON 对象");
+      const parsed = JSON.parse(match[0]);
+      if (!Array.isArray(parsed.tokens) || !parsed.tokens.length) throw new Error("tokens 为空");
+      const coverage = glossCoverage({ translation, tokens: parsed.tokens });
+      result = {
+        tokens: parsed.tokens.slice(0, 80).map((token) => ({
+          surface: String(token.surface || "").slice(0, 60),
+          pos: String(token.pos || "").slice(0, 30),
+          gloss: String(token.gloss || "").slice(0, 80)
+        })),
+        literal: String(parsed.literal || "").slice(0, 500),
+        note: String(parsed.note || "").slice(0, 300),
+        // 近似拆解：词块未能严格覆盖译文时标记，前端显示“仅供参考”
+        approximate: coverage < 1
+      };
+      break;
+    } catch {
+      if (attempt === 1) break;
+      content = await chat([
+        ...messages,
+        { role: "assistant", content: String(content || "").slice(0, 3_000) || "(空白)" },
+        { role: "user", content: "上一个回答无效。请直接重新输出 JSON：tokens 的 surface 尽量取自译文原文，按顺序拼接（去空白）后尽量等于译文。不要思考过程，直接输出。" }
+      ], runtimeConfig, { temperature: 0, timeoutMs: 90_000, maxTokens: 3200, requestLabel: "Auto QA 语素拆解重试", responseFormat: { type: "json_object" }, reasoningEffort: "low", onUsage });
+    }
+  }
+  return result;
 }
 
 function noIssueResponse(content) {

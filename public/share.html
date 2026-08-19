@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Kami 分享验证</title>
+    <link rel="icon" type="image/png" href="/assets/kami-favicon-v2.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="share-shell">
+      <header class="share-header">
+        <div class="share-brand">
+          <img src="/assets/kami-sidebar-logo-v2.png" alt="Kami 本地化工作台" />
+          <div>
+            <p class="eyebrow">KAMI · SHARED REVIEW</p>
+            <h1 id="shareTitle">翻译验证</h1>
+            <p class="page-description" id="shareMeta">正在读取分享内容……</p>
+          </div>
+        </div>
+        <div class="share-summary" id="shareSummary" hidden></div>
+      </header>
+      <div class="share-notice">
+        <strong>审核说明</strong>
+        <span>对照原文逐段检查译文。每段附语素拆解、字面直译与 QA 评分，帮助理解译文；有问题请在段落下方填写具体要求（可附建议译法），提交后由项目负责人采纳并沉淀为风格规则。</span>
+      </div>
+      <div class="share-error" id="shareError" role="alert" hidden></div>
+      <main class="share-segments" id="shareSegments">
+        <div class="empty-list">正在读取分享内容……</div>
+      </main>
+      <footer class="share-footer">由 Kami 本地化工作台生成 · 数据只读，仅收集审核意见</footer>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/share.js"></script>
+  </body>
+</html>
