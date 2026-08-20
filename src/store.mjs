@@ -37,6 +37,7 @@ import {
   getDirectusShare,
   listDirectusShares,
   updateDirectusShare,
+  deleteDirectusShare,
   saveDirectusMemory,
   saveDirectusQaCase,
   saveDirectusQaRun,
@@ -546,6 +547,9 @@ async function saveJsonShare(input) {
     meta: input.meta ?? null,
     segments: Array.isArray(input.segments) ? input.segments.slice(0, 2_000) : [],
     feedbacks: Array.isArray(existing?.feedbacks) ? existing.feedbacks : [],
+    status: String(input.status || existing?.status || "ready"),
+    glossedSegments: Number(input.glossedSegments ?? existing?.glossedSegments) || 0,
+    totalSegments: Number(input.totalSegments ?? existing?.totalSegments) || (Array.isArray(input.segments) ? input.segments.length : existing?.segments?.length || 0),
     createdAt: existing?.createdAt || now,
     updatedAt: now
   };
@@ -572,6 +576,15 @@ async function updateJsonShare(token, updater) {
   const updated = { ...next, updatedAt: new Date().toISOString() };
   await writeJsonAtomic(path, updated);
   return updated;
+}
+
+async function deleteJsonShare(token) {
+  try {
+    await rm(join(ROOT, "shares", `${String(token)}.json`), { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function rebuildJsonEmbeddings(locale, currentModel) {  const stats = { memories: 0, qaCases: 0, evidence: 0, errors: [] };  const targets = [
@@ -1106,6 +1119,10 @@ export async function listShares(options) {
 
 export async function updateShare(token, updater) {
   return usesDirectus() ? updateDirectusShare(token, updater) : updateJsonShare(token, updater);
+}
+
+export async function deleteShare(token) {
+  return usesDirectus() ? deleteDirectusShare(token) : deleteJsonShare(token);
 }
 
 export async function listStyleProfiles(locale, status) {

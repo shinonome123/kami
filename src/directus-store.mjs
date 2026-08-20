@@ -881,7 +881,10 @@ export async function saveDirectusShare(input) {
     domain: String(input.domain || "general"),
     meta: input.meta ?? null,
     segments: Array.isArray(input.segments) ? input.segments.slice(0, 2_000) : [],
-    feedbacks: Array.isArray(input.feedbacks) ? input.feedbacks : []
+    feedbacks: Array.isArray(input.feedbacks) ? input.feedbacks : [],
+    status: String(input.status || "ready"),
+    glossed_segments: Number(input.glossedSegments) || 0,
+    total_segments: Number(input.totalSegments) || (Array.isArray(input.segments) ? input.segments.length : 0)
   };
   const params = new URLSearchParams({ limit: "1", fields: "id" });
   params.set("filter[token][_eq]", token);
@@ -893,7 +896,7 @@ export async function saveDirectusShare(input) {
 
 export async function getDirectusShare(token) {
   try {
-    const params = new URLSearchParams({ limit: "1", fields: "id,token,batch_id,qa_task_id,filename,target_locale,content_type,domain,meta,segments,feedbacks,date_created,date_updated" });
+    const params = new URLSearchParams({ limit: "1", fields: "id,token,batch_id,qa_task_id,filename,target_locale,content_type,domain,meta,segments,feedbacks,status,glossed_segments,total_segments,date_created,date_updated" });
     params.set("filter[token][_eq]", String(token));
     const items = await request(`/items/shares?${params}`);
     const item = items[0];
@@ -902,6 +905,7 @@ export async function getDirectusShare(token) {
       token: item.token, batchId: item.batch_id || "", qaTaskId: item.qa_task_id || "", filename: item.filename || "",
       locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
       meta: item.meta ?? null, segments: arrayValue(item.segments), feedbacks: arrayValue(item.feedbacks),
+      status: item.status || "ready", glossedSegments: Number(item.glossed_segments) || 0, totalSegments: Number(item.total_segments) || 0,
       createdAt: item.date_created || null, updatedAt: item.date_updated || null
     };
   } catch (error) {
@@ -911,7 +915,7 @@ export async function getDirectusShare(token) {
 }
 
 export async function listDirectusShares({ batchId = "", qaTaskId = "", limit = 100 } = {}) {
-  const params = new URLSearchParams({ limit: String(Math.min(500, Math.max(1, Number(limit) || 100))), sort: "-date_updated", fields: "id,token,batch_id,qa_task_id,filename,target_locale,content_type,domain,meta,segments,feedbacks,date_created,date_updated" });
+  const params = new URLSearchParams({ limit: String(Math.min(500, Math.max(1, Number(limit) || 100))), sort: "-date_updated", fields: "id,token,batch_id,qa_task_id,filename,target_locale,content_type,domain,meta,segments,feedbacks,status,glossed_segments,total_segments,date_created,date_updated" });
   if (batchId) params.set("filter[batch_id][_eq]", String(batchId));
   if (qaTaskId) params.set("filter[qa_task_id][_eq]", String(qaTaskId));
   const items = await request(`/items/shares?${params}`);
@@ -919,6 +923,7 @@ export async function listDirectusShares({ batchId = "", qaTaskId = "", limit = 
     token: item.token, batchId: item.batch_id || "", qaTaskId: item.qa_task_id || "", filename: item.filename || "",
     locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
     meta: item.meta ?? null, segments: arrayValue(item.segments), feedbacks: arrayValue(item.feedbacks),
+    status: item.status || "ready", glossedSegments: Number(item.glossed_segments) || 0, totalSegments: Number(item.total_segments) || 0,
     createdAt: item.date_created || null, updatedAt: item.date_updated || null
   }));
 }
@@ -931,8 +936,33 @@ export async function updateDirectusShare(token, updater) {
   params.set("filter[token][_eq]", String(token));
   const existing = await request(`/items/shares?${params}`);
   if (!existing[0]?.id) return null;
-  await request(`/items/shares/${encodeURIComponent(existing[0].id)}`, { method: "PATCH", body: { filename: next.filename, segments: next.segments, feedbacks: next.feedbacks } });
+  await request(`/items/shares/${encodeURIComponent(existing[0].id)}`, {
+    method: "PATCH",
+    body: {
+      filename: next.filename,
+      segments: next.segments,
+      feedbacks: next.feedbacks,
+      status: next.status ?? "ready",
+      glossed_segments: Number(next.glossedSegments) || 0,
+      total_segments: Number(next.totalSegments) || 0
+    }
+  });
   return next;
+}
+
+export async function deleteDirectusShare(token) {
+  try {
+    const params = new URLSearchParams({ limit: "1", fields: "id" });
+    params.set("filter[token][_eq]", String(token));
+    const existing = await request(`/items/shares?${params}`);
+    if (existing[0]?.id) {
+      await request(`/items/shares/${encodeURIComponent(existing[0].id)}`, { method: "DELETE" });
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export async function listDirectusStyleProfiles(locale, status) {

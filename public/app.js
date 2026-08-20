@@ -1108,7 +1108,11 @@ function renderTasks() {
   const pending = tasks.filter((item) => item.status === "in_progress").length;
   const unitCount = tasks.reduce((sum, item) => sum + (item.totalSegments || 0), 0);
   $("#taskSummary").innerHTML = `<span>进行中 ${pending}</span><span>待处理 QA ${review}</span><span>已完成 ${completed}</span><span>共 ${tasks.length} 个任务 · ${unitCount} 个翻译单元</span>`;
-  $("#taskList").innerHTML = tasks.length ? tasks.map((task) => task.type === "autoqa" ? renderQaTaskRow(task) : renderBatchTaskRow(task)).join("") : '<div class="empty-list task-empty">没有符合当前筛选条件的历史任务</div>';
+  $("#taskList").innerHTML = tasks.length ? tasks.map((task) => {
+    if (task.type === "autoqa") return renderQaTaskRow(task);
+    if (task.type === "share") return renderShareTaskRow(task);
+    return renderBatchTaskRow(task);
+  }).join("") : '<div class="empty-list task-empty">没有符合当前筛选条件的历史任务</div>';
   $$(".task-row [data-action]").forEach((button) => button.addEventListener("click", () => {
     const id = button.closest(".task-row").dataset.taskId;
     const action = button.dataset.action;
@@ -1120,7 +1124,47 @@ function renderTasks() {
     else if (action === "feedback-qa-task") openShareFeedbackDialog({ qaTaskId: id });
     else if (action === "open-qa-task") openQaTask(id);
     else if (action === "delete-qa-task") deleteQaTaskRow(id, button);
+    else if (action === "open-share") window.open(`/share/${encodeURIComponent(id)}`, "_blank", "noopener");
+    else if (action === "copy-share") copyShareLink(id);
+    else if (action === "delete-share") deleteShareTaskRow(id, button);
   }));
+}
+
+function renderShareTaskRow(task) {
+  const locale = state.bootstrap.locales[task.locale];
+  const statusLabel = task.status === "in_progress" ? "拆解生成中" : task.status === "needs_attention" ? "生成失败" : task.qaPending ? "有待批准反馈" : "就绪";
+  const statusClass = task.status === "in_progress" ? "warning" : task.status === "needs_attention" ? "error" : task.qaPending ? "warning" : "success";
+  const progress = task.totalSegments ? Math.round(task.completedSegments / task.totalSegments * 100) : 0;
+  return `<article class="task-row" data-task-id="${escapeHtml(task.id)}">
+    <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.title)}</strong><span class="task-status ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span><span class="task-type-chip">分享</span></div><small>${escapeHtml(locale?.label || task.locale)} · ${escapeHtml(contentTypeLabel(task.contentType))} · ${escapeHtml(task.domain)} · ${formatTaskTime(task.updatedAt)}</small></div>
+    <div class="task-progress"><div><i style="width:${task.status === "in_progress" ? progress : 100}%"></i></div><span>${task.status === "in_progress" ? `拆解 ${task.completedSegments} / ${task.totalSegments}` : `${task.totalSegments} 段`}</span></div>
+    <div class="task-qa"><strong>${task.qaPending ? `${task.qaPending} 条待批准反馈` : "暂无反馈"}</strong><small>链接长期有效</small></div>
+    <div class="task-actions"><button class="button secondary small" data-action="open-share">打开分享页</button><button class="button ghost small" data-action="copy-share">复制链接</button><button class="button ghost small" data-action="delete-share">删除</button></div>
+  </article>`;
+}
+
+async function copyShareLink(token) {
+  try {
+    await navigator.clipboard.writeText(`${location.origin}/share/${encodeURIComponent(token)}`);
+    toast("分享链接已复制");
+  } catch (error) {
+    toast("复制失败，请手动从打开页面复制地址");
+  }
+}
+
+async function deleteShareTaskRow(token, button) {
+  if (!confirm("确认删除这个分享？同事将无法再打开该链接，已收集的反馈会一并删除。")) return;
+  button.disabled = true;
+  button.textContent = "删除中…";
+  try {
+    await api(`/api/share/${encodeURIComponent(token)}`, { method: "DELETE" });
+    await loadTasks();
+    toast("已删除分享");
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "删除";
+    toast(error.message);
+  }
 }
 
 function renderBatchTaskRow(task) {
@@ -1192,7 +1236,7 @@ function showShareLinkDialog(payload) {
   const urls = [...new Set([primary, ...(payload.shareUrls || [])])];
   $("#shareUrlList").innerHTML = urls.map((url) => `
     <div class="share-url-row"><input readonly value="${escapeHtml(url)}" /><button class="button ghost small share-copy" data-url="${escapeHtml(url)}">复制</button></div>`).join("");
-  $("#shareGlossNote").textContent = `已为 ${payload.glossedSegments} / ${payload.totalSegments} 段生成语素拆解与直译${payload.glossedSegments < payload.totalSegments ? "（超出 30 段的部分未生成）" : ""}。`;
+  $("#shareGlossNote").textContent = `链接立即可用。语素拆解与直译正在后台生成（${Math.min(payload.totalSegments, 30)} 段以内），生成进度与分享入口见任务中心「分享验证」类型，刷新或重启都不影响。`;
   $$(".share-copy").forEach((copyButton) => copyButton.addEventListener("click", async () => {
     await navigator.clipboard.writeText(copyButton.dataset.url);
     toast("链接已复制");

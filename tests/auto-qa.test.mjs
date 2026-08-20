@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, dedupeIssues, groupIssuesByDimension, runBasicQa, splitQaSegments, summarizeIssues, validateGlossTokens } from "../src/auto-qa.mjs";
+import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, dedupeIssues, groupIssuesByDimension, isGlossDumpLiteral, runBasicQa, splitQaSegments, summarizeIssues, validateGlossTokens } from "../src/auto-qa.mjs";
 import { parseAutoQaLineResponse, parseGrammarLineResponse, validateAlignmentPlan } from "../src/provider.mjs";
 
 test("基本检查：未翻译的完全相同译文记为阻断", () => {
@@ -110,6 +110,13 @@ test("语素拆解校验：词块拼接必须完整覆盖译文，不允许遗�
   assert.equal(splitAcross, true);
   assert.equal(validateGlossTokens({ translation: "テスト", tokens: [{ surface: "テスト" }, { surface: "余計" }] }), false);
   assert.equal(validateGlossTokens({ translation: "テスト", tokens: [] }), false);
+});
+
+test("直译质量检测：释义拼接与标签字样被识别为不合格", () => {
+  assert.equal(isGlossDumpLiteral("最近 游戏 话题助词 《 黑色的 神话 : 钟馗 》 的 15 分钟 分量 游戏内 演示 影像 宾格助词 公开 做了"), true);
+  assert.equal(isGlossDumpLiteral("新的 通行证 主格 登场 了"), true);
+  assert.equal(isGlossDumpLiteral("黑色神话钟馗的15分钟游戏内演示影像被公开了，这是本作首次"), false);
+  assert.equal(isGlossDumpLiteral(""), false);
 });
 
 test("模型行式降级解析带 dimension 字段", () => {

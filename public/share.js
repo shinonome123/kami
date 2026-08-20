@@ -1,6 +1,7 @@
 const token = decodeURIComponent(location.pathname.replace(/^\/share\/?/, ""));
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+let shareStatus = "ready";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -63,10 +64,10 @@ function renderSegment(segment) {
         ${segment.gloss.approximate ? '<p class="share-gloss-note">⚠️ 拆解为模型近似切分，仅供参考。</p>' : ""}
         <div class="share-gloss-tokens">${segment.gloss.tokens.map((tokenItem) =>
           `<span class="share-gloss-token"><b>${escapeHtml(tokenItem.surface)}</b><i>${escapeHtml(tokenItem.pos || "")}</i><em>${escapeHtml(tokenItem.gloss || "")}</em></span>`).join("")}</div>
-        <p class="share-gloss-literal"><strong>字面直译</strong>${escapeHtml(segment.gloss.literal || "—")}</p>
+        ${segment.gloss.literal ? `<p class="share-gloss-literal"><strong>字面直译</strong>${escapeHtml(segment.gloss.literal)}</p>` : ""}
         ${segment.gloss.note ? `<p class="share-gloss-note">${escapeHtml(segment.gloss.note)}</p>` : ""}
       </div>`
-    : '<div class="share-gloss-empty">本段未生成辅助拆解</div>';
+    : `<div class="share-gloss-empty">${shareStatus === "generating" ? "辅助拆解生成中，请稍后刷新……" : "本段未生成辅助拆解"}</div>`;
   const issues = (segment.issues || []).length
     ? `<div class="share-issues">${segment.issues.map((issue) =>
         `<div class="qa-item ${issue.severity === "error" || issue.severity === "critical" ? "error" : ""}"><strong>[${escapeHtml(issue.category || issue.type || "qa")}]</strong> ${escapeHtml(issue.message)}${issue.suggestion ? ` <small>建议：${escapeHtml(issue.suggestion)}</small>` : ""}</div>`).join("")}</div>`
@@ -129,6 +130,7 @@ async function initialize() {
   }
   try {
     const [payload, bootstrap] = await Promise.all([api(`/api/share/${encodeURIComponent(token)}`), api("/api/bootstrap")]);
+    shareStatus = payload.status || "ready";
     const locale = bootstrap.locales?.[payload.locale];
     document.title = `${payload.filename} · Kami 分享验证`;
     $("#shareTitle").textContent = payload.filename;
@@ -136,6 +138,11 @@ async function initialize() {
     const pending = payload.feedbackCount;
     $("#shareSummary").hidden = false;
     $("#shareSummary").innerHTML = `<span>共 ${payload.segments.length} 段</span><span>已收反馈 ${pending} 条</span>`;
+    if (shareStatus === "generating") {
+      $("#shareGeneratingBanner").hidden = false;
+      $("#shareGeneratingText").textContent = `语素拆解与字面直译正在后台生成（${payload.glossedSegments} / ${Math.min(payload.totalSegments, 30)}），页面会自动刷新；您可以先查看原文、译文与评分。`;
+      pollGlossStatus(token);
+    }
     $("#shareSegments").innerHTML = (payload.segments.length || payload.meta)
       ? `${renderMeta(payload.meta)}${payload.segments.map(renderSegment).join("")}`
       : '<div class="empty-list">该分享没有可展示的段落。</div>';
@@ -145,6 +152,26 @@ async function initialize() {
     $("#shareError").textContent = error.message;
     $("#shareSegments").innerHTML = "";
   }
+}
+
+/** 拆解生成期间轮询：完成后自动刷新页面展示拆解结果。 */
+function pollGlossStatus(shareToken) {
+  let checks = 0;
+  const timer = setInterval(async () => {
+    checks += 1;
+    try {
+      const payload = await api(`/api/share/${encodeURIComponent(shareToken)}`);
+      if (payload.status !== "generating") {
+        clearInterval(timer);
+        location.reload();
+        return;
+      }
+      $("#shareGeneratingText").textContent = `语素拆解与字面直译正在后台生成（${payload.glossedSegments} / ${Math.min(payload.totalSegments, 30)}），页面会自动刷新；您可以先查看原文、译文与评分。`;
+    } catch {
+      // 网络抖动忽略，继续轮询
+    }
+    if (checks > 120) clearInterval(timer); // 最多等 16 分钟，避免无限轮询
+  }, 8_000);
 }
 
 initialize();

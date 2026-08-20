@@ -1,6 +1,6 @@
 import { loadProviderConfig, saveProviderConfig } from "./provider-store.mjs";
 import { CONTENT_TYPES, LOCALES } from "./config.mjs";
-import { glossCoverage, validateGlossTokens } from "./auto-qa.mjs";
+import { glossCoverage, isGlossDumpLiteral, validateGlossTokens } from "./auto-qa.mjs";
 
 const loadedProvider = loadProviderConfig();
 let persistence = loadedProvider.persistence;
@@ -877,7 +877,7 @@ export async function glossTranslationWithModel({ translation, locale, onUsage =
   const messages = [
     {
       role: "system",
-      content: `你是${language}语言学教师。把译文逐词/逐语素拆解，帮助不懂${language}的中文读者理解：tokens 数组必须按译文顺序列出每个词块；surface 尽量取自译文里原样出现的连续片段（全部 surface 按顺序拼接并去掉空白后应尽量等于译文本身）；pos 是简短词性/语法标签（如 助词/动词/名词/形容词/敬语/助动词）；gloss 是该词块的中文对译；literal 是整句逐词直译的中文（保持原文语序，允许不通顺）；note 可选，一句话说明关键语法点。按常见教材切分即可，不要纠结语言学争议、不要长篇推演、不要思考过程，直接输出。只输出严格 JSON：{"tokens":[{"surface":"新しい","pos":"形容词","gloss":"新的"}],"literal":"新的 通行证 主格 登场 了","note":"が 是主格助词"}，禁止空白或 Markdown。`
+      content: `你是${language}语言学教师。把译文逐词/逐语素拆解，帮助不懂${language}的中文读者理解：tokens 数组必须按译文顺序列出每个词块；surface 尽量取自译文里原样出现的连续片段（全部 surface 按顺序拼接并去掉空白后应尽量等于译文本身）；pos 是简短词性/语法标签（如 助词/动词/名词/形容词/敬语/助动词）；gloss 是该词块的中文对译；literal 必须是一句连贯的中文字面直译——把每个词块的意思按原文语序连成通顺度尚可的一句话，助词、语尾等语法成分融进句子里（例如把「主格助词」直接体现为句子里的主语关系，把「宾语助词」体现为「把/被」等结构），禁止用空格把词块释义拼成一串，禁止在 literal 里出现「助词」「语尾」「宾格」「主格」等标签字样；note 可选，一句话说明关键语法点。按常见教材切分即可，不要纠结语言学争议、不要长篇推演、不要思考过程，直接输出。只输出严格 JSON：{"tokens":[{"surface":"新しい","pos":"形容词","gloss":"新的"}],"literal":"新的通行证登场了（敬体）","note":"が 是主格助词"}，禁止空白或 Markdown。`
     },
     { role: "user", content: JSON.stringify({ translation, locale }) }
   ];
@@ -890,14 +890,22 @@ export async function glossTranslationWithModel({ translation, locale, onUsage =
       const parsed = JSON.parse(match[0]);
       if (!Array.isArray(parsed.tokens) || !parsed.tokens.length) throw new Error("tokens 为空");
       const coverage = glossCoverage({ translation, tokens: parsed.tokens });
+      let literal = String(parsed.literal || "").slice(0, 500);
+      let literalNote = "";
+      if (isGlossDumpLiteral(literal)) {
+        if (attempt === 0) throw new Error("literal 为词块释义拼接");
+        literal = "";
+        literalNote = "字面直译未通过连贯性检查，已隐藏；请参考上方逐词拆解。";
+      }
+      const noteParts = [String(parsed.note || "").slice(0, 300), literalNote].filter(Boolean);
       result = {
         tokens: parsed.tokens.slice(0, 80).map((token) => ({
           surface: String(token.surface || "").slice(0, 60),
           pos: String(token.pos || "").slice(0, 30),
           gloss: String(token.gloss || "").slice(0, 80)
         })),
-        literal: String(parsed.literal || "").slice(0, 500),
-        note: String(parsed.note || "").slice(0, 300),
+        literal,
+        note: noteParts.join(" "),
         // 近似拆解：词块未能严格覆盖译文时标记，前端显示“仅供参考”
         approximate: coverage < 1
       };
@@ -907,7 +915,7 @@ export async function glossTranslationWithModel({ translation, locale, onUsage =
       content = await chat([
         ...messages,
         { role: "assistant", content: String(content || "").slice(0, 3_000) || "(空白)" },
-        { role: "user", content: "上一个回答无效。请直接重新输出 JSON：tokens 的 surface 尽量取自译文原文，按顺序拼接（去空白）后尽量等于译文。不要思考过程，直接输出。" }
+        { role: "user", content: "上一个回答无效。请直接重新输出 JSON：tokens 的 surface 尽量取自译文原文，按顺序拼接（去空白）后尽量等于译文；literal 必须是连贯的中文句子（把助词、语尾融入句中，如「新的通行证登场了（敬体）」，或「黑色神话钟馗的15分钟游戏内演示影像被公开了」），严禁用空格拼接词块释义，严禁出现「助词/语尾/宾格/主格」等标签字样。不要思考过程，直接输出。" }
       ], runtimeConfig, { temperature: 0, timeoutMs: 90_000, maxTokens: 3200, requestLabel: "Auto QA 语素拆解重试", responseFormat: { type: "json_object" }, reasoningEffort: "low", onUsage });
     }
   }

@@ -594,8 +594,11 @@ const definitions = [
       jsonField("meta", "质检摘要", { note: "Auto QA 分享的综合分、三维评分、对齐说明与整句级问题。", sort: 9 }),
       jsonField("segments", "分享段落快照", { note: "每段的原文、译文、评分与语素拆解。", sort: 10 }),
       jsonField("feedbacks", "同事反馈队列", { note: "pending 待采纳 / adopted 已入风格证据 / ignored 已忽略。", sort: 11 }),
-      dateField("date_created", "创建时间", "date-created", 12),
-      dateField("date_updated", "更新时间", "date-updated", 13)
+      selectField("status", "生成状态", [["生成中", "generating"], ["就绪", "ready"], ["失败", "failed"]], { defaultValue: "ready", sort: 12 }),
+      { field: "glossed_segments", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 13, translations: label("已生成拆解段数") }, schema: { is_nullable: true } },
+      { field: "total_segments", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 14, translations: label("总段数") }, schema: { is_nullable: true } },
+      dateField("date_created", "创建时间", "date-created", 15),
+      dateField("date_updated", "更新时间", "date-updated", 16)
     ]
   }
 ];

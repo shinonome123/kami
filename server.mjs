@@ -13,7 +13,7 @@ import { adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSug
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, dedupeIssues, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
@@ -85,6 +85,64 @@ function feedbackEntry(share, feedback) {
     createdAt: feedback.createdAt,
     resolvedAt: feedback.resolvedAt || ""
   };
+}
+
+/** 单个分享最多生成的语素拆解段数。 */
+const SHARE_GLOSS_LIMIT = 30;
+
+/**
+ * 后台生成分享的语素拆解：请求返回后异步执行，进度写回分享记录，
+ * 服务重启后由启动恢复逻辑续跑未完成的分享。
+ */
+async function generateShareGlosses(token) {
+  const share = await getShare(token);
+  if (!share || share.status === "ready" || share.status === "failed") return;
+  const targets = (share.segments || [])
+    .slice(0, SHARE_GLOSS_LIMIT)
+    .map((segment, index) => ({ index, segment }))
+    .filter(({ segment }) => !segment.gloss);
+  if (!targets.length) {
+    await updateShare(token, (item) => ({
+      ...item,
+      status: "ready",
+      glossedSegments: (item.segments || []).slice(0, SHARE_GLOSS_LIMIT).filter((segment) => segment.gloss).length
+    }));
+    return;
+  }
+  const flush = async (updates) => {
+    await updateShare(token, (item) => {
+      const nextSegments = item.segments.map((segment) => {
+        const gloss = updates.get(segment.index);
+        return gloss ? { ...segment, gloss } : segment;
+      });
+      const limit = Math.min(nextSegments.length, SHARE_GLOSS_LIMIT);
+      const glossed = nextSegments.slice(0, limit).filter((segment) => segment.gloss).length;
+      return { ...item, segments: nextSegments, glossedSegments: glossed, status: glossed >= limit ? "ready" : "generating" };
+    });
+  };
+  const settled = await runTaskPool(targets.map(({ segment }) => ({ translation: segment.translation, locale: share.locale })), async (target) => {
+    try {
+      return await glossTranslationWithModel({ translation: target.translation, locale: target.locale });
+    } catch {
+      return null;
+    }
+  }, { concurrency: 2 });
+  const updates = new Map();
+  for (let index = 0; index < targets.length; index += 1) {
+    updates.set(targets[index].segment.index, settled[index]?.status === "fulfilled" ? settled[index].value : null);
+    if (updates.size >= 5 || index === targets.length - 1) {
+      await flush(updates);
+      updates.clear();
+    }
+  }
+  const final = await getShare(token);
+  if (final && final.status !== "ready") {
+    await updateShare(token, (item) => ({
+      ...item,
+      status: "ready",
+      glossedSegments: (item.segments || []).slice(0, SHARE_GLOSS_LIMIT).filter((segment) => segment.gloss).length
+    }));
+  }
 }
 
 function learningScope({ locale, contentType = "general", domain = "general", project = "default" }) {
@@ -1029,9 +1087,26 @@ async function apiHandler(req, res, url) {
     const status = url.searchParams.get("status") || "";
     const search = url.searchParams.get("search") || "";
     const limit = Number(url.searchParams.get("limit")) || 200;
-    const batches = type === "autoqa" ? [] : await listBatchRuns({ locale, status, search, limit });
-    const qaTasks = type === "batch" ? [] : await listQaTasks({ locale, status, search, limit });
-    const merged = [...batches.map((item) => ({ ...item, type: "batch" })), ...qaTasks]
+    const batches = type === "autoqa" || type === "share" ? [] : await listBatchRuns({ locale, status, search, limit });
+    const qaTasks = type === "batch" || type === "share" ? [] : await listQaTasks({ locale, status, search, limit });
+    const shares = type === "batch" || type === "autoqa" ? [] : (await listShares({})).map((share) => ({
+      id: share.token,
+      type: "share",
+      title: share.filename,
+      locale: share.locale,
+      contentType: share.contentType || "general",
+      domain: share.domain || "general",
+      status: share.status === "generating" ? "in_progress" : share.status === "failed" ? "needs_attention" : (share.feedbacks || []).some((feedback) => feedback.status === "pending") ? "review" : "completed",
+      overallScore: null,
+      totalSegments: Number(share.totalSegments) || share.segments.length,
+      completedSegments: Number(share.glossedSegments) || 0,
+      failedSegments: 0,
+      qaPending: (share.feedbacks || []).filter((feedback) => feedback.status === "pending").length,
+      sharePath: `/share/${share.token}`,
+      createdAt: share.createdAt,
+      updatedAt: share.updatedAt
+    })).filter((item) => (!locale || item.locale === locale) && (!status || item.status === status) && (!search || item.title.toLowerCase().includes(String(search).toLowerCase())));
+    const merged = [...batches.map((item) => ({ ...item, type: "batch" })), ...qaTasks, ...shares]
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
       .slice(0, limit);
     return json(res, 200, merged);
@@ -1380,16 +1455,7 @@ async function apiHandler(req, res, url) {
       error.statusCode = 400;
       throw error;
     }
-    const GLOSS_LIMIT = 30;
-    const glossTargets = reportSegments.slice(0, GLOSS_LIMIT);
-    const glossSettled = await runTaskPool(glossTargets.map((segment) => ({ translation: segment.translation, locale: task.locale })), async (target) => {
-      try {
-        return await glossTranslationWithModel({ translation: target.translation, locale: target.locale });
-      } catch {
-        return null;
-      }
-    }, { concurrency: 2 });
-    const glossByTarget = new Map(glossSettled.map((result, index) => [index, result.status === "fulfilled" ? result.value : null]));
+    // 链接立即可用：语素拆解由后台任务异步生成（任务中心可见进度，服务重启后续跑）
     const segments = reportSegments.map((segment, index) => ({
       index: index + 1,
       source: segment.source,
@@ -1408,7 +1474,7 @@ async function apiHandler(req, res, url) {
         sourceSpan: String(issue.sourceSpan || ""),
         targetSpan: String(issue.targetSpan || "")
       })),
-      gloss: index < glossTargets.length ? glossByTarget.get(index) : null
+      gloss: null
     }));
     const meta = {
       source: "autoqa",
@@ -1428,14 +1494,19 @@ async function apiHandler(req, res, url) {
       contentType: task.contentType || "general",
       domain: task.domain || "general",
       meta,
-      segments
+      segments,
+      status: "generating",
+      glossedSegments: 0,
+      totalSegments: segments.length
     });
+    generateShareGlosses(share.token).catch((error) => console.error(`分享拆解生成失败 ${share.token}:`, error.message));
     return json(res, 200, {
       token: share.token,
       sharePath: `/share/${share.token}`,
       shareUrls: lanShareUrls(share.token),
-      glossedSegments: Math.min(reportSegments.length, GLOSS_LIMIT),
-      totalSegments: reportSegments.length
+      status: "generating",
+      glossedSegments: 0,
+      totalSegments: segments.length
     });
   }
   if (req.method === "GET" && url.pathname.startsWith("/api/qa-tasks/")) {
@@ -1480,17 +1551,7 @@ async function apiHandler(req, res, url) {
       error.statusCode = 400;
       throw error;
     }
-    // 语素拆解 + 直译：最多生成 30 段，避免长文分享烧光 token
-    const GLOSS_LIMIT = 30;
-    const glossTargets = doneSegments.slice(0, GLOSS_LIMIT);
-    const glossSettled = await runTaskPool(glossTargets.map((segment) => ({ translation: segment.translation, locale: run.locale })), async (target) => {
-      try {
-        return await glossTranslationWithModel({ translation: target.translation, locale: target.locale });
-      } catch {
-        return null;
-      }
-    }, { concurrency: 2 });
-    const glossByTarget = new Map(glossSettled.map((result, index) => [index, result.status === "fulfilled" ? result.value : null]));
+    // 链接立即可用：语素拆解由后台任务异步生成（任务中心可见进度，服务重启后续跑）
     const segments = doneSegments.map((segment, index) => ({
       index: index + 1,
       source: segment.source,
@@ -1505,17 +1566,20 @@ async function apiHandler(req, res, url) {
         message: String(issue.message || ""),
         suggestion: String(issue.suggestion || "")
       })),
-      gloss: index < glossTargets.length ? glossByTarget.get(index) : null
+      gloss: null
     }));
     const share = await saveShare({
-      batchId, filename: run.filename, locale: run.locale, contentType: run.contentType || "general", domain: run.domain || "general", segments
+      batchId, filename: run.filename, locale: run.locale, contentType: run.contentType || "general", domain: run.domain || "general",
+      segments, status: "generating", glossedSegments: 0, totalSegments: segments.length
     });
+    generateShareGlosses(share.token).catch((error) => console.error(`分享拆解生成失败 ${share.token}:`, error.message));
     return json(res, 200, {
       token: share.token,
       sharePath: `/share/${share.token}`,
       shareUrls: lanShareUrls(share.token),
-      glossedSegments: Math.min(doneSegments.length, GLOSS_LIMIT),
-      totalSegments: doneSegments.length
+      status: "generating",
+      glossedSegments: 0,
+      totalSegments: segments.length
     });
   }
   if (req.method === "GET" && url.pathname.startsWith("/api/share/")) {
@@ -1536,8 +1600,21 @@ async function apiHandler(req, res, url) {
       meta: share.meta || null,
       segments: share.segments,
       feedbackCount: share.feedbacks.length,
+      status: share.status || "ready",
+      glossedSegments: Number(share.glossedSegments) || 0,
+      totalSegments: Number(share.totalSegments) || share.segments.length,
       createdAt: share.createdAt
     });
+  }
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/share/")) {
+    const token = decodeURIComponent(url.pathname.slice("/api/share/".length));
+    const deleted = await deleteShare(token);
+    if (!deleted) {
+      const error = new Error("分享不存在或已删除");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { ok: true });
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/share/") && url.pathname.endsWith("/feedback")) {
     const token = decodeURIComponent(url.pathname.slice("/api/share/".length, -"/feedback".length));
@@ -1848,6 +1925,18 @@ async function serveStatic(req, res, url) {
 }
 
 await initializeStore();
+
+// 恢复未完成的分享拆解任务：服务重启后继续后台生成语素拆解
+try {
+  const shares = await listShares({});
+  for (const share of shares) {
+    if (share.status === "generating") {
+      generateShareGlosses(share.token).catch((error) => console.error(`分享拆解恢复失败 ${share.token}:`, error.message));
+    }
+  }
+} catch (error) {
+  console.error("恢复分享拆解任务失败", error);
+}
 
 // 技能评测后台任务队列：同一时刻只跑一个评测，逐对持久化检查点，重启后可续跑。
 const evaluationJobs = createEvaluationJobRunner({

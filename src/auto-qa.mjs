@@ -161,6 +161,20 @@ export function glossCoverage({ translation = "", tokens = [] }) {
   return Math.min(matched / [...source].length, [...source].length / Math.max([...covered].length, 1));
 }
 
+/**
+ * 检测“直译”是否退化成词块释义的拼接（如「最近 游戏 话题助词 《…》」）。
+ * 出现语法标签字样或大量空格分隔碎片时视为不合格，需要模型重写或隐藏。
+ */
+export function isGlossDumpLiteral(literal = "") {
+  const text = String(literal || "");
+  if (!text) return false;
+  const labelHits = (text.match(/(?:助词|语尾|助动词|冠形词|宾格|主格|话题|主题)/gu) || []).length;
+  if (labelHits >= 2) return true;
+  const spaces = (text.match(/\s/gu) || []).length;
+  const length = [...text].length;
+  return length > 0 && spaces / length > 0.22;
+}
+
 /** 整句级漏译/增译问题（由对齐结果直接判定）。 */
 export function buildAlignmentIssues({ sourceSegments = [], translationSegments = [], unmatchedSource = [], unmatchedTranslation = [] }) {  const issues = [];
   for (const index of unmatchedSource) {
