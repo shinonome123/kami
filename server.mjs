@@ -1,7 +1,7 @@
 import http from "node:http";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONTENT_TYPES, LOCALES, assertLocale } from "./src/config.mjs";
@@ -13,7 +13,7 @@ import { adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSug
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, dedupeIssues, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
@@ -89,6 +89,26 @@ function feedbackEntry(share, feedback) {
 
 /** 单个分享最多生成的语素拆解段数。 */
 const SHARE_GLOSS_LIMIT = 30;
+
+/** 创建后台任务记录（术语导入 / Embedding 重建 / 批次导出）。 */
+async function createBackgroundTask({ type, title, locale = "", progress = {} }) {
+  return saveBackgroundTask({
+    type,
+    title: String(title || "后台任务").slice(0, 160),
+    locale,
+    status: "in_progress",
+    progress: { percent: 0, phase: "queued", message: "已进入后台队列", completed: 0, total: 0, ...progress },
+    payload: {}
+  });
+}
+
+/** 更新后台任务进度；任务已被删除时返回 false，执行方据此停止后续工作。 */
+async function updateBackgroundTaskProgress(id, update) {
+  const task = await getBackgroundTask(id);
+  if (!task) return false;
+  await saveBackgroundTask({ ...task, ...update });
+  return true;
+}
 
 /**
  * 后台生成分享的语素拆解：请求返回后异步执行，进度写回分享记录，
@@ -531,12 +551,17 @@ async function previewTermImport(body, onProgress = () => {}) {
   return { ...extracted, ...saved };
 }
 
-async function commitTermImport(body) {
+async function commitTermImport(body, onProgress = null) {
   if (!body.batchId || !Array.isArray(body.candidates)) {
     const error = new Error("导入批次或候选数据无效");
     error.statusCode = 400;
     throw error;
   }
+  const report = (update) => {
+    if (typeof onProgress === "function") onProgress(update);
+  };
+  const total = body.candidates.length;
+  let done = 0;
   const imported = [];
   const skipped = [];
   const decisions = [];
@@ -606,7 +631,12 @@ async function commitTermImport(body) {
       skipped.push({ source: candidate.source, locale: candidate.locale, reason: error.message });
       decisions.push(decision);
     }
+    done += 1;
+    if (done % 10 === 0 || done === total) {
+      report({ phase: "importing", message: `正在入库：${done} / ${total}`, percent: 10 + Math.round((done / Math.max(total, 1)) * 70), completed: done, total });
+    }
   }
+  report({ phase: "distilling", message: "风格学习与蒸馏", percent: 88, completed: done, total });
   const styleProfiles = [];
   const batchLearning = [];
   const styleFallbacks = [];
@@ -712,13 +742,29 @@ async function apiHandler(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/term-import/preview") {
     const body = await readJsonBody(req);
     const progressId = String(body.progressId || "").trim();
-    const progress = (update) => reportImportProgress(progressId, { status: "running", ...update });
+    const task = await createBackgroundTask({
+      type: "term_import",
+      title: String(body.filename || "术语导入表格").slice(0, 120),
+      locale: body.locale || ""
+    });
+    const progress = (update) => {
+      reportImportProgress(progressId, { status: "running", ...update });
+      updateBackgroundTaskProgress(task.id, { progress: update }).catch(() => {});
+    };
     try {
       const result = await previewTermImport(body, progress);
       reportImportProgress(progressId, { status: "completed", phase: "completed", message: "识别与清洗完成", percent: 100 });
-      return json(res, 200, result);
+      await updateBackgroundTaskProgress(task.id, {
+        progress: { phase: "pending-commit", message: "识别完成，等待确认入库", percent: 100, completed: 1, total: 1 }
+      });
+      return json(res, 200, { ...result, backgroundTaskId: task.id });
     } catch (error) {
       reportImportProgress(progressId, { status: "failed", phase: "failed", message: error.message, error: error.message });
+      await updateBackgroundTaskProgress(task.id, {
+        status: "failed",
+        progress: { phase: "failed", message: error.message, percent: 100, completed: 0, total: 0 },
+        payload: { error: error.message }
+      });
       throw error;
     } finally {
       scheduleImportProgressCleanup(progressId);
@@ -730,7 +776,21 @@ async function apiHandler(req, res, url) {
     return json(res, progress ? 200 : 404, progress || { error: "识别任务尚未开始" });
   }
   if (req.method === "POST" && url.pathname === "/api/term-import/commit") {
-    return json(res, 201, await commitTermImport(await readJsonBody(req)));
+    const body = await readJsonBody(req);
+    const backgroundTaskId = String(body.backgroundTaskId || "");
+    const onProgress = (update) => {
+      if (!backgroundTaskId) return;
+      updateBackgroundTaskProgress(backgroundTaskId, { progress: update }).catch(() => {});
+    };
+    const result = await commitTermImport(body, onProgress);
+    if (backgroundTaskId) {
+      await updateBackgroundTaskProgress(backgroundTaskId, {
+        status: "completed",
+        progress: { phase: "completed", message: "导入完成", percent: 100, completed: 1, total: 1 },
+        payload: { summary: result.summary }
+      });
+    }
+    return json(res, 201, { ...result, backgroundTaskId });
   }
   if (req.method === "GET" && url.pathname === "/api/provider") {
     return json(res, 200, getProviderConfig());
@@ -742,11 +802,40 @@ async function apiHandler(req, res, url) {
     const body = await readJsonBody(req);
     const locale = body.locale ? assertLocale(body.locale) : null;
     const locales = locale ? [locale] : Object.keys(LOCALES);
-    const results = {};
-    for (const target of locales) {
-      results[target] = await rebuildEmbeddings(target);
-    }
-    return json(res, 200, { embeddingModel: getProviderConfig().embeddingModel || null, results });
+    const task = await createBackgroundTask({
+      type: "embedding_rebuild",
+      title: `Embedding 重建 · ${locale || "全部语言"}`,
+      locale: locale || ""
+    });
+    (async () => {
+      let externalEmbeddingWorking = false;
+      try {
+        await embed("重建探针");
+        externalEmbeddingWorking = true;
+      } catch {
+        // 外部向量服务不可用：整轮重建使用本地词面向量，避免每条都撞超时
+      }
+      const results = {};
+      let failure = "";
+      for (let index = 0; index < locales.length; index += 1) {
+        const target = locales[index];
+        const alive = await updateBackgroundTaskProgress(task.id, {
+          progress: { phase: "rebuilding", message: `正在重建 ${target}（${index + 1} / ${locales.length}）${externalEmbeddingWorking ? "" : "· 本地词面向量"}`, percent: Math.round((index / Math.max(locales.length, 1)) * 90), completed: index, total: locales.length }
+        });
+        if (!alive) return;
+        try {
+          results[target] = await rebuildEmbeddings(target, { forceLocal: !externalEmbeddingWorking });
+        } catch (error) {
+          failure += `${target}: ${error.message}；`;
+        }
+      }
+      await updateBackgroundTaskProgress(task.id, {
+        status: failure ? "failed" : "completed",
+        progress: { phase: failure ? "failed" : "completed", message: failure ? "部分语言重建失败" : "重建完成", percent: 100, completed: locales.length, total: locales.length },
+        payload: { embeddingModel: getProviderConfig().embeddingModel || null, externalEmbeddingWorking, results, error: failure }
+      });
+    })().catch((error) => console.error("Embedding 重建后台任务失败", error));
+    return json(res, 202, { backgroundTaskId: task.id, message: "Embedding 重建已进入任务中心后台执行" });
   }
   if (req.method === "POST" && url.pathname === "/api/feedback/accept") {
     const body = await readJsonBody(req);
@@ -1087,9 +1176,9 @@ async function apiHandler(req, res, url) {
     const status = url.searchParams.get("status") || "";
     const search = url.searchParams.get("search") || "";
     const limit = Number(url.searchParams.get("limit")) || 200;
-    const batches = type === "autoqa" || type === "share" ? [] : await listBatchRuns({ locale, status, search, limit });
-    const qaTasks = type === "batch" || type === "share" ? [] : await listQaTasks({ locale, status, search, limit });
-    const shares = type === "batch" || type === "autoqa" ? [] : (await listShares({})).map((share) => ({
+    const batches = type === "autoqa" || type === "share" || type === "background" ? [] : await listBatchRuns({ locale, status, search, limit });
+    const qaTasks = type === "batch" || type === "share" || type === "background" ? [] : await listQaTasks({ locale, status, search, limit });
+    const shares = type === "batch" || type === "autoqa" || type === "background" ? [] : (await listShares({})).map((share) => ({
       id: share.token,
       type: "share",
       title: share.filename,
@@ -1106,7 +1195,26 @@ async function apiHandler(req, res, url) {
       createdAt: share.createdAt,
       updatedAt: share.updatedAt
     })).filter((item) => (!locale || item.locale === locale) && (!status || item.status === status) && (!search || item.title.toLowerCase().includes(String(search).toLowerCase())));
-    const merged = [...batches.map((item) => ({ ...item, type: "batch" })), ...qaTasks, ...shares]
+    const backgroundTasks = type === "batch" || type === "autoqa" || type === "share" ? [] : (await listBackgroundTasks({ locale, search, limit })).map((task) => ({
+      id: task.id,
+      type: "background",
+      taskType: task.type,
+      title: task.title,
+      locale: task.locale || "",
+      contentType: "general",
+      domain: "general",
+      status: task.status === "in_progress" ? "in_progress" : task.status === "failed" ? "needs_attention" : "completed",
+      overallScore: null,
+      totalSegments: Number(task.progress?.total) || 0,
+      completedSegments: Number(task.progress?.completed) || 0,
+      failedSegments: 0,
+      qaPending: 0,
+      progress: task.progress || null,
+      payload: task.payload || null,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt
+    })).filter((item) => (!status || item.status === status));
+    const merged = [...batches.map((item) => ({ ...item, type: "batch" })), ...qaTasks, ...shares, ...backgroundTasks]
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
       .slice(0, limit);
     return json(res, 200, merged);
@@ -1119,7 +1227,62 @@ async function apiHandler(req, res, url) {
       error.statusCode = 404;
       throw error;
     }
-    return json(res, 200, await exportBatchDocument({ filename: run.filename, locale: run.locale, format: "task-xlsx", segments: run.segments }));
+    const task = await createBackgroundTask({ type: "batch_export", title: `导出 · ${run.filename}`, locale: run.locale });
+    (async () => {
+      try {
+        await updateBackgroundTaskProgress(task.id, { progress: { phase: "exporting", message: "正在合并导出文件", percent: 40, completed: 0, total: 1 } });
+        const exported = await exportBatchDocument({ filename: run.filename, locale: run.locale, format: "task-xlsx", segments: run.segments });
+        await updateBackgroundTaskProgress(task.id, { progress: { phase: "saving", message: "正在保存文件", percent: 85, completed: 0, total: 1 } });
+        const directory = join(DATA_ROOT, "exports");
+        await mkdir(directory, { recursive: true });
+        await writeFile(join(directory, `${task.id}.xlsx`), Buffer.from(exported.base64, "base64"));
+        await updateBackgroundTaskProgress(task.id, {
+          status: "completed",
+          progress: { phase: "completed", message: "导出完成", percent: 100, completed: 1, total: 1 },
+          payload: { filename: exported.filename, mimeType: exported.mimeType, bytes: exported.bytes, downloadUrl: `/api/export-tasks/${task.id}/download` }
+        });
+      } catch (error) {
+        await updateBackgroundTaskProgress(task.id, {
+          status: "failed",
+          progress: { phase: "failed", message: error.message, percent: 100, completed: 0, total: 1 },
+          payload: { error: error.message }
+        });
+      }
+    })().catch((error) => console.error("批次导出后台任务失败", error));
+    return json(res, 202, { backgroundTaskId: task.id, message: "导出已进入任务中心后台处理" });
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/export-tasks/") && url.pathname.endsWith("/download")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/export-tasks/".length, -"/download".length));
+    const task = await getBackgroundTask(id);
+    if (!task || task.type !== "batch_export" || task.payload?.downloadUrl !== `/api/export-tasks/${id}/download`) {
+      const error = new Error("导出任务不存在或尚未完成");
+      error.statusCode = 404;
+      throw error;
+    }
+    try {
+      const body = await readFile(join(DATA_ROOT, "exports", `${id}.xlsx`));
+      res.writeHead(200, {
+        "content-type": task.payload.mimeType || "application/octet-stream",
+        "content-length": body.length,
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(task.payload.filename || `${id}.xlsx`)}`
+      });
+      res.end(body);
+      return true;
+    } catch {
+      const error = new Error("导出文件已丢失，请重新导出");
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/background-tasks/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/background-tasks/".length));
+    const deleted = await deleteBackgroundTask(id);
+    if (!deleted) {
+      const error = new Error("后台任务不存在");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { ok: true });
   }
   if (req.method === "GET" && url.pathname.startsWith("/api/batch/run/")) {
     const batchId = decodeURIComponent(url.pathname.slice("/api/batch/run/".length));
@@ -2017,6 +2180,6 @@ const HOST = process.env.KAMI_HOST || "127.0.0.1";
 server.listen(PORT, HOST, () => {
   console.log(`Kami Localization Workbench: http://127.0.0.1:${PORT}`);
   if (HOST !== "127.0.0.1" && HOST !== "localhost") {
-    for (const address of lanShareUrls("")) console.log(`局域网访问（分享给同事可用）：http://${address.replace("/share/", "")}${PORT === 80 ? "" : `:${PORT}`}`);
+    for (const url of lanShareUrls("")) console.log(`局域网访问（分享给同事可用）：${url.replace(/\/share\/$/, "")}`);
   }
 });

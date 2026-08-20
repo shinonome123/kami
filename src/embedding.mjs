@@ -37,8 +37,8 @@ export function embeddingModelName() {
   return getProviderConfig().embeddingModel || LOCAL_MODEL;
 }
 
-export async function embedSource(source) {
-  if (isEmbeddingConfigured()) {
+export async function embedSource(source, { forceLocal = false } = {}) {
+  if (!forceLocal && isEmbeddingConfigured()) {
     try {
       const { vector, model, dimensions } = await embed(source);
       return { vector, model, dimensions };

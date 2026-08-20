@@ -38,6 +38,10 @@ import {
   listDirectusShares,
   updateDirectusShare,
   deleteDirectusShare,
+  saveDirectusBackgroundTask,
+  getDirectusBackgroundTask,
+  listDirectusBackgroundTasks,
+  deleteDirectusBackgroundTask,
   saveDirectusMemory,
   saveDirectusQaCase,
   saveDirectusQaRun,
@@ -579,15 +583,55 @@ async function updateJsonShare(token, updater) {
 }
 
 async function deleteJsonShare(token) {
-  try {
-    await rm(join(ROOT, "shares", `${String(token)}.json`), { force: true });
-    return true;
-  } catch {
-    return false;
-  }
+  const path = join(ROOT, "shares", `${String(token)}.json`);
+  const existing = await readJson(path, null);
+  if (!existing) return false;
+  await rm(path, { force: true });
+  return true;
 }
 
-async function rebuildJsonEmbeddings(locale, currentModel) {  const stats = { memories: 0, qaCases: 0, evidence: 0, errors: [] };  const targets = [
+async function saveJsonBackgroundTask(input) {
+  const id = String(input.id || randomUUID());
+  const existing = await readJson(join(ROOT, "background-tasks", `${id}.json`), null);
+  const now = new Date().toISOString();
+  const item = {
+    id,
+    type: String(input.type || "term_import"),
+    title: String(input.title || "后台任务"),
+    locale: input.locale || "",
+    status: String(input.status || existing?.status || "in_progress"),
+    progress: input.progress ?? existing?.progress ?? { percent: 0, phase: "queued", message: "已进入后台队列", completed: 0, total: 0 },
+    payload: input.payload ?? existing?.payload ?? {},
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+  await writeJsonAtomic(join(ROOT, "background-tasks", `${id}.json`), item);
+  return item;
+}
+
+async function getJsonBackgroundTask(id) {
+  return readJson(join(ROOT, "background-tasks", `${String(id)}.json`), null);
+}
+
+async function listJsonBackgroundTasks({ locale = "", status = "", search = "", limit = 200 } = {}) {
+  let files = [];
+  try { files = await readdir(join(ROOT, "background-tasks")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  const tasks = (await Promise.all(files.filter((file) => file.endsWith(".json")).map((file) => readJson(join(ROOT, "background-tasks", file), null)))).filter(Boolean);
+  return tasks
+    .filter((task) => (!locale || task.locale === locale) && (!status || task.status === status) && (!search || task.title.toLowerCase().includes(String(search).toLowerCase())))
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .slice(0, limit);
+}
+
+async function deleteJsonBackgroundTask(id) {
+  const path = join(ROOT, "background-tasks", `${String(id)}.json`);
+  const existing = await readJson(path, null);
+  if (!existing) return false;
+  await rm(path, { force: true });
+  return true;
+}
+
+async function rebuildJsonEmbeddings(locale, currentModel, { forceLocal = false } = {}) {  const stats = { memories: 0, qaCases: 0, evidence: 0, errors: [] };  const targets = [
     { path: join(ROOT, "memories", `${assertLocale(locale)}.json`), kind: "memories" },
     { path: join(ROOT, "qa", "cases.json"), kind: "qaCases", filter: (item) => item.locale === locale },
     { path: join(ROOT, "styles", "evidence.json"), kind: "evidence", filter: (item) => item.locale === locale }
@@ -598,7 +642,7 @@ async function rebuildJsonEmbeddings(locale, currentModel) {  const stats = { me
     for (const { item, index } of scoped) {
       if (!item.source) continue;
       if (item.embedding?.vector?.length && item.embedding?.model === currentModel) continue;
-      const embedding = await embedSource(item.source);
+      const embedding = await embedSource(item.source, { forceLocal });
       if (!embedding) {
         stats.errors.push(`${target.kind}: ${item.source.slice(0, 30)}`);
         break;
@@ -1058,15 +1102,14 @@ export async function saveQaCase(input) {
   return appendJsonQa("cases", { ...input, ...(embedding ? { embedding } : {}) });
 }
 
-export async function rebuildEmbeddings(locale) {
+export async function rebuildEmbeddings(locale, options = {}) {
   const model = embeddingModelName();
   if (!model) {
     const error = new Error("未配置 embedding 模型，无法重建向量索引");
     error.statusCode = 400;
     throw error;
   }
-  if (usesDirectus()) return rebuildDirectusEmbeddings(locale);
-  return rebuildJsonEmbeddings(locale, model);
+  return usesDirectus() ? rebuildDirectusEmbeddings(locale, options) : rebuildJsonEmbeddings(locale, model, options);
 }
 
 export async function demoteMemories(locale, source, exceptId) {
@@ -1123,6 +1166,22 @@ export async function updateShare(token, updater) {
 
 export async function deleteShare(token) {
   return usesDirectus() ? deleteDirectusShare(token) : deleteJsonShare(token);
+}
+
+export async function saveBackgroundTask(input) {
+  return usesDirectus() ? saveDirectusBackgroundTask(input) : saveJsonBackgroundTask(input);
+}
+
+export async function getBackgroundTask(id) {
+  return usesDirectus() ? getDirectusBackgroundTask(id) : getJsonBackgroundTask(id);
+}
+
+export async function listBackgroundTasks(options) {
+  return usesDirectus() ? listDirectusBackgroundTasks(options) : listJsonBackgroundTasks(options);
+}
+
+export async function deleteBackgroundTask(id) {
+  return usesDirectus() ? deleteDirectusBackgroundTask(id) : deleteJsonBackgroundTask(id);
 }
 
 export async function listStyleProfiles(locale, status) {

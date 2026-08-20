@@ -1111,6 +1111,7 @@ function renderTasks() {
   $("#taskList").innerHTML = tasks.length ? tasks.map((task) => {
     if (task.type === "autoqa") return renderQaTaskRow(task);
     if (task.type === "share") return renderShareTaskRow(task);
+    if (task.type === "background") return renderBackgroundTaskRow(task);
     return renderBatchTaskRow(task);
   }).join("") : '<div class="empty-list task-empty">没有符合当前筛选条件的历史任务</div>';
   $$(".task-row [data-action]").forEach((button) => button.addEventListener("click", () => {
@@ -1127,7 +1128,50 @@ function renderTasks() {
     else if (action === "open-share") window.open(`/share/${encodeURIComponent(id)}`, "_blank", "noopener");
     else if (action === "copy-share") copyShareLink(id);
     else if (action === "delete-share") deleteShareTaskRow(id, button);
+    else if (action === "download-export") downloadBackgroundExport(id, button);
+    else if (action === "delete-background") deleteBackgroundTaskRow(id, button);
   }));
+}
+
+const BACKGROUND_TASK_LABELS = { term_import: "术语导入", embedding_rebuild: "Embedding 重建", batch_export: "批次导出" };
+
+function renderBackgroundTaskRow(task) {
+  const locale = state.bootstrap.locales[task.locale];
+  const progress = task.progress || {};
+  const percent = Number.isFinite(Number(progress.percent)) ? Math.max(0, Math.min(100, Number(progress.percent))) : (task.status === "completed" ? 100 : 0);
+  const statusLabel = task.status === "in_progress" ? "进行中" : task.status === "needs_attention" ? "失败" : "已完成";
+  const statusClass = task.status === "in_progress" ? "warning" : task.status === "needs_attention" ? "error" : "success";
+  const message = progress.message || "";
+  const download = task.taskType === "batch_export" && task.status === "completed" && task.payload?.downloadUrl;
+  const summary = task.payload?.summary;
+  const payloadText = summary
+    ? `术语 ${summary.terms ?? 0} · 译例 ${summary.memories ?? 0} · 风格草稿 ${summary.styleProfiles ?? 0} · 跳过 ${summary.skipped ?? 0}`
+    : task.payload?.error ? `错误：${task.payload.error}` : "";
+  return `<article class="task-row" data-task-id="${escapeHtml(task.id)}">
+    <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.title)}</strong><span class="task-status ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span><span class="task-type-chip">${escapeHtml(BACKGROUND_TASK_LABELS[task.taskType] || "后台")}</span></div><small>${locale ? `${escapeHtml(locale.label)} · ` : ""}${escapeHtml(message || payloadText || contentTypeLabel(task.contentType))} · ${formatTaskTime(task.updatedAt)}</small></div>
+    <div class="task-progress"><div><i style="width:${percent}%"></i></div><span>${task.totalSegments ? `${task.completedSegments} / ${task.totalSegments}` : `${percent}%`}</span></div>
+    <div class="task-qa"><strong>${payloadText || "—"}</strong><small>${task.status === "in_progress" ? "后台执行中" : formatTaskTime(task.updatedAt)}</small></div>
+    <div class="task-actions">${download ? `<button class="button secondary small" data-action="download-export">下载 Excel</button>` : ""}<button class="button ghost small" data-action="delete-background">删除</button></div>
+  </article>`;
+}
+
+function downloadBackgroundExport(id, button) {
+  window.location.href = `/api/export-tasks/${encodeURIComponent(id)}/download`;
+}
+
+async function deleteBackgroundTaskRow(id, button) {
+  if (!confirm("确认删除这条后台任务记录？进行中的任务会在后台继续执行但不再展示。")) return;
+  button.disabled = true;
+  button.textContent = "删除中…";
+  try {
+    await api(`/api/background-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await loadTasks();
+    toast("已删除后台任务");
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "删除";
+    toast(error.message);
+  }
 }
 
 function renderShareTaskRow(task) {
@@ -1174,7 +1218,7 @@ function renderBatchTaskRow(task) {
     <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.filename)}</strong><span class="task-status ${escapeHtml(task.status)}">${taskStatusLabel(task.status)}</span><span class="task-type-chip">批次</span></div><small>${escapeHtml(locale?.label || task.locale)} · ${escapeHtml(contentTypeLabel(task.contentType))} · ${escapeHtml(task.domain)} · ${formatTaskTime(task.updatedAt)}</small></div>
     <div class="task-progress"><div><i style="width:${progress}%"></i></div><span>${task.completedSegments} / ${task.totalSegments}</span></div>
     <div class="task-qa"><strong>${task.qaPending ? `${task.qaPending} 条待处理` : "QA 已清"}</strong>${task.failedSegments ? `<small>${task.failedSegments} 段失败</small>` : `<small>${task.format || "text"}</small>`}</div>
-    <div class="task-actions"><button class="button ghost small" data-action="open-task">打开任务</button><button class="button ghost small" data-action="share-task">分享验证</button><button class="button ghost small" data-action="feedback-task">反馈</button><button class="button secondary small" data-action="export-task">导出 Excel</button></div>
+    <div class="task-actions"><button class="button ghost small" data-action="open-task">打开任务</button><button class="button ghost small" data-action="share-task">分享验证</button><button class="button ghost small" data-action="feedback-task">反馈</button><button class="button secondary small" data-action="export-task">后台导出</button></div>
   </article>`;
 }
 
@@ -1385,13 +1429,16 @@ async function resolveFeedbackOnPage(token, feedbackId, action, button) {
 
 async function exportTaskExcel(batchId, button) {
   button.disabled = true;
-  button.textContent = "导出中…";
+  button.textContent = "提交中…";
   try {
     const payload = await api(`/api/tasks/${encodeURIComponent(batchId)}/export`, { method: "POST" });
-    downloadBase64File(payload);
-    toast(`已导出 ${payload.filename}`);
+    toast(payload.message || "导出已进入任务中心后台处理");
+    setTimeout(() => loadTasks().catch(() => {}), 600);
   } catch (error) { toast(error.message); }
-  finally { button.disabled = false; button.textContent = "导出 Excel"; }
+  finally {
+    button.disabled = false;
+    button.textContent = "后台导出";
+  }
 }
 
 function applyStoredBatchRun(run) {
@@ -2570,7 +2617,8 @@ async function commitImport() {
     const result = await api("/api/term-import/commit", { method: "POST", body: JSON.stringify({
       batchId: state.importPreview.batchId,
       filename: state.importPreview.filename,
-      candidates: state.importPreview.candidates
+      candidates: state.importPreview.candidates,
+      backgroundTaskId: state.importPreview.backgroundTaskId || ""
     }) });
     state.importCompleted = true;
     const importedIds = new Set(result.imported.map((item) => `${item.locale}\u0000${item.source}\u0000${item.target}`));

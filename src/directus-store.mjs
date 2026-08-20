@@ -649,7 +649,7 @@ export async function completeDirectusImport(batchId, decisions, summary) {
   });
 }
 
-export async function rebuildDirectusEmbeddings(locale) {
+export async function rebuildDirectusEmbeddings(locale, { forceLocal = false } = {}) {
   assertLocale(locale);
   const model = embeddingModelName();
   if (!model) {
@@ -662,7 +662,7 @@ export async function rebuildDirectusEmbeddings(locale) {
   const memoryItems = await request(`/items/${collection}?limit=-1&fields=id,source,embedding`);
   for (const item of memoryItems) {
     if (item.embedding?.vector?.length && item.embedding?.model === model) continue;
-    const embedding = await embedSource(item.source);
+    const embedding = await embedSource(item.source, { forceLocal });
     if (!embedding) {
       const error = new Error("embedding 服务不可用，重建中断");
       error.statusCode = 503;
@@ -677,7 +677,7 @@ export async function rebuildDirectusEmbeddings(locale) {
     const items = await request(`/items/${collectionName}?${params}`);
     for (const item of items) {
       if (item.embedding?.vector?.length && item.embedding?.model === model) continue;
-      const embedding = await embedSource(item.source);
+      const embedding = await embedSource(item.source, { forceLocal });
       if (!embedding) {
         const error = new Error("embedding 服务不可用，重建中断");
         error.statusCode = 503;
@@ -962,6 +962,65 @@ export async function deleteDirectusShare(token) {
     return false;
   } catch {
     return false;
+  }
+}
+
+export async function saveDirectusBackgroundTask(input) {
+  const id = String(input.id || randomUUID());
+  const body = {
+    task_type: String(input.type || "term_import"),
+    title: String(input.title || "后台任务"),
+    target_locale: input.locale ? assertLocale(input.locale) : null,
+    status: String(input.status || "in_progress"),
+    progress: input.progress ?? { percent: 0, phase: "queued", message: "已进入后台队列", completed: 0, total: 0 },
+    payload: input.payload ?? {}
+  };
+  const params = new URLSearchParams({ limit: "1", fields: "id" });
+  params.set("filter[id][_eq]", id);
+  const existing = await request(`/items/background_tasks?${params}`);
+  if (existing[0]?.id) await request(`/items/background_tasks/${encodeURIComponent(id)}`, { method: "PATCH", body });
+  else await request("/items/background_tasks", { method: "POST", body: { ...body, id } });
+  return { id, ...body };
+}
+
+export async function getDirectusBackgroundTask(id) {
+  try {
+    const item = await request(`/items/background_tasks/${encodeURIComponent(String(id))}?fields=id,task_type,title,target_locale,status,progress,payload,date_created,date_updated`);
+    return {
+      id: item.id, type: item.task_type || "term_import", title: item.title || "",
+      locale: item.target_locale || "", status: item.status || "in_progress",
+      progress: item.progress ?? { percent: 0, phase: "queued", message: "已进入后台队列", completed: 0, total: 0 },
+      payload: item.payload ?? {},
+      createdAt: item.date_created || null, updatedAt: item.date_updated || null
+    };
+  } catch (error) {
+    if (error.statusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function listDirectusBackgroundTasks({ locale = "", status = "", search = "", limit = 200 } = {}) {
+  const params = new URLSearchParams({ limit: String(Math.min(500, Math.max(1, Number(limit) || 200))), sort: "-date_updated,-date_created", fields: "id,task_type,title,target_locale,status,progress,payload,date_created,date_updated" });
+  if (locale) params.set("filter[target_locale][_eq]", assertLocale(locale));
+  if (search) params.set("filter[title][_icontains]", String(search).slice(0, 120));
+  const items = await request(`/items/background_tasks?${params}`);
+  const tasks = items.map((item) => ({
+    id: item.id, type: item.task_type || "term_import", title: item.title || "",
+    locale: item.target_locale || "", status: item.status || "in_progress",
+    progress: item.progress ?? { percent: 0, phase: "queued", message: "已进入后台队列", completed: 0, total: 0 },
+    payload: item.payload ?? {},
+    createdAt: item.date_created || null, updatedAt: item.date_updated || null
+  }));
+  return status ? tasks.filter((item) => item.status === status) : tasks;
+}
+
+export async function deleteDirectusBackgroundTask(id) {
+  try {
+    await request(`/items/background_tasks/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    return true;
+  } catch (error) {
+    if (error.statusCode === 404) return false;
+    throw error;
   }
 }
 

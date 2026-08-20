@@ -600,6 +600,22 @@ const definitions = [
       dateField("date_created", "创建时间", "date-created", 15),
       dateField("date_updated", "更新时间", "date-updated", 16)
     ]
+  },
+  {
+    collection: "background_tasks",
+    meta: { icon: "hourglass_bottom", note: "术语导入、Embedding 重建与批次导出等后台任务，任务中心可见进度并可回看结果。", display_template: "{{title}}", group: "localization_pipeline", sort: 14, accountability: "all", translations: label("后台任务") },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("task_type", "任务类型", [["术语导入", "term_import"], ["Embedding 重建", "embedding_rebuild"], ["批次导出", "batch_export"]], { required: true, sort: 2 }),
+      textField("title", "任务标题", { required: true, sort: 3 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { width: "half", sort: 4 }),
+      selectField("status", "任务状态", [["进行中", "in_progress"], ["已完成", "completed"], ["失败", "failed"]], { defaultValue: "in_progress", sort: 5 }),
+      jsonField("progress", "进度快照", { note: "percent、phase、message、completed、total。", sort: 6 }),
+      jsonField("payload", "结果载荷", { note: "导出文件下载地址、导入汇总、重建统计等。", sort: 7 }),
+      dateField("date_created", "创建时间", "date-created", 8),
+      dateField("date_updated", "更新时间", "date-updated", 9)
+    ]
   }
 ];
 
@@ -755,7 +771,8 @@ async function ensureServiceAccount() {
     ...["create", "read"].map((action) => ["qa_runs", action]),
     ...["create", "read", "update", "delete"].map((action) => ["qa_cases", action]),
     ...["create", "read", "update", "delete"].map((action) => ["qa_tasks", action]),
-    ...["create", "read", "update", "delete"].map((action) => ["shares", action])
+    ...["create", "read", "update", "delete"].map((action) => ["shares", action]),
+    ...["create", "read", "update", "delete"].map((action) => ["background_tasks", action])
   ];
   const currentPermissions = await api(`/permissions?filter[policy][_eq]=${policy.id}&limit=-1`);
   const existingPermissionKeys = new Set(currentPermissions.map((permission) => `${permission.collection}:${permission.action}`));
