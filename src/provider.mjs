@@ -248,24 +248,39 @@ export function isEmbeddingConfigured() {
   return Boolean(runtimeConfig.embeddingModel);
 }
 
+function embeddingRequestProfile(model, configuredUrl) {
+  const baseUrl = String(configuredUrl || "").replace(/\/+$/, "");
+  const hasCompleteEndpoint = /\/embeddings(?:\/multimodal)?$/i.test(baseUrl);
+  const multimodal = /\/embeddings\/multimodal$/i.test(baseUrl) || /^doubao-embedding-vision(?:-|$)/i.test(model);
+  return {
+    endpoint: hasCompleteEndpoint ? baseUrl : `${baseUrl}${multimodal ? "/embeddings/multimodal" : "/embeddings"}`,
+    multimodal
+  };
+}
+
 export async function embed(text, { model: modelOverride, timeoutMs = 30_000 } = {}) {
   const model = modelOverride || runtimeConfig.embeddingModel;
   if (!model) throw new Error("未配置 embedding 模型，向量检索保持禁用");
   const baseUrl = runtimeConfig.embeddingBaseUrl || runtimeConfig.baseUrl;
   const apiKey = runtimeConfig.embeddingApiKey || runtimeConfig.apiKey;
-  const { response, text: responseText } = await fetchWithTimeout(`${baseUrl}/embeddings`, {
+  const source = String(text).slice(0, 16_000);
+  const profile = embeddingRequestProfile(model, baseUrl);
+  const requestBody = profile.multimodal
+    ? { model, input: [{ type: "text", text: source }], encoding_format: "float", dimensions: 1024 }
+    : { model, input: source };
+  const { response, text: responseText } = await fetchWithTimeout(profile.endpoint, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
     },
-    body: JSON.stringify({ model, input: String(text).slice(0, 16_000) })
+    body: JSON.stringify(requestBody)
   }, { timeoutMs, label: "embedding" });
   if (!response.ok) {
     throw new Error(`embedding 请求失败 (${response.status})：${(responseText || "").slice(0, 500)}`);
   }
   const payload = JSON.parse(responseText || "{}");
-  let vector = payload.data?.[0]?.embedding ?? payload.embedding;
+  let vector = payload.data?.[0]?.embedding ?? payload.data?.embedding ?? payload.embedding;
   if (!Array.isArray(vector) || !vector.length || !vector.every((value) => Number.isFinite(value))) {
     throw new Error("embedding 响应缺少有效向量");
   }
@@ -536,7 +551,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
   const messages = [
     {
       role: "system",
-      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
+      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。category 使用简短英文代码；message、suggestion 和其他解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 必须逐字保留原文或译文中的证据片段。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"简体中文问题原因","suggestion":"简体中文可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
   ];
@@ -561,7 +576,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
     const lineContent = await chat([
       {
         role: "system",
-        content: "你是本地化 QA。不要输出 JSON。若没有问题只输出 PASS；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|类别|原文片段|译文片段|问题原因|修订建议。不得输出其他内容。"
+        content: "你是本地化 QA。不要输出 JSON。若没有问题只输出 PASS；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|英文类别代码|原文片段|译文片段|简体中文问题原因|简体中文修订建议。问题原因和修订建议禁止使用目标语言。不得输出其他内容。"
       },
       { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 3), qaCases: qaCases.slice(0, 2) }) }
     ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "AIQA 行式降级", onUsage });
@@ -591,6 +606,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
 export async function evaluateAutoQaWithModel({ source, translation, locale, contentType = "general", domain = "general", styleProfile = null, references = [], qaCases = [], evidence = [], onUsage = null }) {
   const evidencePayload = {
     source, translation, locale, contentType, domain,
+    multiSentence: String(source).includes("\n"),
     styleProfile: styleProfile ? { name: styleProfile.name, version: styleProfile.version, instruction: styleProfile.instruction, examples: styleProfile.examples } : null,
     references: references.slice(0, 5),
     qaCases: qaCases.slice(0, 3),
@@ -602,10 +618,12 @@ export async function evaluateAutoQaWithModel({ source, translation, locale, con
       content: `你是独立于译者的亚洲语言本地化 Auto QA 审校员，对一条已完成译文做三层审查，语义忠实性是最高优先级。只报告可定位的问题，不要给总分：
 
 1) basic 基本检查：目标语言拼写错误、语法错误、数字/日期/符号与原文不符、专名与品牌名在句内前后不一致。
-2) fidelity 语义忠实性（着重检查项）：漏译、增译、错译、语义偏差。必须同时给出原文片段 sourceSpan 与译文片段 targetSpan 作为证据；只有语义确实丢失或凭空添加事实时 severity 才能是 critical；调整语序、换用同义地道表达不是问题。
+2) fidelity 语义忠实性（着重检查项）：漏译、增译、错译、语义偏差。必须同时给出原文片段 sourceSpan 与译文片段 targetSpan 作为证据；只有语义确实丢失或凭空添加事实时 severity 才能是 critical；调整语序、换用同义地道表达不是问题。特别重要：若原文包含多个句子（用换行分隔），必须逐句核对译文是否覆盖每一句的信息，任何一句未译出都要记 critical omission，不得因为其他句子译出了就认为完整。
 3) nuance 细微一致性：敬语级别、语气词、正式度、句式节奏是否与提供的风格规范、已批准译例、历史风格证据一致。有证据时优先对照证据判断；没有证据时按目标语言自然习惯判断。细微差异记 minor，明显违反记 major。
 
-severity 只能是 critical、major、minor；dimension 只能是 basic、fidelity、nuance。没有问题必须返回 {"issues":[]}；禁止输出空白、纯文本说明或 Markdown。输出严格 JSON：{"issues":[{"dimension":"fidelity","severity":"critical","category":"omission","sourceSpan":"原文片段","targetSpan":"译文片段","message":"问题原因","suggestion":"可执行修订意见","confidence":0.9}]}`
+输出语言要求：category 使用简短英文代码；message、suggestion 和所有解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 只用于逐字引用原文或译文证据，可以保留对应语言。
+
+severity 只能是 critical、major、minor；dimension 只能是 basic、fidelity、nuance。没有问题必须返回 {"issues":[]}；禁止输出空白、纯文本说明或 Markdown。输出严格 JSON：{"issues":[{"dimension":"fidelity","severity":"critical","category":"omission","sourceSpan":"原文片段","targetSpan":"译文片段","message":"简体中文问题原因","suggestion":"简体中文可执行修订意见","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify(evidencePayload) }
   ];
@@ -648,7 +666,7 @@ severity 只能是 critical、major、minor；dimension 只能是 basic、fideli
     const lineContent = await chat([
       {
         role: "system",
-        content: "你是本地化 Auto QA。不要输出 JSON。若没有问题必须只输出 PASS 这一行；若有问题，每个问题单独一行，严格使用：ISSUE|dimension|critical/major/minor|类别|原文片段|译文片段|问题原因|修订建议。dimension 只能是 basic、fidelity、nuance。禁止输出空白或任何其他内容。"
+        content: "你是本地化 Auto QA。不要输出 JSON。若没有问题必须只输出 PASS 这一行；若有问题，每个问题单独一行，严格使用：ISSUE|dimension|critical/major/minor|英文类别代码|原文片段|译文片段|简体中文问题原因|简体中文修订建议。dimension 只能是 basic、fidelity、nuance；问题原因和修订建议禁止使用目标语言。禁止输出空白或任何其他内容。"
       },
       { role: "user", content: JSON.stringify({ source, translation, locale, contentType, domain, references: references.slice(0, 3), qaCases: qaCases.slice(0, 2), evidence: evidence.slice(0, 4) }) }
     ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "Auto QA 行式降级", onUsage });
@@ -756,7 +774,7 @@ export async function alignSegmentsWithModel({ sourceSegments, translationSegmen
   const messages = [
     {
       role: "system",
-      content: "你是双语逐句对齐助手。原文已按句拆成 sourceSegments，译文已按句拆成 translationSegments（数组元素带 index 与 text）。请把表达相同内容的片段配对：一个原文片段可对应多个连续译文片段（译文拆句），多个连续原文片段也可对应一个译文片段（合并）；在原文中没有对应内容的译文片段记入 unmatchedTranslation（疑似增译），在译文中没有对应内容的原文片段记入 unmatchedSource（疑似漏译）。每个索引必须恰好出现一次。只输出严格 JSON：{\"pairs\":[{\"sourceIndices\":[0],\"translationIndices\":[0]}],\"unmatchedSource\":[],\"unmatchedTranslation\":[]}。禁止空白、解释或 Markdown。"
+      content: "你是双语逐句对齐助手。原文已按句拆成 sourceSegments，译文已按句拆成 translationSegments（数组元素带 index 与 text）。请把表达相同内容的片段配对：一个原文片段可对应多个连续译文片段（译文拆句），多个连续原文片段也可对应一个译文片段（合并）；在原文中没有对应内容的译文片段记入 unmatchedTranslation（疑似增译），在译文中没有对应内容的原文片段记入 unmatchedSource（疑似漏译）。只有译文确实包含该原文片段的信息时才配对；严禁为了覆盖全部索引而把内容缺失的句子强行合并进相邻配对。示例：原文 3 句（A：游戏介绍 / B：研发中并发布CG / C：实机演示公开），译文 2 句（a：游戏介绍 / b：实机演示公开）时，正确输出是 pairs=[[A↔a],[C↔b]]、unmatchedSource=[B]、unmatchedTranslation=[]，而不是把 A+B 合并到 a。每个索引必须恰好出现一次。只输出严格 JSON：{\"pairs\":[{\"sourceIndices\":[0],\"translationIndices\":[0]}],\"unmatchedSource\":[],\"unmatchedTranslation\":[]}。禁止空白、解释或 Markdown。"
     },
     {
       role: "user",
@@ -796,7 +814,7 @@ export async function evaluateGrammarWithModel({ translation, locale, contentTyp
   const messages = [
     {
       role: "system",
-      content: `你是${language}母语级语言审校员。只检查译文本身的语言正确性，不对比原文、不评价翻译质量、不讨论用词偏好。逐项检查：拼写/错字、语法错误（助词、时态、敬语一致、语序）、标点错误、空格错误。每一条给出错误片段 span、原因 message、可执行修改建议 suggestion。severity 只能是 critical、major、minor：句子完全无法理解或根本不是${language}才记 critical，明确语法/拼写错误记 major，其他不自然处记 minor。没有问题必须返回 {"issues":[]}；禁止输出空白、纯文本说明或 Markdown。输出严格 JSON：{"issues":[{"severity":"major","category":"grammar","span":"错误片段","message":"问题原因","suggestion":"修改建议","confidence":0.9}]}`
+      content: `你是${language}母语级语言审校员。只检查译文本身的语言正确性，不对比原文、不评价翻译质量、不讨论用词偏好。逐项检查：拼写/错字、语法错误（助词、时态、敬语一致、语序）、标点错误、空格错误。每一条给出错误片段 span、原因 message、可执行修改建议 suggestion。span 必须逐字引用${language}译文；category 使用 grammar、spelling、punctuation、orthography、spacing 中的英文代码；message 和 suggestion 必须全部使用简体中文，禁止用${language}解释问题。severity 只能是 critical、major、minor：句子完全无法理解或根本不是${language}才记 critical，明确语法/拼写错误记 major，其他不自然处记 minor。没有问题必须返回 {"issues":[]}；禁止输出空白、纯文本说明或 Markdown。输出严格 JSON：{"issues":[{"severity":"major","category":"grammar","span":"目标语言错误片段","message":"简体中文问题原因","suggestion":"简体中文修改建议","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify({ translation, locale, contentType }) }
   ];
@@ -821,7 +839,7 @@ export async function evaluateGrammarWithModel({ translation, locale, contentTyp
     const lineContent = await chat([
       {
         role: "system",
-        content: `你是${language}语言审校。不要输出 JSON。若没有问题必须只输出 PASS 这一行；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|类别|错误片段|问题原因|修改建议。禁止输出空白或其他内容。`
+        content: `你是${language}语言审校。不要输出 JSON。若没有问题必须只输出 PASS 这一行；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|英文类别代码|${language}错误片段|简体中文问题原因|简体中文修改建议。问题原因和修改建议禁止使用${language}。禁止输出空白或其他内容。`
       },
       { role: "user", content: JSON.stringify({ translation, locale, contentType }) }
     ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1200, requestLabel: "Auto QA 语法行式降级", onUsage });
@@ -865,6 +883,25 @@ export function parseGrammarLineResponse(content) {
     suggestion: "根据该语言审校意见修订",
     confidence: 0.65
   }];
+}
+
+/** 用一个极小请求验证模型服务、鉴权和余额，避免每个分享段落重复撞同一故障。 */
+export async function probeModelAvailability({ timeoutMs = 20_000, onUsage = null } = {}) {
+  const content = await chat([
+    { role: "system", content: "这是服务可用性检查。不要解释，只回复 OK。" },
+    { role: "user", content: "ping" }
+  ], runtimeConfig, {
+    temperature: 0,
+    timeoutMs: Math.max(5_000, Math.min(60_000, Number(timeoutMs) || 20_000)),
+    // 推理模型可能先消耗少量 reasoning token；8 token 会偶发在输出 OK 前耗尽。
+    // chat() 遇到 length 还会将此预算翻倍重试一次。
+    maxTokens: 64,
+    requestLabel: "分享拆解可用性探针",
+    reasoningEffort: "low",
+    onUsage
+  });
+  if (!String(content || "").trim()) throw new Error("模型可用性探针返回空白");
+  return true;
 }
 
 /**

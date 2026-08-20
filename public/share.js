@@ -29,36 +29,43 @@ function scoreTone(score) {
   return score >= 90 ? "good" : score >= 70 ? "warn" : "bad";
 }
 
-function dimensionBadges(dimensionScores) {
+function dimensionBadges(dimensionScores, modelIncomplete = false) {
   if (!dimensionScores) return "";
   return Object.entries(DIMENSION_LABELS).map(([dimension, label]) =>
-    `<span class="autoqa-segment-metric ${scoreTone(Number(dimensionScores[dimension]) ?? 100)}"><i>${Number(dimensionScores[dimension]) ?? "—"}</i>${label}</span>`).join("");
+    `<span class="autoqa-segment-metric ${modelIncomplete ? "" : scoreTone(Number(dimensionScores[dimension]) ?? 100)}"><i>${modelIncomplete ? "—" : Number(dimensionScores[dimension]) ?? "—"}</i>${label}</span>`).join("");
 }
 
 function renderMeta(meta) {
   if (!meta || meta.source !== "autoqa") return "";
+  const modelIncomplete = Boolean(meta.fallbackReason);
   const scoreCards = `<div class="autoqa-score-row share-score-row">
-      <div class="autoqa-score-card overall"><strong>${Number.isFinite(meta.overallScore) ? meta.overallScore : "—"}</strong><span>综合分</span><small>基本 20% · 忠实性 50% · Nuance 30%</small></div>
+      <div class="autoqa-score-card overall"><strong>${!modelIncomplete && Number.isFinite(meta.overallScore) ? meta.overallScore : "—"}</strong><span>综合分</span><small>${modelIncomplete ? "模型层未完成" : "基本 20% · 忠实性 50% · Nuance 30%"}</small></div>
       ${Object.entries(DIMENSION_LABELS).map(([dimension, label]) => {
         const value = Number(meta.dimensionScores?.[dimension]);
         const counts = meta.summary?.[dimension];
-        const caption = counts?.total ? `${counts.total} 条问题 · 阻断 ${counts.error} · 主要 ${counts.major} · 轻微 ${counts.minor}` : "未发现问题";
-        return `<div class="autoqa-score-card ${Number.isFinite(value) ? scoreTone(value) : ""}"><strong>${Number.isFinite(value) ? value : "—"}</strong><span>${escapeHtml(label)}</span><small>${escapeHtml(caption)}</small></div>`;
+        const caption = modelIncomplete ? "模型层未完成" : counts?.total ? `${counts.total} 条问题 · 阻断 ${counts.error} · 主要 ${counts.major} · 轻微 ${counts.minor}` : "未发现问题";
+        return `<div class="autoqa-score-card ${!modelIncomplete && Number.isFinite(value) ? scoreTone(value) : ""}"><strong>${!modelIncomplete && Number.isFinite(value) ? value : "—"}</strong><span>${escapeHtml(label)}</span><small>${escapeHtml(caption)}</small></div>`;
       }).join("")}
     </div>`;
+  const modelWarning = modelIncomplete
+    ? `<div class="qa-item warning"><strong>模型质检未完成</strong>：${/Insufficient Balance|QUOTA|402/iu.test(meta.fallbackReason) ? "模型服务余额不足。" : "模型服务调用失败。"}当前只完成了本地规则检查，不能视为完整 QA 通过。</div>`
+    : "";
   const alignmentNote = meta.alignmentNote ? `<p class="share-meta-note">${escapeHtml(meta.alignmentNote)}</p>` : "";
   const alignmentIssues = (meta.alignmentIssues || []).length
     ? `<div class="share-issues"><div class="share-issues-title">整句级问题（漏译 / 增译）</div>${meta.alignmentIssues.map((issue) =>
-        `<div class="qa-item ${issue.severity === "critical" ? "error" : ""}"><strong>[${escapeHtml(issue.category || "alignment")}]</strong> ${escapeHtml(issue.message)}</div>`).join("")}</div>`
+        `<div class="qa-item ${issue.severity === "critical" ? "error" : ""}"><strong>[${escapeHtml(issue.displayCategory || issue.category || "整句对齐")}]</strong> ${escapeHtml(issue.displayMessage || issue.message)}</div>`).join("")}</div>`
     : "";
-  return `<section class="share-meta">${scoreCards}${alignmentNote}${alignmentIssues}</section>`;
+  return `<section class="share-meta">${scoreCards}${modelWarning}${alignmentNote}${alignmentIssues}</section>`;
 }
 
-function renderSegment(segment) {
-  const qa = Number.isFinite(segment.qaScore)
+function renderSegment(segment, modelIncomplete = false) {
+  const formId = `share-feedback-${Number(segment.index)}`;
+  const qa = modelIncomplete
+    ? '<span class="autoqa-segment-score">QA —</span>'
+    : Number.isFinite(segment.qaScore)
     ? `<span class="autoqa-segment-score ${scoreTone(segment.qaScore)}">QA ${segment.qaScore}</span>`
     : "";
-  const badges = dimensionBadges(segment.dimensionScores);
+  const badges = dimensionBadges(segment.dimensionScores, modelIncomplete);
   const gloss = segment.gloss?.tokens?.length
     ? `<div class="share-gloss">
         ${segment.gloss.approximate ? '<p class="share-gloss-note">⚠️ 拆解为模型近似切分，仅供参考。</p>' : ""}
@@ -67,11 +74,22 @@ function renderSegment(segment) {
         ${segment.gloss.literal ? `<p class="share-gloss-literal"><strong>字面直译</strong>${escapeHtml(segment.gloss.literal)}</p>` : ""}
         ${segment.gloss.note ? `<p class="share-gloss-note">${escapeHtml(segment.gloss.note)}</p>` : ""}
       </div>`
-    : `<div class="share-gloss-empty">${shareStatus === "generating" ? "辅助拆解生成中，请稍后刷新……" : "本段未生成辅助拆解"}</div>`;
+    : `<div class="share-gloss-empty">${shareStatus === "generating" ? "辅助拆解生成中，请稍后刷新……" : shareStatus === "failed" ? "辅助拆解生成失败" : "本段未生成辅助拆解"}</div>`;
   const issues = (segment.issues || []).length
-    ? `<div class="share-issues">${segment.issues.map((issue) =>
-        `<div class="qa-item ${issue.severity === "error" || issue.severity === "critical" ? "error" : ""}"><strong>[${escapeHtml(issue.category || issue.type || "qa")}]</strong> ${escapeHtml(issue.message)}${issue.suggestion ? ` <small>建议：${escapeHtml(issue.suggestion)}</small>` : ""}</div>`).join("")}</div>`
-    : '<div class="qa-item">该段 QA 未发现问题</div>';
+    ? `<div class="share-issues share-known-issues">
+        <div class="share-known-issues-intro"><strong>已知问题</strong><span>未勾选表示译者坚持当前译法；复核后仍需上报的问题请打勾。</span></div>
+        ${segment.issues.map((issue, issueIndex) => {
+          const sourceEvidence = issue.sourceSpan ? `<small class="share-known-issue-evidence"><b>原文片段</b> ${escapeHtml(issue.sourceSpan)}</small>` : "";
+          const targetEvidence = issue.targetSpan ? `<small class="share-known-issue-evidence"><b>译文片段</b> ${escapeHtml(issue.targetSpan)}</small>` : "";
+          return `<label class="qa-item share-known-issue ${issue.severity === "error" || issue.severity === "critical" ? "error" : ""}">
+            <input type="checkbox" name="knownIssueIndexes" value="${issueIndex}" form="${formId}" />
+            <span><strong>[${escapeHtml(issue.displayCategory || issue.category || issue.type || "其他问题")}]</strong> ${escapeHtml(issue.displayMessage || issue.message)}${sourceEvidence}${targetEvidence}${issue.displaySuggestion || issue.suggestion ? ` <small class="share-known-issue-suggestion"><b>建议</b> ${escapeHtml(issue.displaySuggestion || issue.suggestion)}</small>` : ""}</span>
+          </label>`;
+        }).join("")}
+      </div>`
+    : modelIncomplete
+      ? '<div class="qa-item warning">本地规则未发现问题；模型质检尚未完成</div>'
+      : '<div class="qa-item">该段 QA 未发现问题</div>';
   return `<article class="share-segment" data-segment-index="${segment.index}">
     <div class="share-segment-head"><span class="share-segment-index">第 ${segment.index} 段</span>${qa}<span class="share-segment-badges">${badges}</span>${segment.locator ? `<span class="share-segment-locator">${escapeHtml(segment.locator)}</span>` : ""}</div>
     <div class="autoqa-segment-pair share-pair">
@@ -80,17 +98,29 @@ function renderSegment(segment) {
     </div>
     ${gloss}
     ${issues}
-    <form class="share-feedback-form">
+    <form class="share-feedback-form" id="${formId}">
       <div class="share-feedback-fields">
         <input name="reviewer" placeholder="你的名字（可留空）" maxlength="80" />
         <input name="suggestedTranslation" placeholder="建议译法（可留空）" />
       </div>
       <div class="share-feedback-submit">
-        <textarea name="request" required placeholder="提出具体要求，例如：这句应该用敬语体；‘登场’统一译成 ‘등장’……" rows="2"></textarea>
+        <textarea name="request" placeholder="补充新问题或说明（可留空；仅勾选已知问题也能提交）" rows="2"></textarea>
         <button class="button primary small" type="submit">提交要求</button>
       </div>
+      <p class="share-feedback-hint">未勾选的已知问题不会重复上报。</p>
     </form>
   </article>`;
+}
+
+function selectedKnownIssueIndexes(segment) {
+  return [...segment.querySelectorAll('input[name="knownIssueIndexes"]:checked')].map((input) => Number(input.value));
+}
+
+function updateFeedbackButton(form) {
+  const segment = form.closest(".share-segment");
+  const count = selectedKnownIssueIndexes(segment).length;
+  const button = form.querySelector("button[type=submit]");
+  if (!button.disabled) button.textContent = count ? `提交已勾选问题（${count}）` : "提交要求";
 }
 
 async function submitFeedback(event) {
@@ -98,7 +128,11 @@ async function submitFeedback(event) {
   const form = event.currentTarget;
   const segment = form.closest(".share-segment");
   const request = form.elements.request.value.trim();
-  if (!request) return;
+  const knownIssueIndexes = selectedKnownIssueIndexes(segment);
+  if (!request && !knownIssueIndexes.length) {
+    toast("请勾选仍需上报的已知问题，或填写新的具体要求");
+    return;
+  }
   const button = form.querySelector("button[type=submit]");
   button.disabled = true;
   button.textContent = "提交中…";
@@ -108,17 +142,19 @@ async function submitFeedback(event) {
       body: JSON.stringify({
         segmentIndex: Number(segment.dataset.segmentIndex),
         request,
+        knownIssueIndexes,
         suggestedTranslation: form.elements.suggestedTranslation.value.trim(),
         reviewer: form.elements.reviewer.value.trim()
       })
     });
     toast("已提交，感谢反馈！");
     form.reset();
+    updateFeedbackButton(form);
   } catch (error) {
     toast(error.message);
   } finally {
     button.disabled = false;
-    button.textContent = "提交要求";
+    updateFeedbackButton(form);
   }
 }
 
@@ -143,10 +179,20 @@ async function initialize() {
       $("#shareGeneratingText").textContent = `语素拆解与字面直译正在后台生成（${payload.glossedSegments} / ${Math.min(payload.totalSegments, 30)}），页面会自动刷新；您可以先查看原文、译文与评分。`;
       pollGlossStatus(token);
     }
+    if (shareStatus === "failed") {
+      $("#shareError").hidden = false;
+      $("#shareError").textContent = `辅助拆解生成失败：${payload.generationError || "模型服务调用失败，请由项目负责人检查模型配置或余额后重新生成分享。"} 分享链接仍可用于核对原文与译文。`;
+    }
+    const modelIncomplete = Boolean(payload.meta?.fallbackReason);
     $("#shareSegments").innerHTML = (payload.segments.length || payload.meta)
-      ? `${renderMeta(payload.meta)}${payload.segments.map(renderSegment).join("")}`
+      ? `${renderMeta(payload.meta)}${payload.segments.map((segment) => renderSegment(segment, modelIncomplete)).join("")}`
       : '<div class="empty-list">该分享没有可展示的段落。</div>';
-    $$(".share-feedback-form").forEach((form) => form.addEventListener("submit", submitFeedback));
+    $$(".share-feedback-form").forEach((form) => {
+      form.addEventListener("submit", submitFeedback);
+      form.closest(".share-segment").querySelectorAll('input[name="knownIssueIndexes"]').forEach((input) => {
+        input.addEventListener("change", () => updateFeedbackButton(form));
+      });
+    });
   } catch (error) {
     $("#shareError").hidden = false;
     $("#shareError").textContent = error.message;

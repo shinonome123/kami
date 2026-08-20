@@ -940,6 +940,7 @@ export async function updateDirectusShare(token, updater) {
     method: "PATCH",
     body: {
       filename: next.filename,
+      meta: next.meta ?? null,
       segments: next.segments,
       feedbacks: next.feedbacks,
       status: next.status ?? "ready",

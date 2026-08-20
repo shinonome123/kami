@@ -217,6 +217,9 @@ function setTranslationMode(mode) {
 }
 
 function switchView(view) {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
   state.view = view;
   $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   $$(".view").forEach((element) => element.classList.toggle("active", element.id === `view-${view}`));
@@ -1179,10 +1182,11 @@ function renderShareTaskRow(task) {
   const statusLabel = task.status === "in_progress" ? "拆解生成中" : task.status === "needs_attention" ? "生成失败" : task.qaPending ? "有待批准反馈" : "就绪";
   const statusClass = task.status === "in_progress" ? "warning" : task.status === "needs_attention" ? "error" : task.qaPending ? "warning" : "success";
   const progress = task.totalSegments ? Math.round(task.completedSegments / task.totalSegments * 100) : 0;
+  const failed = task.status === "needs_attention";
   return `<article class="task-row" data-task-id="${escapeHtml(task.id)}">
     <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.title)}</strong><span class="task-status ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span><span class="task-type-chip">分享</span></div><small>${escapeHtml(locale?.label || task.locale)} · ${escapeHtml(contentTypeLabel(task.contentType))} · ${escapeHtml(task.domain)} · ${formatTaskTime(task.updatedAt)}</small></div>
-    <div class="task-progress"><div><i style="width:${task.status === "in_progress" ? progress : 100}%"></i></div><span>${task.status === "in_progress" ? `拆解 ${task.completedSegments} / ${task.totalSegments}` : `${task.totalSegments} 段`}</span></div>
-    <div class="task-qa"><strong>${task.qaPending ? `${task.qaPending} 条待批准反馈` : "暂无反馈"}</strong><small>链接长期有效</small></div>
+    <div class="task-progress"><div><i style="width:${task.status === "in_progress" || failed ? progress : 100}%"></i></div><span>${task.status === "in_progress" ? `拆解 ${task.completedSegments} / ${task.totalSegments}` : failed ? `拆解 ${task.completedSegments} / ${task.totalSegments} · ${task.failedSegments} 失败` : `${task.totalSegments} 段`}</span></div>
+    <div class="task-qa"><strong>${failed ? "拆解待处理" : task.qaPending ? `${task.qaPending} 条待批准反馈` : "暂无反馈"}</strong><small>${failed ? "检查模型配置或余额后重新生成" : "链接长期有效"}</small></div>
     <div class="task-actions"><button class="button secondary small" data-action="open-share">打开分享页</button><button class="button ghost small" data-action="copy-share">复制链接</button><button class="button ghost small" data-action="delete-share">删除</button></div>
   </article>`;
 }

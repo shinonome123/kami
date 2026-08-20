@@ -54,6 +54,6 @@ export function presentAiQaIssues(aiIssues = []) {
     mqmSeverity: issue.severity,
     severity: issue.severity === "minor" ? "warning" : "error",
     type: `aiqa_${issue.category}`,
-    message: `${issue.message}${issue.suggestion ? `；建议：${issue.suggestion}` : ""}`
+    message: issue.message
   }));
 }

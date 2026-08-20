@@ -169,7 +169,7 @@
 
         <section class="view" id="view-import">
           <div class="step-banner">
-            <span class="step-badge">ZERO-CONFIG</span>
+            <span class="step-badge">全自动导入</span>
             <div><h2>只需拖入表格，其余全部自动完成</h2><p>自动识别语言和正文列，并逐条区分术语、翻译记忆、语体、领域及约束级别。</p></div>
           </div>
           <div class="smart-import-entry">
@@ -184,7 +184,7 @@
                 <div><span>02</span><strong>逐条分流资产</strong><small>短术语进入术语库；完整句段进入翻译记忆和风格证据池。</small></div>
                 <div><span>03</span><strong>自动确定规则</strong><small>识别语体、领域与强制/优先级；异常项才留给人工确认。</small></div>
               </div>
-              <p class="smart-import-fallback">AI 会自动参与清洗；模型暂时不可用时改用本地规则并明确标记，不会卡住导入。</p>
+              <p class="smart-import-fallback">系统会自动清洗内容；模型暂时不可用时改用本地规则并明确标记，不会卡住导入。</p>
             </article>
           </div>
           <article class="panel preview-panel">
@@ -221,7 +221,7 @@
             </div>
           </article>
           <article class="panel import-learning-panel" id="importBatchLearningPanel" hidden>
-            <div class="panel-head"><div><span class="card-kicker">03 · BATCH STYLE LEARNING</span><h2>本批 AI 学到了什么</h2><p class="panel-caption">这里展示本次完整译例浓缩出的可执行风格观察。证据不足时只继续积累，不会直接影响生产翻译。</p></div><div class="asset-count" id="importBatchLearningCount">0 个范围</div></div>
+            <div class="panel-head"><div><span class="card-kicker">03 · BATCH STYLE LEARNING</span><h2>本批提炼结果</h2><p class="panel-caption">这里展示本次完整译例浓缩出的可执行风格观察。证据不足时只继续积累，不会直接影响生产翻译。</p></div><div class="asset-count" id="importBatchLearningCount">0 个范围</div></div>
             <div class="batch-learning-list" id="importBatchLearningList"><div class="empty-list">提交译例后显示本批风格学习结果</div></div>
           </article>
         </section>
@@ -260,7 +260,7 @@
             </section>
           </article>
           <article class="panel style-qa-panel">
-            <div class="panel-head"><div><span class="card-kicker">REVIEW QUEUE · NOT A STYLE RULE</span><h2>AIQA 反例审核</h2><p class="panel-caption">这里是“错误译文 → 修正译文”的质量案例，不是风格指导。采纳后只用于提醒后续 AI 避免同类错误。</p></div><div class="asset-count" id="styleQaCount">0 条</div></div>
+            <div class="panel-head"><div><span class="card-kicker">REVIEW QUEUE · NOT A STYLE RULE</span><h2>AIQA 反例审核</h2><p class="panel-caption">这里是“错误译文 → 修正译文”的质量案例，不是风格指导。采纳后只用于后续翻译的同类错误提醒。</p></div><div class="asset-count" id="styleQaCount">0 条</div></div>
             <div class="style-qa-list" id="styleQaList"><div class="empty-list">当前没有待审核案例</div></div>
           </article>
         </section>
@@ -349,7 +349,7 @@
         <label><span>Base URL</span><input name="baseUrl" placeholder="http://localhost:11434/v1" /></label>
         <label><span>模型名称</span><input name="model" placeholder="qwen3:14b" /></label>
         <label><span>Embedding 模型（可选，留空禁用向量检索）</span><input name="embeddingModel" placeholder="nomic-embed-text" /></label>
-        <label><span>Embedding Base URL（留空复用主 Base URL）</span><input name="embeddingBaseUrl" placeholder="http://localhost:11434/v1" /></label>
+        <label><span>Embedding API 地址（可填 Base URL 或完整端点）</span><input name="embeddingBaseUrl" placeholder="http://localhost:11434/v1" /></label>
         <label><span>输入价格（美元 / 百万 token，用于评测成本门禁）</span><input name="inputPricePerMTok" type="number" step="any" min="0" placeholder="例如 0.27" /></label>
         <label><span>输出价格（美元 / 百万 token，用于评测成本门禁）</span><input name="outputPricePerMTok" type="number" step="any" min="0" placeholder="例如 1.10" /></label>
         <label><span>Embedding API Key（留空复用主 Key）</span><input name="embeddingApiKey" type="password" autocomplete="off" /></label>

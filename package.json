@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --env-file=directus/.env server.mjs",
-    "dev": "node --env-file=directus/.env --watch server.mjs",
+    "start": "node --use-system-ca --env-file=directus/.env server.mjs",
+    "dev": "node --use-system-ca --env-file=directus/.env --watch server.mjs",
     "test": "node --test",
     "directus:up": "docker compose --env-file directus/.env -f directus/docker-compose.yml up -d",
     "directus:down": "docker compose --env-file directus/.env -f directus/docker-compose.yml down",

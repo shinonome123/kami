@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, dedupeIssues, groupIssuesByDimension, isGlossDumpLiteral, runBasicQa, splitQaSegments, summarizeIssues, validateGlossTokens } from "../src/auto-qa.mjs";
+import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, createStructuralAlignmentScorer, dedupeIssues, groupIssuesByDimension, isGlossDumpLiteral, normalizeQaInputText, runBasicQa, splitQaSegments, summarizeIssues, validateGlossTokens } from "../src/auto-qa.mjs";
 import { parseAutoQaLineResponse, parseGrammarLineResponse, validateAlignmentPlan } from "../src/provider.mjs";
 
 test("基本检查：未翻译的完全相同译文记为阻断", () => {
@@ -134,8 +134,24 @@ test("逐句切分：中文句末标点、换行与韩文句界", () => {
   const ko = splitQaSegments("우선, 이름에서 보시다시피. 다음, 여전히 표준적인 게임입니다. 또한, 최신 영상을 통해. ");
   assert.equal(ko.length, 3);
   assert.equal(ko[1], "다음, 여전히 표준적인 게임입니다.");
+  // 数字也可以是下一句的开头；不能把发布日期并入上一句，否则整篇双语对齐会从这里错位
+  assert.deepEqual(
+    splitQaSegments("배경으로 설정했습니다. 2025년 8월 20일, 첫 CG 예고편을 공개했습니다."),
+    ["배경으로 설정했습니다.", "2025년 8월 20일, 첫 CG 예고편을 공개했습니다."]
+  );
   // 小数与版本号不应被切断
   assert.deepEqual(splitQaSegments("v2.0 버전입니다. 보상 3.5배 증가"), ["v2.0 버전입니다.", "보상 3.5배 증가"]);
+});
+
+test("质检文本清理：保留纯文本与 HTML 的段落换行", () => {
+  const plain = "ถาม: คำถามแรก?\r\n\r\nตอบ: คำตอบแรก\r\nถาม: คำถามถัดไป?";
+  assert.equal(normalizeQaInputText(plain), "ถาม: คำถามแรก?\n\nตอบ: คำตอบแรก\nถาม: คำถามถัดไป?");
+  const html = "<p>ถาม: คำถามแรก?</p><p>ตอบ: คำตอบแรก</p><div>ถาม: คำถามถัดไป?</div>";
+  assert.deepEqual(splitQaSegments(normalizeQaInputText(html)), [
+    "ถาม: คำถามแรก?",
+    "ตอบ: คำตอบแรก",
+    "ถาม: คำถามถัดไป?"
+  ]);
 });
 
 test("对齐：句数相同时一一对应", () => {
@@ -157,6 +173,26 @@ test("对齐：译文拆句时并入对应原文句，不误报增译", () => {
   assert.deepEqual(last, { sourceIndices: [3], translationIndices: [3, 4, 5] });
 });
 
+test("对齐：译文合句时并入多句原文，不误报漏译", () => {
+  // 原文第 2、3 句在泰文中自然合成一句。
+  const score = (i, j) => {
+    if (i === 0 && j === 0) return 0.9;
+    if ((i === 1 || i === 2) && j === 1) return i === 1 ? 0.9 : 0.65;
+    if (i === 3 && j === 2) return 0.9;
+    return 0.05;
+  };
+  const plan = alignSegmentPairs(4, 3, score);
+  assert.deepEqual(plan, {
+    pairs: [
+      { sourceIndices: [0], translationIndices: [0] },
+      { sourceIndices: [1, 2], translationIndices: [1] },
+      { sourceIndices: [3], translationIndices: [2] }
+    ],
+    unmatchedSource: [],
+    unmatchedTranslation: []
+  });
+});
+
 test("对齐：真漏译与真增译分别标记", () => {
   // 原文 4 句、译文 3 句：原文第 4 句与任何译文都不相似（漏译）
   const omissionScore = (i, j) => (i < 3 && j === i ? 0.9 : i === 3 ? 0.05 : 0.05);
@@ -176,6 +212,43 @@ test("对齐：无向量时按位置比例近似配对", () => {
   assert.deepEqual(plan.pairs.map((pair) => pair.translationIndices), [[0], [1], [2, 3], [4, 5]]);
 });
 
+test("结构对齐：数字与专名锚点把相邻拆句并回正确原句", () => {
+  const source = [
+    "游戏由虚幻引擎5开发。",
+    "这是系列第二部作品。",
+    "2025年8月20日发布首支CG宣传片。",
+    "公开15分钟实机演示。",
+    "TGS PlayStation展台节选镜头，可前往YouTube、X、Twitter搜索Black Myth。",
+    "发售时间待确认。"
+  ];
+  const translation = [
+    "언리얼 엔진 5로 개발했습니다.",
+    "시리즈의 두 번째 작품입니다.",
+    "2025년 8월 20일 첫 CG 예고편을 공개했습니다.",
+    "15분 인게임 영상을 공개했습니다.",
+    "TGS PlayStation 부스에서는 일부 장면만 상영했습니다.",
+    "YouTube, X, Twitter에서 Black Myth를 검색할 수 있습니다.",
+    "출시 시기는 아직 확정되지 않았습니다."
+  ];
+  const plan = alignSegmentPairs(
+    source.length,
+    translation.length,
+    createStructuralAlignmentScorer(source, translation)
+  );
+  assert.deepEqual(plan, {
+    pairs: [
+      { sourceIndices: [0], translationIndices: [0] },
+      { sourceIndices: [1], translationIndices: [1] },
+      { sourceIndices: [2], translationIndices: [2] },
+      { sourceIndices: [3], translationIndices: [3] },
+      { sourceIndices: [4], translationIndices: [4, 5] },
+      { sourceIndices: [5], translationIndices: [6] }
+    ],
+    unmatchedSource: [],
+    unmatchedTranslation: []
+  });
+});
+
 test("整句级漏译/增译问题生成", () => {
   const issues = buildAlignmentIssues({
     sourceSegments: ["甲", "乙", "丙"],
@@ -187,6 +260,7 @@ test("整句级漏译/增译问题生成", () => {
   assert.equal(issues[0].severity, "critical");
   assert.equal(issues[0].category, "omission");
   assert.ok(issues[0].message.includes("第 2 句"));
+  assert.equal(issues[0].confidence, 0.8);
   assert.equal(issues[1].severity, "major");
   assert.equal(issues[1].category, "addition");
 });

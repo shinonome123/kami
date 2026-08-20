@@ -63,5 +63,6 @@ test("AIQA 分数由问题严重度计算且硬错误封顶", () => {
   assert.equal(calculateQaScore({ hardIssues: [{ severity: "error" }], aiIssues: [] }), 60);
   const presented = presentAiQaIssues([{ severity: "major", category: "style", message: "语体不一致", suggestion: "改用敬体", confidence: 0.9 }]);
   assert.equal(presented[0].severity, "error");
-  assert.match(presented[0].message, /改用敬体/);
+  assert.equal(presented[0].message, "语体不一致");
+  assert.equal(presented[0].suggestion, "改用敬体");
 });

@@ -3,11 +3,31 @@ import { normalizeSource } from "./text.mjs";
 
 export const AUTO_QA_DIMENSIONS = Object.freeze(["basic", "fidelity", "nuance"]);
 
-/** 逐句切分：CJK 句末标点、换行，以及“句号/叹号/问号 + 空格 + 字母/谚文”的韩文/西文句界。 */
+/**
+ * 清理从网页或富文本中粘贴的质检文本，同时保留显式换行。
+ * 换行是泰文等弱句末标点语言的重要段落边界，不能与普通空格一起压平。
+ */
+export function normalizeQaInputText(value = "") {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li|tr|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * 逐句切分：CJK 句末标点、换行，以及“句号/叹号/问号 + 空格 + 句首字符”的韩文/西文句界。
+ * 句首要包含数字，否则“……했습니다. 2025년……”会被误合成一段，令后续双语对齐整体错位。
+ */
 export function splitQaSegments(text = "") {
   return String(text ?? "")
     .replace(/\r\n?/g, "\n")
-    .split(/(?<=\n)|(?<=[。！？!?；;])(?=[^”’」』【】）)])|(?<=[.!?])\s+(?=[A-Za-z\uac00-\ud7af])/u)
+    .split(/(?<=\n)|(?<=[。！？!?；;])(?=[^”’」』【】）)])|(?<=[.!?])\s+(?=[A-Za-z0-9\uac00-\ud7af])/u)
     .map((value) => value.trim())
     .filter(Boolean);
 }
@@ -18,6 +38,33 @@ export function cosineSimilarity(a, b) {
   let dot = 0;
   for (let index = 0; index < a.length; index += 1) dot += a[index] * b[index];
   return Math.max(0, Math.min(1, dot));
+}
+
+/**
+ * 无跨语言 Embedding/模型时的结构对齐分数。
+ * 数字与拉丁专名通常会在译文中原样保留，可作为可靠锚点；其余句子只使用相对位置弱约束。
+ * 这不是语义相似度，只用于比纯粹按比例分组更准确地识别相邻拆句。
+ */
+export function createStructuralAlignmentScorer(sourceSegments = [], translationSegments = []) {
+  const protectedTokens = (text) => new Set(
+    (String(text || "").match(/[A-Za-z][A-Za-z0-9.+-]*|\d+(?:\.\d+)?/gu) || [])
+      .map((token) => token.toLowerCase())
+  );
+  const sourceTokens = sourceSegments.map(protectedTokens);
+  const translationTokens = translationSegments.map(protectedTokens);
+  const sourceCount = Math.max(sourceSegments.length, 1);
+  const translationCount = Math.max(translationSegments.length, 1);
+  return (sourceIndex, translationIndex) => {
+    const sourceSet = sourceTokens[sourceIndex] || new Set();
+    const translationSet = translationTokens[translationIndex] || new Set();
+    const sharedCount = [...sourceSet].filter((token) => translationSet.has(token)).length;
+    const overlap = sharedCount / Math.max(1, Math.min(sourceSet.size, translationSet.size));
+    const sourcePosition = (sourceIndex + 0.5) / sourceCount;
+    const translationPosition = (translationIndex + 0.5) / translationCount;
+    const positionScore = 0.52 * Math.max(0, 1 - Math.abs(sourcePosition - translationPosition));
+    const anchorScore = sharedCount ? 0.62 + 0.36 * overlap : 0;
+    return Math.min(1, Math.max(positionScore, anchorScore));
+  };
 }
 
 const ALIGN_GAP_PENALTY = 0.16;
@@ -93,6 +140,22 @@ export function alignSegmentPairs(sourceCount, translationCount, score = null) {
     else if (op.type === "skipSource") skippedSource.push(op.i);
     else skippedTranslation.push(op.j);
   }
+  // 被跳过的原文句并入相似度更高的相邻译文句（常见于译文把多句合成一句）。
+  // 用原始匹配锚点判断相邻关系，合并结果不改变锚点，避免先合并的句子挡住后续判断。
+  const stillUnmatchedSource = [];
+  for (const iIndex of skippedSource) {
+    const prev = [...pairs].reverse().find((pair) => pair.anchorSource < iIndex);
+    const next = pairs.find((pair) => pair.anchorSource > iIndex);
+    const prevScore = prev ? score(iIndex, prev.anchorTranslation) : -Infinity;
+    const nextScore = next ? score(iIndex, next.anchorTranslation) : -Infinity;
+    if (Math.max(prevScore, nextScore) >= ALIGN_REASSIGN_THRESHOLD) {
+      if (prev && prevScore >= nextScore) prev.sourceIndices.push(iIndex);
+      else if (next) next.sourceIndices.push(iIndex);
+      else stillUnmatchedSource.push(iIndex);
+    } else {
+      stillUnmatchedSource.push(iIndex);
+    }
+  }
   // 被跳过的译文句并入相似度更高的相邻原文句（常见于译文把一句拆成多句）。
   // 用原始匹配锚点判断相邻关系，合并结果不改变锚点，避免先合并的句子挡住后续判断。
   const stillUnmatched = [];
@@ -116,7 +179,7 @@ export function alignSegmentPairs(sourceCount, translationCount, score = null) {
     delete pair.anchorSource;
     delete pair.anchorTranslation;
   }
-  return { pairs, unmatchedSource: skippedSource, unmatchedTranslation: stillUnmatched };
+  return { pairs, unmatchedSource: stillUnmatchedSource, unmatchedTranslation: stillUnmatched };
 }
 
 /**
@@ -187,7 +250,8 @@ export function buildAlignmentIssues({ sourceSegments = [], translationSegments 
       targetSpan: "",
       message: `疑似整句漏译：原文第 ${index + 1} 句在译文中找不到对应内容`,
       suggestion: "补译该句内容",
-      confidence: 1
+      // 对齐缺口只是自动检测信号，不是经过校准的 100% 模型置信度。
+      confidence: 0.8
     });
   }
   for (const index of unmatchedTranslation) {
