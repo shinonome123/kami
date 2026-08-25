@@ -401,23 +401,66 @@ export function issuePenalty(issue) {
   return 3;
 }
 
+/** 单个维度、单个段落的得分：扣分累加后套用阻断封顶。 */
+function segmentDimensionScore(issues) {
+  let score = Math.max(0, 100 - issues.reduce((sum, issue) => sum + issuePenalty(issue), 0));
+  if (issues.some((issue) => issue.severity === "error")) score = Math.min(score, 60);
+  if (issues.some((issue) => issue.severity === "critical" && (issue.confidence === undefined || Number(issue.confidence) >= 0.7))) {
+    score = Math.min(score, 65);
+  }
+  return score;
+}
+
+function isBlocking(issue) {
+  if (issue.severity === "error") return true;
+  return issue.severity === "critical" && (issue.confidence === undefined || Number(issue.confidence) >= 0.7);
+}
+
 /**
  * 三层打分：每个维度独立计分并套用阻断封顶，
  * 综合分 = 基本 20% + 语义忠实性 50% + nuance 30%（忠实性为着重项）。
+ *
+ * 文档级分数是**各段得分的平均**，不是整份文档的扣分累加。旧算法把全文扣分
+ * 打在一个 100 分预算上，文档越长分数越低——实测同一位专业译者的短标题得
+ * 96~100，16 段的 FAQ 得 21~34，差距完全来自段数而非质量（fidelity 累计扣
+ * 315 分，超预算三倍）。按段平均后，坏掉一段只影响 1/段数。
+ *
+ * 阻断封顶保留在两级：段级让出问题的那一段落到 60/65，文档级让整份报告不超过
+ * 65 分。因此 overall 在"有阻断问题"之后会饱和——区分"坏一段"和"全坏"要看
+ * summary 里的 blockedSegments，单一分数无法同时承载这两件事。
  */
-export function calculateAutoQaScores(issues = []) {
+export function calculateAutoQaScores(issues = [], { segmentCount = 1 } = {}) {
+  const total = Math.max(1, Math.trunc(Number(segmentCount)) || 1);
   const dimensions = {};
+  let blockedSegments = 0;
+  const blocked = new Set();
   for (const dimension of AUTO_QA_DIMENSIONS) {
     const list = issues.filter((issue) => (issue.dimension || "basic") === dimension);
-    let score = Math.max(0, 100 - list.reduce((sum, issue) => sum + issuePenalty(issue), 0));
+    const bySegment = new Map();
+    for (const issue of list) {
+      const key = issue.segmentIndex ?? 0;
+      if (!bySegment.has(key)) bySegment.set(key, []);
+      bySegment.get(key).push(issue);
+      if (isBlocking(issue)) blocked.add(key);
+    }
+    // 分母 = 段数 + 整句漏译/增译这类不属于任何段的问题各占一格；
+    // 没有问题的段按满分计入平均。声明的段数少于实际出现的段号时以后者为准。
+    const entries = [...bySegment.entries()];
+    const segmentEntries = entries.filter(([key]) => typeof key === "number");
+    const extraEntries = entries.filter(([key]) => typeof key !== "number");
+    const segmentSlots = Math.max(total, segmentEntries.length);
+    const cleanSegments = segmentSlots - segmentEntries.length;
+    const sum = entries.reduce((carry, [, list]) => carry + segmentDimensionScore(list), 0);
+    let score = (sum + cleanSegments * 100) / (segmentSlots + extraEntries.length);
     if (list.some((issue) => issue.severity === "error")) score = Math.min(score, 60);
     if (list.some((issue) => issue.severity === "critical" && (issue.confidence === undefined || Number(issue.confidence) >= 0.7))) {
       score = Math.min(score, 65);
     }
     dimensions[dimension] = Math.round(score);
   }
+  blockedSegments = blocked.size;
   const overall = Math.round(dimensions.basic * 0.2 + dimensions.fidelity * 0.5 + dimensions.nuance * 0.3);
-  return { overall, dimensions };
+  return { overall, dimensions, blockedSegments, segmentCount: total };
 }
 
 export function groupIssuesByDimension(issues = []) {

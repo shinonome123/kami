@@ -72,3 +72,27 @@ export function rankQaCases(source, cases = [], { limit = 3, queryEmbedding = nu
     return { ...item, similarity: Number(score.toFixed(3)), semantic: cosine === null ? null : Number(cosine.toFixed(3)) };
   }).filter((item) => item.similarity >= 0.3).sort((a, b) => b.similarity - a.similarity || b.scoreAfter - a.scoreAfter).slice(0, limit);
 }
+
+/**
+ * Split retrieved references by whether they may be cited as an authority.
+ *
+ * A QA-passed machine translation is written straight back into the memory pool
+ * as `machine_verified`. If the judge is then handed that memory under the label
+ * "已批准译例", one model's output becomes the standard its own successors are
+ * measured against — observed in practice within a single session: a machine
+ * translation that carried Chinese 《》 brackets into Korean passed QA, entered
+ * the pool, and was then cited to mark a professional translator's correct 「」
+ * as an inconsistency. Worse, the same phrase was called a semantic narrowing
+ * when judging the machine and "the approved rendering" when judging the human.
+ *
+ * Only human-approved material (human accepts, curated table imports) may be
+ * cited as authority. Machine-verified memories stay useful for the TRANSLATOR
+ * (cross-segment consistency) but are never evidence of correctness.
+ */
+export function splitReferenceAuthority(references = []) {
+  const list = Array.isArray(references) ? references : [];
+  return {
+    approved: list.filter((item) => item?.qualityStatus === "human_approved"),
+    machineDrafts: list.filter((item) => item?.qualityStatus !== "human_approved")
+  };
+}

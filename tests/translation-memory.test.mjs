@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateQaScore, presentAiQaIssues } from "../src/qa.mjs";
-import { rankQaCases, rankTranslationMemories } from "../src/translation-memory.mjs";
+import { rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "../src/translation-memory.mjs";
 
 test("翻译记忆检索优先同义近似且已验证的译例", () => {
   const ranked = rankTranslationMemories("高级通行证现已开放购买", [
@@ -65,4 +65,26 @@ test("AIQA 分数由问题严重度计算且硬错误封顶", () => {
   assert.equal(presented[0].severity, "error");
   assert.equal(presented[0].message, "语体不一致");
   assert.equal(presented[0].suggestion, "改用敬体");
+});
+
+test("只有人工批准的译例可以充当审校标准，机器译例另开一档", () => {
+  const { approved, machineDrafts } = splitReferenceAuthority([
+    { id: "m1", source: "甲", target: "人工定稿", qualityStatus: "human_approved" },
+    { id: "m2", source: "乙", target: "机器译文", qualityStatus: "machine_verified" },
+    { id: "m3", source: "丙", target: "导入对照", qualityStatus: "human_approved" }
+  ]);
+  assert.deepEqual(approved.map((item) => item.id), ["m1", "m3"]);
+  assert.deepEqual(machineDrafts.map((item) => item.id), ["m2"]);
+});
+
+test("缺少 qualityStatus 的历史记录按非权威处理，不会误升为标准", () => {
+  const { approved, machineDrafts } = splitReferenceAuthority([{ id: "legacy", source: "甲", target: "乙" }]);
+  assert.equal(approved.length, 0);
+  assert.equal(machineDrafts.length, 1);
+});
+
+test("输入非数组时安全返回两个空档", () => {
+  const { approved, machineDrafts } = splitReferenceAuthority(null);
+  assert.deepEqual(approved, []);
+  assert.deepEqual(machineDrafts, []);
 });

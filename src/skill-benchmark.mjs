@@ -11,7 +11,7 @@ import { classifyContent } from "./classifier.mjs";
 import { getAssets, getMemories, getQaCases, getStyleProfile, getUserProfile } from "./store.mjs";
 import { matchTerms } from "./matcher.mjs";
 import { embedSource } from "./embedding.mjs";
-import { rankQaCases, rankTranslationMemories } from "./translation-memory.mjs";
+import { rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./translation-memory.mjs";
 import { buildContextPack } from "./context-pack.mjs";
 import { createUsageCollector, estimateUsageCost, evaluateTranslationWithModel, getProviderConfig, translateWithReflection } from "./provider.mjs";
 import { calculateQaScore, runQa } from "./qa.mjs";
@@ -82,7 +82,13 @@ export async function benchmarkTranslationSkill(skill, trajectory, { styleProfil
   const usage = createUsageCollector();
   const translated = await translateWithReflection(contextPack, { reflect: false, onUsage: usage.onUsage });
   const hardIssues = runQa({ source, translation: translated.translation, matches });
-  const aiIssues = await evaluateTranslationWithModel({ contextPack: qaContextPack, translation: translated.translation, references: translationReferences, qaCases: qaGuidance, onUsage: usage.onUsage });
+  // 评测里的裁判同样不能把机器译例当标准，否则两个变体都在向系统自己的历史输出收敛。
+  const referenceAuthority = splitReferenceAuthority(translationReferences);
+  const aiIssues = await evaluateTranslationWithModel({
+    contextPack: qaContextPack, translation: translated.translation,
+    references: referenceAuthority.approved, machineDrafts: referenceAuthority.machineDrafts,
+    qaCases: qaGuidance, onUsage: usage.onUsage
+  });
   const score = calculateQaScore({ hardIssues, aiIssues });
   const required = matches.filter((item) => item.mode === "exact" && item.term?.enforcement === "required");
   const requiredTermHits = required.filter(({ term }) => String(translated.translation).includes(String(term.target || ""))).length;

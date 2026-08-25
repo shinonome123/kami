@@ -16,7 +16,7 @@ import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineS
 import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
-import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
+import { rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./src/translation-memory.mjs";
 import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 import { runTaskPool } from "./src/task-pool.mjs";
@@ -324,6 +324,9 @@ async function classify(body) {
 async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, contentType, domain, batchId, providedReferences = null, humanDecisions = [], passScore = 90, maxRevisions = 2 }) {
   const queryEmbedding = await embedSource(contextPack.source);
   const references = providedReferences || rankTranslationMemories(contextPack.source, await getMemories(locale, { contentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
+  // 审校环节只能引用人工批准的译例；本系统自己 QA 通过后写回的机器译文另开一档，
+  // 否则一次错误会在下一次审校里被当成"已批准"的规范。
+  const { approved: approvedReferences, machineDrafts } = splitReferenceAuthority(references);
   const qaCases = contextPack.qaGuidance || [];
   let translation = initialTranslation;
   let hardIssues = runQa({ source: contextPack.source, translation, matches });
@@ -375,7 +378,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
         }
       }
     }
-    aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references, qaCases });
+    aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references: approvedReferences, machineDrafts, qaCases });
     used = true;
     score = calculateQaScore({ hardIssues, aiIssues });
     initialScore = score;
@@ -384,7 +387,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
       translation = await reviseTranslationWithQa({ contextPack, translation, issues: actionable, references, qaCases });
       iterations += 1;
       hardIssues = runQa({ source: contextPack.source, translation, matches });
-      aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references, qaCases });
+      aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references: approvedReferences, machineDrafts, qaCases });
       score = calculateQaScore({ hardIssues, aiIssues });
     }
   } catch (error) {
@@ -1571,6 +1574,8 @@ async function apiHandler(req, res, url) {
     const references = rankTranslationMemories(cleanSource, await getMemories(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
     const qaCases = rankQaCases(cleanSource, await getQaCases(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 3, queryEmbedding });
     const evidence = positiveEvidenceOnly(await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 12 })).slice(0, 6);
+    // 只有人工批准的译例能充当"标准"；机器译文另开一档，仅供一致性参考。
+    const { approved: approvedReferences, machineDrafts } = splitReferenceAuthority(references);
     const sourceSegments = splitQaSegments(cleanSource);
     const translationSegments = splitQaSegments(cleanTranslation);
 
@@ -1646,7 +1651,7 @@ async function apiHandler(req, res, url) {
         evaluateGrammarWithModel({ translation: pairTranslation, locale, contentType: scopeContentType }),
         evaluateAutoQaWithModel({
           source: pairSource, translation: pairTranslation, locale, contentType: scopeContentType, domain,
-          styleProfile, references, qaCases, evidence
+          styleProfile, references: approvedReferences, machineDrafts, qaCases, evidence
         })
       ]);
       const failures = [];
@@ -1666,6 +1671,7 @@ async function apiHandler(req, res, url) {
         issues,
         scores: calculateAutoQaScores(issues),
         summary: summarizeIssues(issues),
+        // 每段的扣分只能记在自己头上，文档级打分才能按段封顶后再平均。
         fallbackReason: failures.join("；")
       };
     });
@@ -1678,8 +1684,11 @@ async function apiHandler(req, res, url) {
       unmatchedSource: pairPlan.unmatchedSource,
       unmatchedTranslation: pairPlan.unmatchedTranslation
     });
-    const allIssues = [...segments.flatMap((segment) => segment.issues), ...alignmentIssues];
-    const scores = calculateAutoQaScores(allIssues);
+    const allIssues = [
+      ...segments.flatMap((segment) => segment.issues.map((issue) => ({ ...issue, segmentIndex: segment.index }))),
+      ...alignmentIssues.map((issue, index) => ({ ...issue, segmentIndex: `alignment-${index}` }))
+    ];
+    const scores = calculateAutoQaScores(allIssues, { segmentCount: Math.max(1, segments.length) });
     const summary = summarizeIssues(allIssues);
     const fallbackReason = segments
       .filter((segment) => segment.fallbackReason)

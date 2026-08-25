@@ -54,7 +54,9 @@ test("基本检查：连续重复字符、配对标点与语气弱化", () => {
 
 test("三层打分：无问题全部满分，权重为 20/50/30", () => {
   const scores = calculateAutoQaScores([]);
-  assert.deepEqual(scores, { overall: 100, dimensions: { basic: 100, fidelity: 100, nuance: 100 } });
+  assert.equal(scores.overall, 100);
+  assert.deepEqual(scores.dimensions, { basic: 100, fidelity: 100, nuance: 100 });
+  assert.equal(scores.blockedSegments, 0);
   const weighted = calculateAutoQaScores([{ dimension: "fidelity", severity: "major", confidence: 0.9 }]);
   assert.equal(weighted.dimensions.fidelity, 88);
   assert.equal(weighted.overall, 94);
@@ -291,4 +293,69 @@ test("文档总分：全部句子的问题统一计入并套用封顶", () => {
   assert.equal(scores.dimensions.basic, 97);
   assert.equal(scores.dimensions.nuance, 88);
   assert.equal(scores.overall, Math.round(97 * 0.2 + 65 * 0.5 + 88 * 0.3));
+});
+
+test("按段平均：同样质量的长文档不再因为段多而崩到零分", () => {
+  // 16 段，每段一条 major(12)。旧算法累加 192 分直接归零；现在每段各扣 12。
+  const issues = Array.from({ length: 16 }, (_, index) => ({
+    dimension: "fidelity", severity: "major", confidence: 0.9, segmentIndex: index + 1
+  }));
+  assert.equal(calculateAutoQaScores(issues, { segmentCount: 16 }).dimensions.fidelity, 88);
+  assert.equal(calculateAutoQaScores(issues).dimensions.fidelity, 88, "问题自带段号时按出现过的段号推断段数");
+});
+
+test("坏掉一段只影响 1/段数，不会拖垮整份文档", () => {
+  const issues = Array.from({ length: 10 }, () => ({
+    dimension: "fidelity", severity: "major", confidence: 0.9, segmentIndex: 3
+  }));
+  const scores = calculateAutoQaScores(issues, { segmentCount: 16 });
+  assert.equal(scores.dimensions.fidelity, 94, "该段扣到 0，其余 15 段满分");
+  assert.equal(scores.blockedSegments, 0, "major 不算阻断");
+});
+
+test("阻断问题让文档封顶 65，坏得越多分数越低", () => {
+  const one = calculateAutoQaScores(
+    [{ dimension: "fidelity", severity: "critical", confidence: 0.9, segmentIndex: 1 }],
+    { segmentCount: 16 }
+  );
+  const all = calculateAutoQaScores(
+    Array.from({ length: 16 }, (_, index) => ({ dimension: "fidelity", severity: "critical", confidence: 0.9, segmentIndex: index + 1 })),
+    { segmentCount: 16 }
+  );
+  assert.equal(one.dimensions.fidelity, 65, "单条 critical 不被平均稀释，仍然封顶");
+  assert.equal(all.dimensions.fidelity, 65, "全坏时平均值正好等于封顶");
+  assert.equal(one.blockedSegments, 1);
+  assert.equal(all.blockedSegments, 16, "单一分数会饱和，靠 blockedSegments 区分坏一段还是全坏");
+});
+
+test("每段两条 critical 时平均值压到封顶以下", () => {
+  const issues = Array.from({ length: 16 }, (_, index) => index + 1).flatMap((segmentIndex) => [
+    { dimension: "fidelity", severity: "critical", confidence: 0.9, segmentIndex },
+    { dimension: "fidelity", severity: "critical", confidence: 0.9, segmentIndex }
+  ]);
+  assert.equal(calculateAutoQaScores(issues, { segmentCount: 16 }).dimensions.fidelity, 30);
+});
+
+test("单段文档行为不变，段数缺省与显式传 1 一致", () => {
+  const issues = [{ dimension: "basic", severity: "major", confidence: 0.9 }];
+  const a = calculateAutoQaScores(issues);
+  const b = calculateAutoQaScores(issues, { segmentCount: 1 });
+  assert.equal(a.overall, b.overall);
+  assert.deepEqual(a.dimensions, b.dimensions);
+});
+
+test("整句漏译这类不属于任何段的问题各占一格分母，不会被段内平均吃掉", () => {
+  const scores = calculateAutoQaScores([
+    { dimension: "fidelity", severity: "critical", confidence: 0.9, segmentIndex: "alignment-0" },
+    { dimension: "fidelity", severity: "critical", confidence: 0.9, segmentIndex: "alignment-1" }
+  ], { segmentCount: 8 });
+  assert.equal(scores.blockedSegments, 2);
+  assert.equal(scores.dimensions.fidelity, 65, "8 段满分 + 2 格各 65，平均 93 后被阻断封顶压到 65");
+});
+
+test("非法段数回落为 1，不会因为除零产生 NaN", () => {
+  const issues = [{ dimension: "nuance", severity: "minor", confidence: 0.9 }];
+  for (const segmentCount of [0, -3, NaN, "abc", null]) {
+    assert.equal(calculateAutoQaScores(issues, { segmentCount }).dimensions.nuance, 97);
+  }
 });

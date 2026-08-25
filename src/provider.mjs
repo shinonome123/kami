@@ -565,13 +565,13 @@ export async function proposeTranslationSkillWithModel({ locale, contentType, do
   };
 }
 
-export async function evaluateTranslationWithModel({ contextPack, translation, references = [], qaCases = [], onUsage = null }) {
+export async function evaluateTranslationWithModel({ contextPack, translation, references = [], machineDrafts = [], qaCases = [], onUsage = null }) {
   const messages = [
     {
       role: "system",
-      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。数据库译例只是证据，不能盲从；只有同语种、同语体且语义相关时才引用。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。category 使用简短英文代码；message、suggestion 和其他解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 必须逐字保留原文或译文中的证据片段。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"简体中文问题原因","suggestion":"简体中文可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
+      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。approvedReferences 是人工批准的译例，只有同语种、同语体且语义相关时才引用，且仍不能盲从。machineDrafts 是本系统自己此前产出的机器译文，只能用于发现同一文档内自相矛盾，绝不能当作正确与否的依据，也不得以"与 machineDrafts 不一致"为由报告问题。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。category 使用简短英文代码；message、suggestion 和其他解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 必须逐字保留原文或译文中的证据片段。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"简体中文问题原因","suggestion":"简体中文可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
     },
-    { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 5), qaCases: qaCases.slice(0, 3) }) }
+    { role: "user", content: JSON.stringify({ contextPack, translation, approvedReferences: references.slice(0, 5), machineDrafts: machineDrafts.slice(0, 3), qaCases: qaCases.slice(0, 3) }) }
   ];
   let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "AIQA", responseFormat: { type: "json_object" }, onUsage });
   let payload;
@@ -621,12 +621,15 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
  * Auto QA 三层模型审校：basic 基本检查、fidelity 语义忠实性（着重）、nuance 细微一致性。
  * 单次调用返回带 dimension 的问题列表；解析失败走行式降级，最终失败抛错由调用方记录。
  */
-export async function evaluateAutoQaWithModel({ source, translation, locale, contentType = "general", domain = "general", styleProfile = null, references = [], qaCases = [], evidence = [], onUsage = null }) {
+export async function evaluateAutoQaWithModel({ source, translation, locale, contentType = "general", domain = "general", styleProfile = null, references = [], machineDrafts = [], qaCases = [], evidence = [], onUsage = null }) {
   const evidencePayload = {
     source, translation, locale, contentType, domain,
     multiSentence: String(source).includes("\n"),
     styleProfile: styleProfile ? { name: styleProfile.name, version: styleProfile.version, instruction: styleProfile.instruction, examples: styleProfile.examples } : null,
-    references: references.slice(0, 5),
+    // approvedReferences 是唯一可以充当"标准"的一档；machineDrafts 只是本系统
+    // 自己此前的输出，拿它当依据会让一次错误在下一次评审里变成规范。
+    approvedReferences: references.slice(0, 5),
+    machineDrafts: machineDrafts.slice(0, 3),
     qaCases: qaCases.slice(0, 3),
     evidence: evidence.slice(0, 6)
   };
@@ -636,8 +639,19 @@ export async function evaluateAutoQaWithModel({ source, translation, locale, con
       content: `你是独立于译者的亚洲语言本地化 Auto QA 审校员，对一条已完成译文做三层审查，语义忠实性是最高优先级。只报告可定位的问题，不要给总分：
 
 1) basic 基本检查：目标语言拼写错误、语法错误、数字/日期/符号与原文不符、专名与品牌名在句内前后不一致。
-2) fidelity 语义忠实性（着重检查项）：漏译、增译、错译、语义偏差。必须同时给出原文片段 sourceSpan 与译文片段 targetSpan 作为证据；只有语义确实丢失或凭空添加事实时 severity 才能是 critical；调整语序、换用同义地道表达不是问题。特别重要：若原文包含多个句子（用换行分隔），必须逐句核对译文是否覆盖每一句的信息，任何一句未译出都要记 critical omission，不得因为其他句子译出了就认为完整。
-3) nuance 细微一致性：敬语级别、语气词、正式度、句式节奏是否与提供的风格规范、已批准译例、历史风格证据一致。有证据时优先对照证据判断；没有证据时按目标语言自然习惯判断。细微差异记 minor，明显违反记 major。
+2) fidelity 语义忠实性（着重检查项）：只检查**信息点**是否守住。信息点指可以被独立核实的内容：事实陈述、数字、日期、时间、金额、名称与专名、平台与渠道、条件与限制、因果或先后关系、否定与转折、承诺强度。判定方法固定为两步：先从原文列出信息点，再逐个检查该信息点能否从译文中还原；只有还原不出、被改变、或译文凭空多出一个原文没有的信息点，才是 fidelity 问题，且必须在 message 里指名是哪一个信息点。必须同时给出原文片段 sourceSpan 与译文片段 targetSpan 作为证据。
+以下一律**不是** fidelity 问题，不得记为漏译、增译或语义偏差（属于合格本地化，至多在 nuance 记 minor）：
+· 中文话语标记与虚词在目标语言中省略或改写：首先/其次/再次/所以/那么/然后/给大家/我们/大家
+· 程度与强调副词换成目标语言等价强度的说法：全力/非常/十分/一定/或许/难免
+· 中文范畴词与冗余限定被目标语言惯用表达吸收：古代神话→神話、进行/工作/情况/方面等虚化名词
+· 把中文代词显化为具体名称（"它"→产品名），或反过来把重复的专名代词化——这是目标语言可读性要求
+· 句子拆分、合并、语序调整、主被动转换、把疑问句改写成目标语言更自然的问法
+· 语气词、拟声词、客套与自嘲（嘻嘻/瞅瞅/顺手/别无二致）换成目标语言等价口吻
+· 中文四字格、对仗、夸张修辞换成目标语言等效表达
+severity：critical 只用于事实层面的丢失或捏造——整句未译、数字/日期/名称/平台错误、条件或否定被改变、承诺强度被改变。信息点仍在但语义范围有出入记 major；措辞偏好记 minor。
+特别重要：若原文包含多个句子（用换行分隔），必须逐句核对译文是否覆盖每一句的信息，任何一句未译出都要记 critical omission，不得因为其他句子译出了就认为完整。
+3) nuance 细微一致性：敬语级别、语气词、正式度、句式节奏是否与提供的风格规范、approvedReferences（人工批准的译例）、历史风格证据一致。有证据时优先对照证据判断；没有证据时按目标语言自然习惯判断。细微差异记 minor，明显违反记 major。
+输入中的 machineDrafts 是本系统此前自己产出的机器译文，**只能用于判断同一文档内前后是否自相矛盾，绝不能当作正确与否的依据**；不得以"与 machineDrafts 不一致"为由报告任何问题，也不得把 machineDrafts 里的用词、术语或标点当成规范。
 
 输出语言要求：category 使用简短英文代码；message、suggestion 和所有解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 只用于逐字引用原文或译文证据，可以保留对应语言。
 
