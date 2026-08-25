@@ -81,7 +81,7 @@ export async function benchmarkTranslationSkill(skill, trajectory, { styleProfil
   const startedAt = Date.now();
   const usage = createUsageCollector();
   const translated = await translateWithReflection(contextPack, { reflect: false, onUsage: usage.onUsage });
-  const hardIssues = runQa({ source, translation: translated.translation, matches });
+  const hardIssues = runQa({ source, translation: translated.translation, matches, locale: scope.locale });
   // 评测里的裁判同样不能把机器译例当标准，否则两个变体都在向系统自己的历史输出收敛。
   const referenceAuthority = splitReferenceAuthority(translationReferences);
   const aiIssues = await evaluateTranslationWithModel({

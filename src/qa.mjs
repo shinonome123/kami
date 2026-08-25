@@ -1,6 +1,7 @@
-import { extractProtectedTokens, normalizeSource } from "./text.mjs";
+import { digitSequence, digitsRecoverable, extractProtectedTokens, normalizeSource } from "./text.mjs";
+import { checkOrthography } from "./orthography.mjs";
 
-export function runQa({ source, translation, matches = [] }) {
+export function runQa({ source, translation, matches = [], locale = "" }) {
   const issues = [];
   for (const token of extractProtectedTokens(source)) {
     if (!String(translation).includes(token)) {
@@ -28,6 +29,18 @@ export function runQa({ source, translation, matches = [] }) {
         issues.push({ severity: "error", type: "forbidden_term", message: `使用了禁用译法：${forbidden}` });
       }
     }
+  }
+  // 目标语言标点约定是确定性规则，交给本地检查而不是靠模型自觉。
+  issues.push(...checkOrthography({ source, translation, locale }));
+  // 裸数字按数值等价校验而不是字面包含：8月20日 / 8월 20일 是 820 的正确本地化，
+  // 不该判成漏掉受保护内容。仅当数字确实无法从译文还原时提示复核。
+  if (!digitsRecoverable(source, translation)) {
+    issues.push({
+      severity: "warning",
+      type: "number_drift",
+      category: "number",
+      message: `原文中的数字未能在译文中完整还原（原文数字：${digitSequence(source)}，译文数字：${digitSequence(translation) || "无"}），请确认是否漏译或已按目标语言习惯改写`
+    });
   }
   if (source.trim() && !String(translation).trim()) {
     issues.push({ severity: "error", type: "empty", message: "译文为空" });

@@ -1,4 +1,5 @@
 import { CONTENT_TYPES, LOCALES } from "./config.mjs";
+import { punctuationGuidance } from "./orthography.mjs";
 import { detectRhymeLike, extractProtectedTokens } from "./text.mjs";
 import { normalizeBatchReferences } from "./batch-verse.mjs";
 
@@ -69,6 +70,7 @@ export function buildContextPack({ source, locale, classification, matches, doma
       strategy: translationSkill.strategy || {}
     } : null,
     localeInstruction: LOCALES[locale].defaultInstruction,
+    punctuation: punctuationGuidance(locale),
     requiredTerms: required.map(({ term }) => ({ source: term.source, target: term.target, forbidden: term.forbidden, note: term.note })),
     preferredTerms: preferred.map(({ term, mode, matchPhrase, score }) => ({
       source: term.source,

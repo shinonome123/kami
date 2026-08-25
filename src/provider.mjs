@@ -142,11 +142,17 @@ function packPrompt(contextPack) {
     batchReferenceHint +
     exampleHint +
     `目标语言要求：${contextPack.localeInstruction}\n` +
+    (contextPack.punctuation ? `标点约定：${contextPack.punctuation}
+` : "") +
     `领域：${contextPack.domain}\n` +
     `文档上下文（仅用于理解，不得翻译进结果）：\n${formatNeighborContext(contextPack.neighborContext)}\n\n` +
     `强制术语：${JSON.stringify(contextPack.requiredTerms, null, 2)}\n` +
     `参考术语：${JSON.stringify(contextPack.preferredTerms, null, 2)}\n` +
-    `必须原样保留：${JSON.stringify(contextPack.protectedTokens)}\n\n` +
+    `必须原样保留（URL、占位符、标签、带单位的数值）：${JSON.stringify(contextPack.protectedTokens)}
+` +
+    `数字与日期：数值必须等价，但格式要按目标语言习惯改写。中文的日期简写（如 820 表示 8 月 20 日）必须展开为目标语言的正常写法，不得为了保留字面而在译文里额外塞入原样数字。
+
+` +
     `规则：\n1. 不得使用其他目标语言的表达。\n2. 信息保真：数字、日期、名称、占位符、强制术语和事实必须完整保留；除此之外，语序、句式、用词、修辞都可以自由改写为地道说法——换一种地道表达不等于漏译或增译。\n3. 强制术语必须逐字采用指定目标译法。\n4. 上下文只用于消歧和保持连贯，不得把上文或下文混入译文。\n5. 标有 contextualFallback 或 contentType 不同的历史译例只用于稳定术语与基础表达，不得覆盖当前语体要求。\n6. 拒绝翻译腔：成语、习语、重复、语气词、客套话一律换成目标语言中语义与语气对等的自然说法；译文读起来必须像目标语言原生文案，而不是中文的逐字影子。\n7. 原文含押韵、对仗、重复或口号结构时，必须在目标语言中重现节奏与韵律，允许换用地道表达；语气要与原句一致（如闲散自嘲不得译成命令口吻）。\n8. 只翻译“当前原文”，只输出译文，不解释。\n\n${rhymeHint}当前原文：\n${contextPack.source}`;
 }
 
@@ -1156,13 +1162,13 @@ const LOCALE_NAMES = Object.freeze({
   "th-TH": "泰语"
 });
 
-export async function classifyWithModel(text) {
+export async function classifyWithModel(text, { descriptor = "", location = "" } = {}) {
   const content = await chat([
     {
       role: "system",
-      content: "你是游戏本地化内容分类器。只能从 marketing, announcement, item_name, item_description, ui, rules, dialogue, social, general 中选择一个 contentType。输出严格 JSON：{\"contentType\":\"...\",\"confidence\":0到1,\"evidence\":[\"简短依据\"]}。"
+      content: "你是游戏本地化内容分类器。只能从 marketing, announcement, item_name, item_description, ui, rules, dialogue, social, general 中选择一个 contentType。输入是 JSON，其中 text 是正文；如果带有\"用途\"或\"位置\"字段，那是需求表自己声明的文案用途，应当优先于从正文推测。输出严格 JSON：{\"contentType\":\"...\",\"confidence\":0到1,\"evidence\":[\"简短依据\"]}。"
     },
-    { role: "user", content: String(text).slice(0, 8000) }
+    { role: "user", content: JSON.stringify({ text: String(text).slice(0, 8000), 用途: descriptor || undefined, 位置: location || undefined }) }
   ]);
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("语体分类模型未返回 JSON");

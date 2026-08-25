@@ -55,13 +55,55 @@ export function detectRhymeLike(text = "") {
   return /([\u4e00-\u9fff]{2,3})[，,]\1[，,]\1/u.test(normalized);
 }
 
+/**
+ * Tokens that must survive verbatim: URLs, placeholders, markup, and numbers
+ * that carry a unit.
+ *
+ * Bare numbers used to be in this list, which made any correct localization of
+ * a number a hard error: "在820当天" yields the token "820", so a translator
+ * writing 8月20日 / 8월 20일 — the right rendering — was marked as dropping
+ * protected content and the score was capped at 60. The model meanwhile learned
+ * to emit "8月20日（820）" purely to satisfy the substring check, i.e. it gamed
+ * the metric, and that output then passed QA into the memory pool.
+ *
+ * Bare numbers are now checked for numeric equivalence instead (see
+ * digitsRecoverable), which tolerates reformatting but still catches real loss.
+ */
 export function extractProtectedTokens(text = "") {
   const patterns = [
     /https?:\/\/[^\s)）\]】]+/gi,
     /\{\{[^{}]+\}\}|\{[^{}]+\}/g,
     /%\([^)]+\)[a-z]|%\d*\$?[a-z]/gi,
     /<\/?[a-z][^>]*>/gi,
-    /\b\d+(?:[.,:]\d+)*(?:%|％|元|円|₩|฿|USD|JPY|KRW|THB)?\b/gi
+    // 末尾不能再加 \b：单位后面通常是中日韩字符，边界不成立会让正则回退成裸数字。
+    /\d+(?:[.,:]\d+)*(?:%|％|元|円|₩|฿|USD|JPY|KRW|THB)/gi
   ];
   return [...new Set(patterns.flatMap((pattern) => String(text).match(pattern) ?? []))];
+}
+
+/** Every digit of a text in reading order, separators and units dropped. */
+export function digitSequence(text = "") {
+  return (String(text ?? "").match(/\d+/gu) ?? []).join("");
+}
+
+/**
+ * True when every digit of the source still appears in the translation in the
+ * same order. "820" is recoverable from "8月20日" and from "8월 20일"; it is not
+ * recoverable from a translation that dropped the date entirely.
+ *
+ * Known limit: locales that spell months out (Thai 20 สิงหาคม) legitimately lose
+ * the month digit, which is why callers report this as a warning to confirm
+ * rather than as a hard error.
+ */
+export function digitsRecoverable(source, translation) {
+  const wanted = digitSequence(source);
+  if (!wanted) return true;
+  const available = digitSequence(translation);
+  let cursor = 0;
+  for (const digit of wanted) {
+    cursor = available.indexOf(digit, cursor);
+    if (cursor < 0) return false;
+    cursor += 1;
+  }
+  return true;
 }

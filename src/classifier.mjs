@@ -11,13 +11,83 @@ const RULES = [
   ["dialogue", 4, /([“「『].+[”」』]|说道|问道|喊道|低声|笑着说|[，,].{1,24}(啊|吧|呢|罢|哩|呀|么|吗|嘛|呐|喽|咯|了|来|去|走|住|听|看|小心|留心)[。！？!?…]*)/u]
 ];
 
-export function classifyContent(text, hint = "auto") {
+/**
+ * Descriptor keywords → content type.
+ *
+ * Localization request sheets state the purpose of every line in their own
+ * columns ("视频标题" / "导航栏文本" / "FAQ文本"), and that is a far stronger
+ * signal than guessing from the copy itself. The classifier ignored those
+ * columns entirely: on the B2 宣发 sample all three rows came out wrong
+ * (视频标题→general、导航栏文本→item_name、FAQ文本→dialogue), and since the
+ * content type selects the style profile, every downstream decision inherited
+ * the mistake.
+ *
+ * Order matters: the more specific pattern has to win (道具描述 before 道具名,
+ * 视频标题 before 社媒).
+ */
+const DESCRIPTOR_RULES = [
+  ["ui", /导航|導航|按钮|按鈕|菜单|選單|选单|界面|系统提示|系統提示|标签页|標籤頁|入口|弹窗|彈窗|toast|tooltip|placeholder|ui/iu],
+  ["item_description", /(道具|物品|装备|裝備|技能|称号|稱號|卡牌|皮肤|皮膚)[^，,。\s]{0,3}(描述|说明|說明)/u],
+  ["item_name", /(道具|物品|装备|裝備|技能|称号|稱號|卡牌|皮肤|皮膚)[^，,。\s]{0,3}(名|名称|名稱)/u],
+  ["announcement", /公告|通知|维护|維護|停机|停機|更新说明|更新說明/u],
+  ["rules", /规则|規則|条款|條款|须知|須知|资格|資格|细则|細則/u],
+  ["dialogue", /对白|對白|台词|台詞|剧情|劇情|旁白|字幕|配音/u],
+  // FAQ 既有事实承诺又常带轻松口吻：归 general（忠实、自然、不过度润色）比
+  // 归 announcement（正式）或 dialogue（角色口吻）都更安全。
+  ["general", /faq|常见问题|常見問題|问答|問答|q\s*&\s*a/iu],
+  ["marketing", /标题|標題|宣发|宣發|宣传|宣傳|广告|廣告|slogan|口号|口號|banner|预告|預告|pv|cta|首页|首頁|落地页|落地頁/iu],
+  ["social", /社媒|社交|推文|帖子|微博|朋友圈|twitter|instagram|tiktok|facebook/iu]
+];
+
+/**
+ * Read a content type off the sheet's own descriptor columns. `descriptor` is
+ * the per-line purpose (描述), `location` the placement (位置); the descriptor
+ * is checked first because it is the more specific of the two.
+ */
+export function contentTypeFromDescriptor(descriptor = "", location = "") {
+  for (const field of [String(descriptor || "").trim(), String(location || "").trim()]) {
+    if (!field) continue;
+    for (const [type, pattern] of DESCRIPTOR_RULES) {
+      const match = field.match(pattern);
+      if (match) return { contentType: type, evidence: `${field}（匹配「${match[0]}」）` };
+    }
+  }
+  return null;
+}
+
+/**
+ * Pull the purpose columns out of a Context Pack's neighbour metadata.
+ *
+ * Excel rows carry their own labels ("位置" / "描述" / "备注"); the batch pipeline
+ * already collects them, they were simply never shown to the classifier.
+ */
+export function descriptorFromContext(neighborContext = {}) {
+  const items = Array.isArray(neighborContext?.metadata) ? neighborContext.metadata : [];
+  const pick = (pattern) => String(items.find((item) => pattern.test(String(item?.label || "")))?.value || "").trim();
+  return {
+    descriptor: pick(/描述|用途|类型|類型|说明|說明|文案|description|usage|type/i),
+    location: pick(/位置|放置|投放|渠道|页面|頁面|placement|location|channel|page/i)
+  };
+}
+
+export function classifyContent(text, hint = "auto", { descriptor = "", location = "" } = {}) {
   if (hint && hint !== "auto" && Object.hasOwn(CONTENT_TYPES, hint)) {
     return {
       contentType: hint,
       confidence: 1,
       source: "manual",
       evidence: ["用户指定语体"]
+    };
+  }
+
+  // 表格已经写明用途时，它比从正文猜要可靠得多，直接采用。
+  const declared = contentTypeFromDescriptor(descriptor, location);
+  if (declared) {
+    return {
+      contentType: declared.contentType,
+      confidence: 0.92,
+      source: "descriptor",
+      evidence: [`表格声明用途：${declared.evidence}`]
     };
   }
 

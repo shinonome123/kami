@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyContent } from "../src/classifier.mjs";
+import { classifyContent, contentTypeFromDescriptor, descriptorFromContext } from "../src/classifier.mjs";
 import { LOCALES } from "../src/config.mjs";
 import { buildContextPack } from "../src/context-pack.mjs";
 import { refineCorpus } from "../src/corpus.mjs";
@@ -188,4 +188,70 @@ test("语料炼化保留分段并产生重复短语候选", () => {
   const result = refineCorpus("高级通行证现已登场。购买高级通行证可领取奖励。高级通行证奖励将在活动结束后发放。", { minFrequency: 2 });
   assert.equal(result.segments.length, 3);
   assert.ok(result.candidates.some((candidate) => candidate.term === "高级通行证"));
+});
+
+test("需求表声明的用途优先于从正文猜测的语体", () => {
+  // 实测样本三行全部猜错：视频标题→general、导航栏文本→item_name、FAQ文本→dialogue
+  const cases = [
+    ["视频标题", "社媒", "marketing"],
+    ["导航栏文本", "B2官网", "ui"],
+    ["FAQ文本", "B2官网", "general"],
+    ["道具描述", "", "item_description"],
+    ["道具名", "", "item_name"],
+    ["角色对白", "", "dialogue"],
+    ["活动规则", "", "rules"]
+  ];
+  for (const [descriptor, location, expected] of cases) {
+    const result = classifyContent("《黑神话：钟馗》X分钟实机演示", "auto", { descriptor, location });
+    assert.equal(result.contentType, expected, `${descriptor} 应判为 ${expected}`);
+    assert.equal(result.source, "descriptor");
+    assert.ok(result.confidence >= 0.86, "声明用途的置信度要高到不再触发模型兜底");
+  }
+});
+
+test("描述列比位置列更具体，冲突时描述赢", () => {
+  assert.equal(contentTypeFromDescriptor("视频标题", "社媒").contentType, "marketing");
+  assert.equal(contentTypeFromDescriptor("", "社媒").contentType, "social");
+});
+
+test("更具体的描述优先：道具描述不会被道具名规则抢走", () => {
+  assert.equal(contentTypeFromDescriptor("道具描述").contentType, "item_description");
+  assert.equal(contentTypeFromDescriptor("道具名称").contentType, "item_name");
+});
+
+test("英文缩写按整词匹配，不会被单词内部命中", () => {
+  assert.equal(contentTypeFromDescriptor("guide 文案"), null, "guide 里的 ui 不算 UI 文案");
+  assert.equal(contentTypeFromDescriptor("PVP 说明"), null, "PVP 里的 pv 不算预告片");
+  assert.equal(contentTypeFromDescriptor("UI 按钮").contentType, "ui");
+  assert.equal(contentTypeFromDescriptor("宣传 PV 标题").contentType, "marketing");
+});
+
+test("人工指定语体仍然压过表格声明", () => {
+  const result = classifyContent("任意文本", "dialogue", { descriptor: "导航栏文本" });
+  assert.equal(result.contentType, "dialogue");
+  assert.equal(result.source, "manual");
+});
+
+test("没有可用描述时回落到正文启发式，不改变原有行为", () => {
+  const withEmpty = classifyContent("限时活动现已开启", "auto", { descriptor: "", location: "" });
+  const without = classifyContent("限时活动现已开启");
+  assert.equal(withEmpty.contentType, without.contentType);
+  assert.equal(withEmpty.source, "heuristic");
+});
+
+test("从 Context Pack 的相邻元数据里认出位置与描述列", () => {
+  const picked = descriptorFromContext({
+    metadata: [
+      { label: "位置", value: "社媒", role: "context" },
+      { label: "描述", value: "视频标题", role: "context" },
+      { label: "DDL", value: "2026-08-18", role: "constraint" }
+    ]
+  });
+  assert.equal(picked.descriptor, "视频标题");
+  assert.equal(picked.location, "社媒");
+});
+
+test("没有元数据时返回空串而不是抛错", () => {
+  assert.deepEqual(descriptorFromContext(), { descriptor: "", location: "" });
+  assert.deepEqual(descriptorFromContext({ metadata: null }), { descriptor: "", location: "" });
 });
