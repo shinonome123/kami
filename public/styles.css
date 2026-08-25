@@ -373,6 +373,11 @@ select { min-width: 150px; }
 .style-state.active { color: #285843; background: #e1f1e8; }
 .style-state.draft { color: #805716; background: #fff0d5; }
 .style-state.inactive { color: #68716c; background: #eceeeb; }
+.style-profile-evaluation { margin: 8px 0 0; padding: 7px 9px; border-radius: 6px; font-size: 12px; line-height: 1.6; }
+.style-profile-evaluation.pass { color: #285843; background: #e1f1e8; }
+.style-profile-evaluation.warn { color: #805716; background: #fff0d5; }
+.style-profile-evaluation.fail { color: #8a352f; background: #fbe5e2; }
+.style-profile-evaluation.neutral { color: #68716c; background: #eceeeb; }
 .style-rule-list { display: grid; gap: 5px; margin-top: 11px; }
 .style-rule-list > div { display: grid; grid-template-columns: 25px 1fr; gap: 8px; padding: 7px 8px; border-radius: 7px; background: #f2f5f2; }
 .style-rule-list span { color: #7b8a82; font-size: 12px; font-weight: 850; }

@@ -1,13 +1,21 @@
 import { distillBatchStyleLearningWithModel, distillStyleProfileWithModel, distillUserProfileWithModel, getProviderConfig, reviewEvolutionWithModel } from "./provider.mjs";
-import { getQaRuns, getStyleEvidence, getStyleProfile, saveStyleLearningRun, saveStyleProfile, saveUserProfile } from "./store.mjs";
+import { getQaRuns, getStyleEvidence, getStyleProfile, listStyleProfiles, saveStyleLearningRun, saveStyleProfile, saveUserProfile } from "./store.mjs";
+import { STYLE_DISTILL_GROWTH_WINDOW, STYLE_DISTILL_THRESHOLD, evaluateStyleDistillDecision, readStyleDistillState } from "./style-distill-gate.mjs";
+import { positiveEvidenceOnly, shapeDistillEvidence } from "./style-delta.mjs";
 
-export const DISTILL_THRESHOLD = 8;
+function positiveEnv(name, fallback) {
+  const value = Math.trunc(Number(process.env[name]));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+export const DISTILL_THRESHOLD = positiveEnv("KAMI_STYLE_DISTILL_THRESHOLD", STYLE_DISTILL_THRESHOLD);
+export const DISTILL_GROWTH_WINDOW = positiveEnv("KAMI_STYLE_DISTILL_GROWTH_WINDOW", STYLE_DISTILL_GROWTH_WINDOW);
 export const PROFILE_THRESHOLD = 3;
 
 function sampleEvidence(evidence) {
   const human = evidence.filter((item) => item.provenance === "human-accept");
   const rest = evidence.filter((item) => item.provenance !== "human-accept");
-  return [...human, ...rest].slice(0, 30).map((item) => ({ source: item.source, target: item.target }));
+  return shapeDistillEvidence([...human, ...rest]);
 }
 
 function dedupeQaRuns(runs) {
@@ -74,11 +82,24 @@ export async function distillBatchStyleLearning({ batchId, filename, locale, con
   });
 }
 
-export async function distillStyleProfileIfReady({ locale, contentType, domain, sourceBatchId = "", learningRunId = "" }) {
-  const evidence = await getStyleEvidence(locale, { contentType, domain, exactScope: true, limit: 1_000 });
-  if (evidence.length < DISTILL_THRESHOLD) return { distilled: null, evidenceCount: evidence.length, threshold: DISTILL_THRESHOLD };
+export async function distillStyleProfileIfReady({
+  locale, contentType, domain, sourceBatchId = "", learningRunId = "",
+  threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW
+}) {
+  const [evidence, existingProfiles] = await Promise.all([
+    getStyleEvidence(locale, { contentType, domain, exactScope: true, limit: 1_000 }),
+    listStyleProfiles(locale, null, { contentType, domain })
+  ]);
+  const decision = evaluateStyleDistillDecision({
+    evidenceCount: evidence.length,
+    ...readStyleDistillState(existingProfiles.styleProfiles, { contentType, domain }),
+    threshold,
+    growthWindow
+  });
+  if (!decision.distill) return { distilled: null, ...decision };
   const previousProfile = await getStyleProfile(locale, contentType, domain);
-  const distilled = await distillStyleProfileWithModel({ locale, contentType, domain, examples: sampleEvidence(evidence), previousProfile });
+  const { examples, counterExamples } = sampleEvidence(evidence);
+  const distilled = await distillStyleProfileWithModel({ locale, contentType, domain, examples, counterExamples, previousProfile });
   const profile = await saveStyleProfile({
     locale, contentType, domain, ...distilled,
     evidenceCount: evidence.length,
@@ -88,22 +109,35 @@ export async function distillStyleProfileIfReady({ locale, contentType, domain, 
     learningRunId,
     status: "draft"
   });
-  return { distilled: profile, evidenceCount: evidence.length, threshold: DISTILL_THRESHOLD };
+  return { distilled: profile, ...decision };
 }
 
 export async function distillUserProfileIfReady(locale) {
   const evidence = await getStyleEvidence(locale, { limit: 1_000 });
-  const accepted = evidence.filter((item) => item.provenance === "human-accept");
+  // 画像描述"这位译者会怎么写"，只能由正例构成；反例走风格规范那条线。
+  const accepted = positiveEvidenceOnly(evidence).filter((item) => item.provenance === "human-accept");
   if (accepted.length < PROFILE_THRESHOLD) return { profile: null, acceptedCount: accepted.length, threshold: PROFILE_THRESHOLD };
-  const distilled = await distillUserProfileWithModel({ locale, examples: sampleEvidence(accepted) });
+  const distilled = await distillUserProfileWithModel({ locale, examples: sampleEvidence(accepted).examples });
   const profile = await saveUserProfile({ locale, ...distilled, evidenceCount: accepted.length, status: "draft" });
   return { profile, acceptedCount: accepted.length, threshold: PROFILE_THRESHOLD };
 }
 
-export async function runEvolutionReview({ locale, contentType, domain, batchId = "" }) {
-  const evidence = await getStyleEvidence(locale, { contentType, domain, exactScope: true, limit: 1_000 });
-  const qaRuns = dedupeQaRuns(await getQaRuns(locale, { contentType, domain, limit: 60 }));
-  const previousProfile = await getStyleProfile(locale, contentType, domain);
+export async function runEvolutionReview({ locale, contentType, domain, batchId = "", threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW }) {
+  const [evidence, existingProfiles, qaRunsRaw, previousProfile] = await Promise.all([
+    getStyleEvidence(locale, { contentType, domain, exactScope: true, limit: 1_000 }),
+    listStyleProfiles(locale, null, { contentType, domain }),
+    getQaRuns(locale, { contentType, domain, limit: 60 }),
+    getStyleProfile(locale, contentType, domain)
+  ]);
+  const qaRuns = dedupeQaRuns(qaRunsRaw);
+  // The review's stylePatch is a distillation like any other and must clear the
+  // same gate; otherwise every finished batch mints another unreviewed draft.
+  const gate = evaluateStyleDistillDecision({
+    evidenceCount: evidence.length,
+    ...readStyleDistillState(existingProfiles.styleProfiles, { contentType, domain }),
+    threshold,
+    growthWindow
+  });
   const result = {
     locale, contentType, domain, batchId,
     evidenceCount: evidence.length,
@@ -118,7 +152,9 @@ export async function runEvolutionReview({ locale, contentType, domain, batchId 
   } catch (error) {
     result.fallbackReasons.review = error.message;
   }
-  if (result.review?.stylePatch) {
+  if (result.review?.stylePatch && !gate.distill) {
+    result.distillPending = gate;
+  } else if (result.review?.stylePatch) {
     try {
       result.distilled = await saveStyleProfile({
         locale, contentType, domain,
@@ -135,9 +171,9 @@ export async function runEvolutionReview({ locale, contentType, domain, batchId 
     }
   } else {
     try {
-      const distilled = await distillStyleProfileIfReady({ locale, contentType, domain });
-      if (distilled.distilled) result.distilled = distilled.distilled;
-      else result.distillPending = { evidenceCount: distilled.evidenceCount, threshold: distilled.threshold };
+      const { distilled, ...pending } = await distillStyleProfileIfReady({ locale, contentType, domain, threshold, growthWindow });
+      if (distilled) result.distilled = distilled;
+      else result.distillPending = pending;
     } catch (error) {
       result.fallbackReasons.distill = error.message;
     }

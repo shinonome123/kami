@@ -576,17 +576,31 @@ export function evaluateSkillPromotion({
     latencyRegression !== null && latencyRegression <= maximumLatencyRegression,
     `变化 ${latencyRegression === Infinity ? "无限" : percent(latencyRegression)}，上限 ${percent(maximumLatencyRegression)}`));
 
-  const materialImprovement = [
-    deltas.mandatoryTermAccuracy !== null && deltas.mandatoryTermAccuracy > 0,
-    deltas.hardErrorCount !== null && deltas.hardErrorCount < 0,
-    deltas.qaScore !== null && deltas.qaScore >= (finiteNumber(guardrails.minimumQaGain) ?? 0.5),
-    deltas.humanEditDistance !== null && deltas.humanEditDistance <= -(finiteNumber(guardrails.minimumEditDistanceGain) ?? 0.005),
-    deltas.humanAcceptanceRate !== null && deltas.humanAcceptanceRate >= (finiteNumber(guardrails.minimumAcceptanceGain) ?? 0.01),
-    costRegression !== null && costRegression <= -(finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1),
-    latencyRegression !== null && latencyRegression <= -(finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1)
-  ].some(Boolean);
+  const materialGains = {
+    mandatoryTerms: deltas.mandatoryTermAccuracy !== null && deltas.mandatoryTermAccuracy > 0,
+    hardErrors: deltas.hardErrorCount !== null && deltas.hardErrorCount < 0,
+    qaScore: deltas.qaScore !== null && deltas.qaScore >= (finiteNumber(guardrails.minimumQaGain) ?? 0.5),
+    humanEditDistance: deltas.humanEditDistance !== null && deltas.humanEditDistance <= -(finiteNumber(guardrails.minimumEditDistanceGain) ?? 0.005),
+    humanAcceptance: deltas.humanAcceptanceRate !== null && deltas.humanAcceptanceRate >= (finiteNumber(guardrails.minimumAcceptanceGain) ?? 0.01),
+    cost: costRegression !== null && costRegression <= -(finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1),
+    latency: latencyRegression !== null && latencyRegression <= -(finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1)
+  };
+  // Some evaluations must not let a metric justify promotion even though that
+  // metric still guards against regression. Style-profile评测 is the case that
+  // needs this: AIQA reads the style profile, so letting a new style profile
+  // win on QA score would be self-scoring. Restricting the whitelist keeps the
+  // qa_score gate as a guard while forcing the gain to come from elsewhere.
+  const allowedGainKeys = Array.isArray(guardrails.materialGainMetrics) && guardrails.materialGainMetrics.length
+    ? guardrails.materialGainMetrics.filter((key) => Object.hasOwn(materialGains, key))
+    : Object.keys(materialGains);
+  const achieved = allowedGainKeys.filter((key) => materialGains[key]);
+  const materialImprovement = achieved.length > 0;
+  const restricted = allowedGainKeys.length < Object.keys(materialGains).length;
+  result.materialGains = materialGains;
   result.gates.push(gate("material_gain", "至少有一项实质收益", "promotion", materialImprovement,
-    materialImprovement ? "质量或效率达到最小改进幅度" : "与 Champion 持平，尚无晋升价值"));
+    materialImprovement
+      ? `质量或效率达到最小改进幅度（${achieved.join("、")}）`
+      : `与 Champion 持平，尚无晋升价值${restricted ? `（本次只认可 ${allowedGainKeys.join("、")}）` : ""}`));
 
   result.promotable = result.gates.every((item) => item.passed);
   result.status = result.promotable ? "promote" : "reject";

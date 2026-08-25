@@ -141,3 +141,49 @@ export function buildKnownIssueFeedbackRequest(knownIssues = [], additionalReque
   const note = cleanText(additionalRequest, 2_000);
   return [knownBlock, note ? `补充要求：${note}` : ""].filter(Boolean).join("\n").slice(0, 2_000);
 }
+
+/**
+ * Turn an adopted colleague feedback into one style-evidence record.
+ *
+ * Two very different cases hide behind the same "采纳" button:
+ *   - the reviewer supplied a rewrite → the current translation is the machine
+ *     draft and the rewrite is the approved target; the diff is the style signal
+ *   - the reviewer only objected → there is NO approved translation yet, and the
+ *     text on screen is precisely what was rejected. Recording it as a positive
+ *     example would teach the model the very writing the reviewer refused, so it
+ *     is stored as a counter-example carrying the stated reason instead.
+ */
+export function buildAdoptedStyleEvidence({ share = {}, feedback = {}, segment = null } = {}) {
+  const currentTranslation = cleanText(segment?.translation, 4_000);
+  const suggested = cleanText(feedback.suggestedTranslation, 4_000);
+  const source = cleanText(segment?.source, 4_000);
+  const revised = Boolean(suggested) && suggested !== currentTranslation;
+  if (suggested) {
+    return {
+      locale: share.locale,
+      contentType: share.contentType,
+      domain: share.domain,
+      source,
+      target: suggested,
+      machineTranslation: revised ? currentTranslation : "",
+      polarity: "positive",
+      note: "",
+      batchId: share.batchId,
+      provenance: "human-accept",
+      status: "accepted"
+    };
+  }
+  return {
+    locale: share.locale,
+    contentType: share.contentType,
+    domain: share.domain,
+    source,
+    target: currentTranslation,
+    machineTranslation: "",
+    polarity: "negative",
+    note: cleanText(feedback.request, 800),
+    batchId: share.batchId,
+    provenance: "colleague-reject",
+    status: "accepted"
+  };
+}

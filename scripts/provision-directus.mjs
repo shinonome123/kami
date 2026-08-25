@@ -335,8 +335,9 @@ const definitions = [
       textField("generated_by", "生成模型", { width: "half", sort: 12 }),
       textField("source_batch_id", "来源导入批次 ID", { width: "half", sort: 13 }),
       textField("learning_run_id", "风格学习记录 ID", { width: "half", sort: 14 }),
-      selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 13 }),
-      dateField("date_updated", "更新时间", "date-updated", 14)
+      jsonField("evaluation", "评测结论", { note: "本草稿与当前生效版本在人工终稿留出集上的配对评测结果；未评测为空。", sort: 15 }),
+      selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 16 }),
+      dateField("date_updated", "更新时间", "date-updated", 17)
     ]
   },
   ...Object.values(memoryCollections).map(({ key, label: collectionLabel }, index) => ({
@@ -364,13 +365,16 @@ const definitions = [
       textField("domain", "业务领域", { width: "half", sort: 4 }),
       textField("source", "简体中文原文", { required: true, multiline: true, sort: 5 }),
       textField("target", "目标语言译文", { required: true, multiline: true, sort: 6 }),
-      textField("source_file", "来源文件", { width: "half", sort: 7 }),
-      { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 8, translations: label("来源行号") }, schema: { is_nullable: true } },
-      textField("batch_id", "来源导入批次 ID", { width: "half", sort: 9 }),
-      selectField("status", "状态", [["可用", "accepted"], ["待复核", "pending"], ["已拒绝", "rejected"]], { defaultValue: "pending", sort: 9 }),
-      textField("provenance", "来源", { width: "half", sort: 10 }),
-      jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 11 }),
-      dateField("date_created", "创建时间", "date-created", 12)
+      textField("machine_translation", "被替换的机器译文", { multiline: true, sort: 7, note: "人工改写前的机器初稿；与 target 的差异就是风格信号。表格导入的既有对照没有这一项。" }),
+      selectField("polarity", "证据极性", [["正例", "positive"], ["反例", "negative"]], { defaultValue: "positive", width: "half", sort: 8 }),
+      textField("note", "备注 / 否决理由", { multiline: true, sort: 9, note: "反例记录同事为什么否决这条译文。" }),
+      textField("source_file", "来源文件", { width: "half", sort: 10 }),
+      { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 11, translations: label("来源行号") }, schema: { is_nullable: true } },
+      textField("batch_id", "来源导入批次 ID", { width: "half", sort: 12 }),
+      selectField("status", "状态", [["可用", "accepted"], ["待复核", "pending"], ["已拒绝", "rejected"]], { defaultValue: "pending", sort: 13 }),
+      textField("provenance", "来源", { width: "half", sort: 14 }),
+      jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 15 }),
+      dateField("date_created", "创建时间", "date-created", 16)
     ]
   },
   {

@@ -41,6 +41,14 @@ const server = http.createServer(async (req, res) => {
     ] }] })
     : prompt.includes("术语表结构分析器")
     ? JSON.stringify({ sheets: [{ sheet: "Terms", headerRow: null, sourceColumn: 1, targetColumns: { "ja-JP": 2 }, confidence: 0.96, reason: "两列逐行中日对照" }] })
+    : prompt.includes("演进复盘员")
+    // domain "review-patch" 专用于覆盖 stylePatch 分支；其余作用域回落到非 JSON 输出，
+    // 让复盘模型不可用时的降级路径继续被测到。
+    ? (prompt.includes('"domain":"review-patch"')
+      ? JSON.stringify({ stylePatch: { instructions: "补充规则：CTA 保留原句式，不追加语气助词。", examples: [{ type: "negative", source: "立即参与！", target: "今すぐ参加してくださいね。", reason: "语气助词削弱号召力" }] }, trend: [{ category: "风格", observation: "CTA 语气偏软", count: 3 }], reason: "复盘发现 CTA 语气趋势" })
+      : "复盘模型暂时不可用")
+    : prompt.includes("译者画像编辑")
+    ? JSON.stringify({ name: "译者画像", instructions: "偏好短句、口语化收尾，避免书面腔。", examples: [{ type: "positive", source: "先走一步了", target: "お先に失礼！", reason: "客套话用目标语言固定表达" }] })
     : prompt.includes("风格资产编辑")
     ? JSON.stringify({ name: "日语宣发风格", instructions: "使用自然、克制且具有期待感的敬体；保留事实、日期和 CTA。", examples: [{ type: "positive", source: "活动现已开启。", target: "イベントが開始しました。", reason: "自然敬体" }] })
     : prompt.includes("独立于翻译器")

@@ -99,7 +99,25 @@
 | 2026-08-14 | 7 | 翻译质量改进（韵文通道）：本地化优先提示词规则、`detectRhymeLike` 韵律结构检测（3+3+7/4+4+7/三连重复）注入 Context Pack、韵文专用再创作通道（高温度 + 示范样例）、AIQA 与修订提示词增加韵律/翻译腔维度、提示词版本升 v2；4 项新测试。**实测定论**：当前模型（中转站 `A-fzl-claude-sonnet-4-6`）即使在专用通道下仍输出字对字直译，模型能力是当前质量瓶颈；该中转站账号组仅此一个可用模型（其余全部 `model_not_found`），建议更换服务商，韵文通道在强模型上会自动生效 | 已实施并提交（`e8d498e`） |
 | 2026-08-14 | 8 | 批次排比一致性（同批上下文锚定）：新增 `src/batch-verse.mjs`（`verseShape` 短句+长句句式识别、`detectBatchVerse` 严格过半数的批次排比检测、`normalizeBatchReferences` 锚点清洗），服务端按 batchId 自动检测排比模板，客户端顺序翻译时携带本批已定稿译文（最多 3 条）作为风格锚点，提示词/AIQA/自检增加同批句式一致性要求，排比批次走高温度初译；4 项新测试。解决了"同一批诗句各行格式不一致"的问题 | 已实施并提交（`214917c`） |
 | 2026-08-14 | 9 | 创译重构（根治直译倾向）：提示词从"译者+严格"重构为"本地化写手+信息保真"框架（"换一种地道表达不等于漏译增译"），`config.mjs` 增加日/韩/繁中三语直译 vs 地道示范对（注入提示词），普通文本温度 0.25→0.6，AIQA 明确"地道改写不算问题、翻译腔记 major"，修订环节禁止退回直译，提示词版本升 v3。**实测**（DeepSeek 官方 deepseek-v4-pro）：肝就完了→根性で乗り切れ！、这波稳了→この流れはもらったな。、皮肤上线→新登場の限定スキンが只今配信中！——口语/营销类创译显著改善；"走走走"韵文仍为直译，属该模型韵文创作能力的硬上限，建议人工采纳或更强模型 | 已实施，待提交 |
+| 2026-08-25 | 10 | 风格蒸馏去重与防抖（`src/style-distill-gate.mjs`）：修复分享反馈采纳时 `distillStyleProfileIfReady` 之后又调一次 `saveStyleProfile` 导致每次采纳生成两个重复草稿的 bug（`saveStyleProfile` 每次都新建记录，不是 upsert）；蒸馏前新增闸门——同作用域存在待审草稿则不蒸馏，上次蒸馏后证据池须再新增满增长窗口（默认 8，`KAMI_STYLE_DISTILL_THRESHOLD` / `KAMI_STYLE_DISTILL_GROWTH_WINDOW`）；`runEvolutionReview` 的 stylePatch 分支原先绕过所有阈值、每个完成批次都落一版草稿，现已并入同一闸门；`listStyleProfiles` 增加作用域过滤参数，避免 Directus 50 行分页把年轻作用域的草稿挤掉导致误判「无待审草稿」；前端按跳过原因区分展示进度（阈值 / 待审草稿 / 增量不足）。16 项新测试 | 已实施，待提交 |
+| 2026-08-25 | 11 | 改动式风格学习与反例入池（`src/style-delta.mjs`）：风格证据新增 `machineTranslation` / `polarity` / `note` 三字段，人工采纳时从**轨迹**（而非客户端提交）取回被替换的机器初稿，蒸馏改为按 `revised`（有改动，携带 machineDraft）/ `confirmed`（原样采纳）/ `imported`（外部导入）三类排序取样，改写证据优先占用样本额度；风格与画像两个蒸馏提示词都改写为"读 diff 归纳规则"。**修复一处实际 bug**：同事在分享页只提问题、未给改写译法时，`server.mjs` 把被否决的当前译文当作正例写进风格证据池，等于教模型复制同事刚刚否掉的写法——现改为按反例入库并保留否决理由，判定逻辑提取为 `buildAdoptedStyleEvidence` 便于测试。译者画像与 Auto QA 参考证据统一经 `positiveEvidenceOnly` 过滤，反例不会被当成标准答案。20 项新测试 | 已实施，待提交 |
+| 2026-08-25 | 12 | 风格草稿配对评测（`src/style-benchmark.mjs`）：`style_profiles` 首次进入晋升门禁。`benchmarkTranslationSkill` 增加 `styleProfileOverride` 与 `qaStyleProfile` 两个入口，使风格规范成为配对评测中的自变量；**AIQA 两侧一律使用当前生效版本打分**，否则草稿会用自己的尺子给自己判卷，`qa_score` 门禁将自我实现。`learning-engine` 新增 `guardrails.materialGainMetrics` 白名单，风格评测只认 `humanEditDistance` / `mandatoryTerms` / `hardErrors` 作为晋升理由（QA 分与合成接受率降为纯回归护栏），编辑距离最小收益提高到 0.01。`evaluation-jobs` 参数化 `kind` 与 `guardrails`，同一队列可承载两类评测且互不抢检查点；`deps.getSkill` 增加 scope 参数（风格规范按作用域寻址）。留出集在技能规则之上再排除蒸馏用过的原文——`isSelfDerived` 的 0.95 阈值对短句欠捕获（10 字句加一个句号只有 0.909），故额外用去标点同形做兜底。新增 `POST /api/style-profiles/:id/evaluate`、评测任务轮询接口与 `findStyleProfile` 存储原语；激活在评测结论反对时返回 409，强行启用记 `activationBasis: forced`，未评测记 `unevaluated`。19 项新测试（含 mock 模型下的中立裁判验证）与真实服务端 E2E 冒烟 | 已实施，待提交 |
 
-## 8. 结论
+## 8. 风格链路的结构性缺口（2026-08-25 复查）
+
+> 状态更新（2026-08-25）：下列第 1、3 条已由施工日志第 11、12 条实施，第 2、4、5、6 条仍然成立。
+
+1. ✅ **风格规范从不参与 A/B**（已实施，见施工日志 12）：`skill-benchmark.mjs` 中 champion 与 challenger 都调用同一个 `getStyleProfile()`，风格在评测里是常量而非自变量。第 3 节那套晋升门禁保护的是 `translation_skills`（检索条数、附加指令、QA 阈值），完全不覆盖 `style_profiles`——即真正承载风格的对象。激活风格草稿 = 人看两段散文 + 点按钮，无预演、无回归、无回滚信号。
+2. **回溯数据已存但从未读取**：`styleProfileId` 已写入 qa_runs、memories、learning_trajectories，全代码库没有一处按它读回。"v3 时期平均 QA 91，v4 之后 88" 这类回溯对比的原料是齐的，缺的只是聚合查询。这是成本最低的一步。
+3. ✅ **只学正例，不学改动**（已实施，见施工日志 11）：风格证据只有 `table-import` 和 `human-accept` 两种来源，`sampleEvidence()` 只把 `{source, target}` 交给蒸馏模型。人工把机器译文 A 改成 B 时 A 被丢弃，而 (A→B) 的差异才是风格信号本身。trajectory 里存了 `initialTranslation` / `finalTranslation`，蒸馏路径不读。同事"忽略"的建议同样只留档不入池。
+4. **滚动重写导致风格失忆**：每次蒸馏都是模型拿最近 30 条证据全量重写 instruction，没有 rule id、没有每条规则的命中/违反计数、没有规则生命周期。早期学到的规则会随窗口滚动静默消失，`previousProfile` 只是提示而非约束。
+5. **风格证据向量化了却按时间检索**：写入时调用 `embedSource`，Auto QA 取用时是 `getStyleEvidence(..., { limit: 6 })` 取最近 6 条，不带 queryEmbedding 排序；memories 与 qaCases 都有 rank 函数，style evidence 没有。
+6. **作用域爆炸**：风格作用域 4 语言 × 9 语体 × 4 领域 = 144 格，每格需 8 条同域证据，多数格子长期填不满，实际生效的是 `CONTENT_TYPES` 里的硬编码 register。
+
+剩余顺序建议：(4) 规则级生命周期是下一个最有价值的改动——现在的蒸馏仍是模型拿最近 30 条证据全量重写，规则没有 id、没有命中计数，早期规则会随窗口滚动静默消失；(2) 的回溯对比（按 `styleProfileId` 聚合 qa_runs）成本很低，可以顺手做掉；(5) 风格证据向量检索与 (6) 作用域稀疏属于长期问题。
+
+配对评测已经让风格改动**可被证伪**，但要真正"按风格进化"，还缺规则级的增删存续——现在能证明"这一版整体更好"，还不能证明"哪一条规则在起作用"。
+
+## 9. 结论
 
 当前版本是"正确性优先、设计诚实、但进化被泄漏数据钉死"的保守系统，实际效果等于"带审计的固定提示词 + 检索增强"。要真正实现自进化，必须先解决 4.1（clean-room 评测），否则所有后续改进都无法被评测系统认可。

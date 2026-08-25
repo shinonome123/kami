@@ -277,6 +277,9 @@ export async function saveDirectusStyleEvidence(input) {
     batch_id: input.batchId || "",
     status: input.status || "accepted",
     provenance: input.provenance || "",
+    machine_translation: String(input.machineTranslation || "").trim(),
+    polarity: input.polarity === "negative" ? "negative" : "positive",
+    note: String(input.note || "").trim(),
     ...(embedding ? { embedding } : {})
   } });
   return { id: saved.id, ...input };
@@ -284,7 +287,7 @@ export async function saveDirectusStyleEvidence(input) {
 
 export async function getDirectusStyleEvidence(locale, options = {}) {
   assertLocale(locale);
-  const params = new URLSearchParams({ limit: String(Math.min(1000, options.limit || 1000)), sort: "-date_created", fields: "id,target_locale,content_type,domain,source,target,source_file,source_row,batch_id,status,provenance,embedding,date_created" });
+  const params = new URLSearchParams({ limit: String(Math.min(1000, options.limit || 1000)), sort: "-date_created", fields: "id,target_locale,content_type,domain,source,target,machine_translation,polarity,note,source_file,source_row,batch_id,status,provenance,embedding,date_created" });
   params.set("filter[target_locale][_eq]", locale);
   if (options.contentType) params.set("filter[content_type][_eq]", options.contentType);
   if (options.exactScope && options.domain) params.set("filter[domain][_eq]", options.domain);
@@ -297,6 +300,9 @@ export async function getDirectusStyleEvidence(locale, options = {}) {
     .map((item) => ({
       id: item.id, locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
       source: item.source, target: item.target, sourceFile: item.source_file || "", sourceRow: Number(item.source_row) || null,
+      machineTranslation: item.machine_translation || "",
+      polarity: item.polarity === "negative" ? "negative" : "positive",
+      note: item.note || "",
       batchId: item.batch_id || "",
       status: item.status || "accepted", provenance: item.provenance || "",
       embedding: item.embedding || null, createdAt: item.date_created
@@ -1025,11 +1031,44 @@ export async function deleteDirectusBackgroundTask(id) {
   }
 }
 
-export async function listDirectusStyleProfiles(locale, status) {
+export async function findDirectusStyleProfile(id) {
+  const fields = "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated";
+  const shape = (item, kind) => ({
+    id: item.id, name: item.name, locale: item.target_locale,
+    contentType: item.content_type || "", domain: item.domain || "general",
+    instruction: item.instructions, examples: arrayValue(item.examples),
+    version: Number(item.version) || 1, parentId: item.parent_id || null,
+    evidenceCount: Number(item.evidence_count) || 0, evaluation: item.evaluation || null,
+    status: item.status, kind, updatedAt: item.date_updated
+  });
+  try {
+    const item = await request(`/items/style_profiles/${encodeURIComponent(id)}?fields=${fields}`);
+    if (item) return shape(item, "style");
+  } catch { /* 不是风格规范就继续找译者画像 */ }
+  try {
+    const item = await request(`/items/user_profiles/${encodeURIComponent(id)}?fields=id,name,target_locale,instructions,examples,version,parent_id,evidence_count,status,date_updated`);
+    if (item) return shape(item, "user_profile");
+  } catch { /* 两张表都没有就是不存在 */ }
+  return null;
+}
+
+export async function saveDirectusStyleProfileEvaluation(id, evaluation) {
+  const saved = await request(`/items/style_profiles/${encodeURIComponent(id)}`, { method: "PATCH", body: { evaluation } });
+  return saved ? { id: saved.id, evaluation: saved.evaluation ?? evaluation } : null;
+}
+
+export async function listDirectusStyleProfiles(locale, status, scope = null) {
   assertLocale(locale);
-  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,status,date_updated" });
+  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
   styleParams.set("filter[target_locale][_eq]", locale);
   if (status) styleParams.set("filter[status][_eq]", status);
+  if (scope?.contentType) {
+    // Without this the shared 50-row page is sorted by version across all
+    // scopes, so a young scope's draft can fall off the end and the distill
+    // gate would mistake it for "no draft pending".
+    styleParams.set("filter[content_type][_eq]", scope.contentType);
+    styleParams.set("filter[domain][_eq]", scope.domain || "general");
+  }
   const styleProfiles = await request(`/items/style_profiles?${styleParams}`);
   const profileParams = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,instructions,examples,version,parent_id,evidence_count,status,date_updated" });
   profileParams.set("filter[target_locale][_eq]", locale);
@@ -1041,6 +1080,7 @@ export async function listDirectusStyleProfiles(locale, status) {
       instruction: item.instructions, examples: arrayValue(item.examples), version: Number(item.version) || 1,
       parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0,
       sourceBatchId: item.source_batch_id || "", learningRunId: item.learning_run_id || "",
+      evaluation: item.evaluation || null,
       status: item.status, updatedAt: item.date_updated
     })),
     userProfiles: userProfiles.map((item) => ({

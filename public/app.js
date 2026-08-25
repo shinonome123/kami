@@ -1058,7 +1058,7 @@ async function runBatch() {
       }) });
       const parts = [];
       if (review.distilled) parts.push(`已生成风格规范草稿 v${review.distilled.version}`);
-      else if (review.distillPending) parts.push(`风格证据 ${review.distillPending.evidenceCount}/${review.distillPending.threshold}`);
+      else if (review.distillPending) parts.push(`风格证据 ${styleDistillProgress(review.distillPending)}`);
       if (review.profile) parts.push(`已生成译者画像草稿 v${review.profile.version}`);
       else if (review.profilePending) parts.push(`画像证据 ${review.profilePending.acceptedCount}/${review.profilePending.threshold}`);
       if (review.review?.trend?.length) parts.push(`复盘发现 ${review.review.trend.length} 类问题趋势`);
@@ -1695,8 +1695,43 @@ async function loadStyleProfiles(locale) {
   }
 }
 
+/** 蒸馏跳过原因决定进度怎么读：阈值看总量，增长窗口看增量，待审草稿没有进度可言。 */
+function styleDistillProgress(pending = {}) {
+  if (pending.skipped === "pending_draft") return "待审核草稿";
+  if (pending.skipped === "growth_window") return `新增 ${pending.sinceLastDistill ?? 0}/${pending.growthWindow}`;
+  if (Number.isFinite(Number(pending.evidenceCount)) && Number.isFinite(Number(pending.threshold))) {
+    return `${pending.evidenceCount}/${pending.threshold}`;
+  }
+  return String(pending.reason || "暂不蒸馏");
+}
+
 function contentTypeLabel(value) {
   return state.bootstrap?.contentTypes?.[value]?.label || value;
+}
+
+/**
+ * 草稿卡片上的评测状态。译者画像不在配对评测覆盖范围内，单独标注，
+ * 免得看起来像"漏评"。
+ */
+function styleEvaluationState(item) {
+  if (item.kind !== "style") return { tone: "neutral", label: "译者画像暂不参与配对评测，按人工判断启用" };
+  const evaluation = item.evaluation;
+  if (!evaluation || !evaluation.evaluatedAt) return { tone: "warn", label: "尚未评测：直接启用属于凭感觉改风格，建议先跑一次配对评测" };
+  const sample = `${evaluation.sampleCount ?? 0} 组留出对照`;
+  if (evaluation.promotable === true) return { tone: "pass", label: `评测通过 · ${sample} · ${evaluation.conclusion || "达到晋升门槛"}` };
+  return { tone: "fail", label: `评测未通过 · ${sample} · ${evaluation.conclusion || "未达晋升门槛"}` };
+}
+
+async function pollStyleEvaluation(jobId) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    let job;
+    try { job = await api(`/api/style-profiles/evaluation-jobs/${encodeURIComponent(jobId)}`); }
+    catch { return null; }
+    if (["completed", "failed", "interrupted"].includes(job.status)) return job;
+    $("#styleProfileCount").textContent = `评测中 ${job.progress.completed}/${job.progress.requested}`;
+  }
+  return null;
 }
 
 function renderStyleProfiles(drafts, active, pending) {
@@ -1718,8 +1753,10 @@ function renderStyleProfiles(drafts, active, pending) {
       <div class="style-profile-head"><strong>v${item.version} · ${escapeHtml(item.name)}</strong><span>${escapeHtml(item.kindLabel)} · ${item.evidenceCount} 条证据${item.status === "draft" ? " · 草稿" : ""}</span></div>
       <div class="style-profile-instruction">${escapeHtml(item.instruction)}</div>
       <div class="style-profile-diff" hidden><div><strong>当前生效版本</strong><p>${escapeHtml(item.previous?.instruction || "无（首个版本）")}</p></div><div><strong>本草稿</strong><p>${escapeHtml(item.instruction)}</p></div></div>
+      <div class="style-profile-evaluation ${escapeHtml(styleEvaluationState(item).tone)}">${escapeHtml(styleEvaluationState(item).label)}</div>
       <div class="style-profile-actions">
         <button class="button ghost small" data-action="diff">对比新旧</button>
+        ${item.kind === "style" ? '<button class="button ghost small" data-action="evaluate">评测</button>' : ""}
         <button class="button ghost small" data-action="activate">激活</button>
         <button class="button ghost small" data-action="reject">拒绝</button>
       </div>
@@ -1740,11 +1777,39 @@ function renderStyleProfiles(drafts, active, pending) {
       card.querySelector(".style-profile-diff").hidden = !card.querySelector(".style-profile-diff").hidden;
       return;
     }
+    if (button.dataset.action === "evaluate") {
+      button.disabled = true;
+      try {
+        const job = await api(`/api/style-profiles/${encodeURIComponent(id)}/evaluate`, { method: "POST", body: JSON.stringify({ project: "default" }) });
+        toast(`风格评测已进入后台：${job.progress.requested} 组留出对照，只有风格规范一个变量`);
+        const finished = await pollStyleEvaluation(job.jobId);
+        if (finished?.status === "completed") toast(finished.result?.report?.conclusion || "风格评测完成");
+        else if (finished) toast(`风格评测未完成：${finished.error || finished.status}`);
+      } catch (error) { toast(error.message); }
+      finally {
+        button.disabled = false;
+        await loadStyleProfiles(state.assetLocale);
+      }
+      return;
+    }
     try {
-      await api(`/api/style-profiles/${encodeURIComponent(id)}/${button.dataset.action}`, { method: "POST" });
+      await api(`/api/style-profiles/${encodeURIComponent(id)}/${button.dataset.action}`, { method: "POST", body: JSON.stringify({}) });
       toast(button.dataset.action === "activate" ? "已激活，开始参与翻译" : "已拒绝该草稿");
       await loadStyleProfiles(state.assetLocale);
-    } catch (error) { toast(error.message); }
+    } catch (error) {
+      // 评测结论反对时后端返回 409；越过闸门必须是一次明确的人工决定，并会被记录。
+      if (button.dataset.action === "activate" && /评测结论不支持启用/.test(error.message) && confirm(`${error.message}
+
+仍要启用吗？本次越过评测闸门会记录在该风格规范上。`)) {
+        try {
+          await api(`/api/style-profiles/${encodeURIComponent(id)}/activate`, { method: "POST", body: JSON.stringify({ force: true }) });
+          toast("已忽略评测结论并启用，该决定已记录");
+          await loadStyleProfiles(state.assetLocale);
+          return;
+        } catch (forceError) { toast(forceError.message); return; }
+      }
+      toast(error.message);
+    }
   }));
   $$(".qa-case-row [data-action]").forEach((button) => button.addEventListener("click", async () => {
     const id = button.closest(".qa-case-row").dataset.caseId;
@@ -2632,7 +2697,7 @@ async function commitImport() {
     });
     state.importBatchLearning = learningRunsFromPayload(result, { includeProfileFallback: true });
     renderImportBatchLearning();
-    const pendingStyles = (result.styleFallbacks || []).slice(0, 4).map((item) => `${state.bootstrap.locales[item.locale]?.shortLabel || item.locale} ${contentTypeLabel(item.contentType)} ${item.evidenceCount}/${item.threshold}`).join("；");
+    const pendingStyles = (result.styleFallbacks || []).slice(0, 4).map((item) => `${state.bootstrap.locales[item.locale]?.shortLabel || item.locale} ${contentTypeLabel(item.contentType)} ${styleDistillProgress(item)}`).join("；");
     const learnedText = state.importBatchLearning.length ? `本批已形成 ${state.importBatchLearning.length} 个风格学习范围，具体内容见下方。` : "本批没有生成可展示的风格学习结果。";
     $("#mappingNote").textContent = `批次已完成：写入术语 ${result.summary.terms || 0} 条、完整译例 / 风格证据 ${result.summary.memories || 0} 条、生成风格草稿 ${result.summary.styleProfiles || 0} 个，跳过 ${result.skipped.length} 条。${learnedText}${pendingStyles ? ` 尚在积累：${pendingStyles}。` : ""}所有资产均按目标语言与自动识别语体隔离。`;
     renderImportCandidates();

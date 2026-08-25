@@ -375,14 +375,28 @@ export async function analyzeTermTableStructureWithModel(snapshot, requestedLoca
   return payload;
 }
 
-export async function distillStyleProfileWithModel({ locale, contentType, domain, examples, previousProfile = null }) {
+export async function distillStyleProfileWithModel({ locale, contentType, domain, examples, counterExamples = [], previousProfile = null }) {
   const language = LOCALE_NAMES[locale] || locale;
   const content = await chat([
     {
       role: "system",
-      content: `你是${language}游戏本地化风格资产编辑。请只根据给定的已对齐中外文证据，为“${contentType}”这一种内容语体提炼稳定、可执行的风格规范。不得混入其他语体，不得编造作品设定。规则应覆盖语气、句式、称谓、标点、信息顺序、长度倾向、禁用表达，并提供简短正反例。输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
+      content: `你是${language}游戏本地化风格资产编辑。请只根据给定的已对齐中外文证据，为“${contentType}”这一种内容语体提炼稳定、可执行的风格规范。不得混入其他语体，不得编造作品设定。规则应覆盖语气、句式、称谓、标点、信息顺序、长度倾向、禁用表达，并提供简短正反例。
+`
+        + `证据分三类，信息量不同，请区别对待：
+`
+        + `1. change="revised"：machineDraft 是机器初稿，target 是人工改写后的定稿。**两者的差异就是这个团队的风格偏好本身**，请逐条读出人改了什么（语气/长度/称谓/句式/标点/用词），并归纳成可复用的规则；machineDraft 一律视为不合格写法，可直接用作反例。
+`
+        + `2. change="confirmed"：人工原样采纳了机器译文，说明该写法已达标，可作正例但不携带改动信息。
+`
+        + `3. change="imported"：外部导入的既有对照，没有经过本项目审校，权重最低。
+`
+        + `counterExamples 是同事明确否决但尚未给出改写的译文，只能当反例，绝不可作为 target 复用。
+`
+        + `revised 与 counterExamples 应当主导规则；如果两者都很少，请在 instructions 中说明证据以既有对照为主、规则置信度有限。
+`
+        + `输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
     },
-    { role: "user", content: JSON.stringify({ locale, contentType, domain, previousProfile, examples: examples.slice(0, 30) }) }
+    { role: "user", content: JSON.stringify({ locale, contentType, domain, previousProfile, examples: examples.slice(0, 30), counterExamples: (counterExamples || []).slice(0, 10) }) }
   ]);
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("风格精炼模型未返回 JSON");
@@ -457,7 +471,11 @@ export async function distillUserProfileWithModel({ locale, examples }) {
   const content = await chat([
     {
       role: "system",
-      content: `你是${language}游戏本地化译者画像编辑。请只根据人工采纳的中外文证据，提炼该团队/译者对${language}的全局翻译偏好。只提炼跨语体稳定的习惯：称谓与敬体选择、句尾语气、长度倾向、标点习惯、数字与格式处理、禁用表达，并提供简短正反例。不得把某个语体的临时风格当成全局偏好。输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
+      content: `你是${language}游戏本地化译者画像编辑。请只根据人工采纳的中外文证据，提炼该团队/译者对${language}的全局翻译偏好。只提炼跨语体稳定的习惯：称谓与敬体选择、句尾语气、长度倾向、标点习惯、数字与格式处理、禁用表达，并提供简短正反例。不得把某个语体的临时风格当成全局偏好。
+`
+        + `带 change="revised" 的证据里，machineDraft 是机器初稿、target 是人工定稿，**反复出现的同类改动才是这位译者的稳定习惯**；只在某一条里出现一次的改动不要写成规则。change="confirmed" 表示原样采纳，只说明达标。
+`
+        + `输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
     },
     { role: "user", content: JSON.stringify({ locale, examples: examples.slice(0, 30) }) }
   ]);

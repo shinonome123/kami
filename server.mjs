@@ -13,7 +13,7 @@ import { adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSug
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, createStructuralAlignmentScorer, dedupeIssues, normalizeQaInputText, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { rankQaCases, rankTranslationMemories } from "./src/translation-memory.mjs";
@@ -25,9 +25,11 @@ import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
 import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
 import { detectBatchVerse } from "./src/batch-verse.mjs";
 import { createAutoProposer } from "./src/auto-proposal.mjs";
+import { classifyChange, isNegativeEvidence, positiveEvidenceOnly } from "./src/style-delta.mjs";
+import { NO_STYLE_PROFILE_ID, STYLE_MIN_EVALUATION_SAMPLES, STYLE_PROMOTION_GUARDRAILS, benchmarkStyleVariant, selectStyleHoldout, styleVariant, validateStylePromotionState } from "./src/style-benchmark.mjs";
 import { proposeChallengerSkill, selectProposalTrajectories } from "./src/skill-proposal.mjs";
 import { finalizeShareGlossGeneration } from "./src/share-gloss.mjs";
-import { buildKnownIssueFeedbackRequest, presentKnownIssue, selectKnownIssues } from "./src/share-feedback.mjs";
+import { buildAdoptedStyleEvidence, buildKnownIssueFeedbackRequest, presentKnownIssue, selectKnownIssues } from "./src/share-feedback.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
@@ -670,7 +672,7 @@ async function commitTermImport(body, onProgress = null) {
       styleFallbacks.push({ locale, contentType, domain, stage: "batch-learning", reason: `本批风格浓缩失败：${error.message}` });
     }
     try {
-      const { distilled, evidenceCount, threshold } = await distillStyleProfileIfReady({
+      const { distilled, ...pending } = await distillStyleProfileIfReady({
         locale,
         contentType,
         domain,
@@ -685,7 +687,7 @@ async function commitTermImport(body, onProgress = null) {
           if (index >= 0) batchLearning[index] = promoted;
         }
       }
-      else styleFallbacks.push({ locale, contentType, domain, evidenceCount, threshold, reason: `风格证据累计 ${evidenceCount} 条，未达 ${threshold} 条蒸馏阈值，继续累积` });
+      else styleFallbacks.push({ locale, contentType, domain, ...pending });
     } catch (error) {
       styleFallbacks.push({ locale, contentType, domain, reason: error.message });
     }
@@ -877,8 +879,14 @@ async function apiHandler(req, res, url) {
       sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
     });
     const demoted = await demoteMemories(locale, source, memory.id);
+    // 机器初稿只从轨迹取，不接受客户端提交：与终稿的差异是风格信号本身，
+    // 必须来自服务端记录的那一版，否则蒸馏学到的是可以被伪造的"改动"。
+    const machineTranslation = linkedTrajectory
+      ? String(linkedTrajectory.finalTranslation || linkedTrajectory.initialTranslation || "").trim()
+      : "";
     const evidence = await saveStyleEvidence({
       locale, source, target: translation, contentType, domain,
+      machineTranslation, polarity: "positive",
       status: "accepted", provenance: "human-accept",
       sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
     });
@@ -916,16 +924,19 @@ async function apiHandler(req, res, url) {
       const key = `${contentType || "general"}\u0000${domain || "general"}`;
       if (!pools.has(key)) pools.set(key, {
         contentType: contentType || "general", domain: domain || "general", evidenceCount: 0,
-        threshold: DISTILL_THRESHOLD, sources: { tableImport: 0, humanAccept: 0, qaReview: 0, other: 0 }
+        threshold: DISTILL_THRESHOLD, sources: { tableImport: 0, humanAccept: 0, qaReview: 0, revised: 0, negative: 0, other: 0 }
       });
       return pools.get(key);
     };
     for (const item of evidence) {
       const pool = ensurePool(item.contentType, item.domain);
       pool.evidenceCount += 1;
-      if (item.provenance === "table-import" || (!item.provenance && item.sourceFile)) pool.sources.tableImport += 1;
+      if (isNegativeEvidence(item)) pool.sources.negative += 1;
+      else if (item.provenance === "table-import" || (!item.provenance && item.sourceFile)) pool.sources.tableImport += 1;
       else if (item.provenance === "human-accept") pool.sources.humanAccept += 1;
       else pool.sources.other += 1;
+      // 改写证据带着机器初稿，是信息量最高的一类，单独计数便于判断这个池子够不够"有话可说"。
+      if (!isNegativeEvidence(item) && classifyChange(item) === "revised") pool.sources.revised += 1;
     }
     for (const item of qaRuns) ensurePool(item.contentType, item.domain).sources.qaReview += 1;
     return json(res, 200, {
@@ -934,13 +945,82 @@ async function apiHandler(req, res, url) {
       evidencePools: [...pools.values()].sort((a, b) => b.evidenceCount - a.evidenceCount)
     });
   }
+  if (req.method === "GET" && url.pathname.startsWith("/api/style-profiles/evaluation-jobs/")) {
+    const jobId = decodeURIComponent(url.pathname.slice("/api/style-profiles/evaluation-jobs/".length));
+    const job = styleEvaluationJobs.get(jobId);
+    if (!job) {
+      const error = new Error("未找到该风格评测任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, job);
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/style-profiles/") && url.pathname.endsWith("/evaluate")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/style-profiles/".length, -"/evaluate".length));
+    const body = await readJsonBody(req);
+    const draft = await findStyleProfile(id);
+    if (!draft || !draft.contentType) {
+      const error = new Error("未找到该风格草稿");
+      error.statusCode = 404;
+      throw error;
+    }
+    const scope = learningScope({
+      locale: draft.locale,
+      contentType: draft.contentType,
+      domain: draft.domain || "general",
+      project: body.project || "default"
+    });
+    const activeProfile = await getStyleProfile(scope.locale, scope.contentType, scope.domain);
+    const state = validateStylePromotionState({ draft, activeProfile });
+    if (!state.valid) {
+      const error = new Error(state.reasons.join("；"));
+      error.statusCode = 409;
+      throw error;
+    }
+    const running = styleEvaluationJobs.findActiveForChallenger(id);
+    if (running) return json(res, 200, running);
+
+    // 草稿是从这些原文蒸馏出来的，留出集必须把它们排除，否则评测的是背诵而不是泛化。
+    const evidenceIds = new Set((draft.evidenceIds || []).map(String));
+    const distilledFromSources = evidenceIds.size
+      ? (await getStyleEvidence(scope.locale, { contentType: scope.contentType, domain: scope.domain, exactScope: true, limit: 1_000 }))
+        .filter((item) => evidenceIds.has(String(item.id))).map((item) => item.source)
+      : [];
+    const holdout = selectStyleHoldout(await listLearningTrajectories({ ...scope, limit: 500 }), { scope, distilledFromSources });
+    if (holdout.length < STYLE_MIN_EVALUATION_SAMPLES) {
+      const error = new Error(`可用留出终稿 ${holdout.length} 条，未达风格评测所需的 ${STYLE_MIN_EVALUATION_SAMPLES} 条（已排除蒸馏用过的 ${distilledFromSources.length} 条原文）`);
+      error.statusCode = 409;
+      throw error;
+    }
+    const provider = getProviderConfig();
+    return json(res, 202, await styleEvaluationJobs.create({
+      scope,
+      champion: { id: activeProfile?.id || NO_STYLE_PROFILE_ID },
+      challenger: { id: draft.id },
+      trajectories: holdout,
+      requireCost: Number.isFinite(provider.inputPricePerMTok) && Number.isFinite(provider.outputPricePerMTok)
+    }));
+  }
   if (req.method === "POST" && url.pathname.startsWith("/api/style-profiles/") && url.pathname.endsWith("/activate")) {
     const id = decodeURIComponent(url.pathname.slice("/api/style-profiles/".length, -"/activate".length));
+    const body = await readJsonBody(req).catch(() => ({}));
+    const located = await findStyleProfile(id);
+    // 有评测结论且结论反对时必须显式 force，并把这次越过闸门的事实记在规范上。
+    if (located?.evaluation && located.evaluation.promotable !== true && body.force !== true) {
+      const error = new Error(`评测结论不支持启用：${located.evaluation.conclusion || "未达晋升门槛"}。确认仍要启用请勾选“忽略评测结论”。`);
+      error.statusCode = 409;
+      throw error;
+    }
     const activated = await activateStyleProfile(id);
     if (!activated) {
       const error = new Error("未找到该风格规范");
       error.statusCode = 404;
       throw error;
+    }
+    if (located) {
+      const basis = !located.evaluation ? "unevaluated" : located.evaluation.promotable === true ? "evaluated" : "forced";
+      await saveStyleProfileEvaluation(id, { ...(located.evaluation || {}), activationBasis: basis, activatedAt: new Date().toISOString() });
+      activated.evaluation = { ...(located.evaluation || {}), activationBasis: basis };
     }
     return json(res, 200, activated);
   }
@@ -1490,7 +1570,7 @@ async function apiHandler(req, res, url) {
     const queryEmbedding = await embedSource(cleanSource);
     const references = rankTranslationMemories(cleanSource, await getMemories(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
     const qaCases = rankQaCases(cleanSource, await getQaCases(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 3, queryEmbedding });
-    const evidence = await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 6 });
+    const evidence = positiveEvidenceOnly(await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 12 })).slice(0, 6);
     const sourceSegments = splitQaSegments(cleanSource);
     const translationSegments = splitQaSegments(cleanTranslation);
 
@@ -1928,24 +2008,16 @@ async function apiHandler(req, res, url) {
     }
     if (action === "adopt") {
       const segment = (share.segments || []).find((item) => item.index === feedback.segmentIndex);
-      await saveStyleEvidence({
-        locale: share.locale,
-        contentType: share.contentType,
-        domain: share.domain,
-        source: segment?.source || "",
-        target: feedback.suggestedTranslation || segment?.translation || "",
-        batchId: share.batchId,
-        provenance: "human-accept",
-        status: "accepted"
-      });
+      await saveStyleEvidence(buildAdoptedStyleEvidence({ share, feedback, segment }));
       try {
-        const { distilled } = await distillStyleProfileIfReady({
+        // distillStyleProfileIfReady 内部已经落盘草稿；saveStyleProfile 不是 upsert，
+        // 再存一次会生成第二个内容相同、版本号 +1 的草稿。
+        await distillStyleProfileIfReady({
           locale: share.locale,
           contentType: share.contentType,
           domain: share.domain,
           sourceBatchId: share.batchId
         });
-        if (distilled) await saveStyleProfile(distilled);
       } catch {
         // 未达阈值或蒸馏失败不阻断采纳
       }
@@ -2166,6 +2238,62 @@ const evaluationJobs = createEvaluationJobRunner({
   }
 });
 await evaluationJobs.initialize();
+
+/** 同一作用域的风格规范列表（含草稿与停用版本），供风格评测解析变体。 */
+async function styleProfilesInScope(scope) {
+  const { styleProfiles } = await listStyleProfiles(scope.locale, null, { contentType: scope.contentType, domain: scope.domain });
+  return styleProfiles;
+}
+
+async function resolveStyleVariant(id, scope) {
+  const profiles = await styleProfilesInScope(scope);
+  const profile = String(id) === NO_STYLE_PROFILE_ID ? null : profiles.find((item) => item.id === String(id)) || null;
+  if (String(id) !== NO_STYLE_PROFILE_ID && !profile) return null;
+  const [skill, activeProfile] = await Promise.all([
+    ensureChampionTranslationSkill(scope),
+    getStyleProfile(scope.locale, scope.contentType, scope.domain)
+  ]);
+  // AIQA 始终看当前生效版本，否则草稿会用自己的标准给自己打分。
+  return styleVariant({ id, scope, skill, profile, qaProfile: activeProfile });
+}
+
+// 风格草稿评测：唯一变量是风格规范本身，技能、留出集与检索隔离两边完全一致。
+const styleEvaluationJobs = createEvaluationJobRunner({
+  benchmark: benchmarkStyleVariant,
+  jobsDirectory: join(DATA_ROOT, "learning", "jobs"),
+  concurrency: 5,
+  kind: "style-evaluation",
+  guardrails: STYLE_PROMOTION_GUARDRAILS,
+  deps: {
+    getSkill: resolveStyleVariant,
+    getCurrentChampion: async (scope) => {
+      const active = await getStyleProfile(scope.locale, scope.contentType, scope.domain);
+      return resolveStyleVariant(active?.id || NO_STYLE_PROFILE_ID, scope);
+    },
+    validatePromotionState: ({ candidate, currentChampion }) => validateStylePromotionState({
+      draft: candidate?.styleProfile,
+      activeProfile: currentChampion?.styleProfile
+    }),
+    saveEvaluation: async (payload) => {
+      const evaluation = {
+        draftProfileId: String(payload.challengerSkillId || ""),
+        activeProfileId: String(payload.championSkillId || ""),
+        sampleCount: payload.sampleCount,
+        decision: payload.decision,
+        promotable: payload.report?.promotable === true,
+        conclusion: payload.report?.conclusion || "",
+        report: payload.report,
+        evaluatedAt: new Date().toISOString(),
+        evaluator: "kami-style-benchmark-v1"
+      };
+      await saveStyleProfileEvaluation(evaluation.draftProfileId, evaluation);
+      return { id: evaluation.draftProfileId };
+    },
+    updateSkillMetrics: async () => undefined,
+    buildUiReport: learningEvaluationUiReport
+  }
+});
+await styleEvaluationJobs.initialize();
 
 // 自动候选生成：人工批准终稿达到阈值后，在后台提议 challenger；评测与激活仍走人工闸门。
 const autoProposer = createAutoProposer({

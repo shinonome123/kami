@@ -28,7 +28,16 @@ function benchmarkScope(skill) {
   };
 }
 
-export async function benchmarkTranslationSkill(skill, trajectory) {
+/**
+ * @param options.styleProfileOverride  Use this style profile for translation
+ *   instead of the scope's active one — this is what makes a style-profile
+ *   draft an actual variable in a paired benchmark instead of a constant.
+ * @param options.qaStyleProfile  Style profile the AIQA judge sees. When a
+ *   style draft is under test the judge must keep reading the CURRENT active
+ *   profile, otherwise each variant is graded by its own yardstick and the
+ *   comparison measures nothing.
+ */
+export async function benchmarkTranslationSkill(skill, trajectory, { styleProfileOverride = undefined, qaStyleProfile = undefined } = {}) {
   const scope = benchmarkScope(skill);
   const source = String(trajectory.source || "");
   // 评测固定使用本地启发式分类并把语体钉死在技能作用域，避免额外模型调用与分类漂移。
@@ -46,7 +55,8 @@ export async function benchmarkTranslationSkill(skill, trajectory) {
   // Clean-room isolation: never feed this holdout case its own final translation
   // back through memories, QA cases or distilled profile examples. The gold must
   // stay invisible to both variants or the benchmark measures copying, not skill.
-  const isolated = isolateBenchmarkAssets({ source, memories, qaCases, styleProfile, userProfile });
+  const translationStyleProfile = styleProfileOverride === undefined ? styleProfile : styleProfileOverride;
+  const isolated = isolateBenchmarkAssets({ source, memories, qaCases, styleProfile: translationStyleProfile, userProfile });
   const memoryLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.translationMemory?.limit) || 5));
   const qaCaseLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.qaCases?.limit) || 3));
   const translationReferences = rankTranslationMemories(source, isolated.memories, { limit: memoryLimit, queryEmbedding });
@@ -56,11 +66,23 @@ export async function benchmarkTranslationSkill(skill, trajectory) {
     neighborContext: trajectory.contextPack?.neighborContext || "",
     styleProfile: isolated.styleProfile, translationSkill: skill, qaGuidance, userProfile: isolated.userProfile, translationReferences
   });
+  // The judge gets its own pack so the style profile under test never becomes
+  // the standard it is judged against.
+  const judgeStyleProfile = qaStyleProfile === undefined
+    ? contextPack.styleProfile
+    : isolateBenchmarkAssets({ source, styleProfile: qaStyleProfile }).styleProfile;
+  const qaContextPack = judgeStyleProfile === contextPack.styleProfile
+    ? contextPack
+    : buildContextPack({
+      source, locale: scope.locale, classification, matches, domain: scope.domain,
+      neighborContext: trajectory.contextPack?.neighborContext || "",
+      styleProfile: judgeStyleProfile, translationSkill: skill, qaGuidance, userProfile: isolated.userProfile, translationReferences
+    });
   const startedAt = Date.now();
   const usage = createUsageCollector();
   const translated = await translateWithReflection(contextPack, { reflect: false, onUsage: usage.onUsage });
   const hardIssues = runQa({ source, translation: translated.translation, matches });
-  const aiIssues = await evaluateTranslationWithModel({ contextPack, translation: translated.translation, references: translationReferences, qaCases: qaGuidance, onUsage: usage.onUsage });
+  const aiIssues = await evaluateTranslationWithModel({ contextPack: qaContextPack, translation: translated.translation, references: translationReferences, qaCases: qaGuidance, onUsage: usage.onUsage });
   const score = calculateQaScore({ hardIssues, aiIssues });
   const required = matches.filter((item) => item.mode === "exact" && item.term?.enforcement === "required");
   const requiredTermHits = required.filter(({ term }) => String(translated.translation).includes(String(term.target || ""))).length;
@@ -78,6 +100,8 @@ export async function benchmarkTranslationSkill(skill, trajectory) {
     qaScore: score,
     humanEditDistance: editDistance,
     humanAccepted: editDistance <= 0.12 && score >= 90 && !hardIssues.some((issue) => issue.severity === "error"),
+    styleProfileId: String(contextPack.styleProfile?.id || ""),
+    qaStyleProfileId: String(qaContextPack.styleProfile?.id || ""),
     isolation: isolated.isolation,
     usage: usageSnapshot || undefined,
     costUsd: Number.isFinite(costUsd) ? costUsd : undefined,

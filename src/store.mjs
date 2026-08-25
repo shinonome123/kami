@@ -49,6 +49,8 @@ import {
   saveDirectusCorpus,
   saveDirectusImportPreview,
   saveDirectusStyleEvidence,
+  saveDirectusStyleProfileEvaluation,
+  findDirectusStyleProfile,
   saveDirectusStyleLearningRun,
   getDirectusStyleLearningRuns,
   saveDirectusStyleProfile,
@@ -199,7 +201,15 @@ async function saveJsonStyleEvidence(input) {
   const items = await readJson(path, []);
   const source = String(input.source || "").trim();
   const embedding = input.embedding ?? await embedSource(source);
-  const item = { id: randomUUID(), ...input, ...(embedding ? { embedding } : {}), createdAt: new Date().toISOString() };
+  const item = {
+    id: randomUUID(),
+    ...input,
+    machineTranslation: String(input.machineTranslation || "").trim(),
+    polarity: input.polarity === "negative" ? "negative" : "positive",
+    note: String(input.note || "").trim(),
+    ...(embedding ? { embedding } : {}),
+    createdAt: new Date().toISOString()
+  };
   items.push(item);
   await writeJsonAtomic(path, items);
   return item;
@@ -269,13 +279,16 @@ async function locateJsonStyleProfile(id) {
   return null;
 }
 
-async function listJsonStyleProfiles(locale, status) {
+async function listJsonStyleProfiles(locale, status, scope = null) {
   assertLocale(locale);
   const styleProfiles = await readJson(join(ROOT, "styles", `${locale}.json`), []);
   const userProfiles = await readJson(join(ROOT, "styles", "profiles.json"), []);
   const pick = (items) => items.filter((item) => !status || item.status === status).sort((a, b) => b.version - a.version);
+  const inScope = (items) => scope?.contentType
+    ? items.filter((item) => item.contentType === scope.contentType && (item.domain || "general") === (scope.domain || "general"))
+    : items;
   return {
-    styleProfiles: pick(styleProfiles),
+    styleProfiles: pick(inScope(styleProfiles)),
     userProfiles: pick(userProfiles.filter((item) => item.locale === locale))
   };
 }
@@ -297,6 +310,14 @@ async function activateJsonStyleProfile(id) {
     else if (item.status === "active" && item.contentType === located.target.contentType && item.domain === located.target.domain) item.status = "inactive";
   }
   located.target.status = "active";
+  await writeJsonAtomic(located.path, located.profiles);
+  return located.target;
+}
+
+async function saveJsonStyleProfileEvaluation(id, evaluation) {
+  const located = await locateJsonStyleProfile(id);
+  if (!located) return null;
+  located.target.evaluation = evaluation;
   await writeJsonAtomic(located.path, located.profiles);
   return located.target;
 }
@@ -1184,8 +1205,9 @@ export async function deleteBackgroundTask(id) {
   return usesDirectus() ? deleteDirectusBackgroundTask(id) : deleteJsonBackgroundTask(id);
 }
 
-export async function listStyleProfiles(locale, status) {
-  return usesDirectus() ? listDirectusStyleProfiles(locale, status) : listJsonStyleProfiles(locale, status);
+/** `scope` ({ contentType, domain }) narrows styleProfiles to one exact scope; userProfiles stay global. */
+export async function listStyleProfiles(locale, status, scope = null) {
+  return usesDirectus() ? listDirectusStyleProfiles(locale, status, scope) : listJsonStyleProfiles(locale, status, scope);
 }
 
 export async function listPendingQaCases(locale) {
@@ -1194,6 +1216,18 @@ export async function listPendingQaCases(locale) {
 
 export async function disposeQaCase(id) {
   return usesDirectus() ? disposeDirectusQaCase(id) : disposeJsonQaCase(id);
+}
+
+/** Look up one style profile or translator profile by id, across every locale. */
+export async function findStyleProfile(id) {
+  if (usesDirectus()) return findDirectusStyleProfile(id);
+  const located = await locateJsonStyleProfile(id);
+  return located ? located.target : null;
+}
+
+/** Attach (or clear, with null) the paired-benchmark conclusion for a style draft. */
+export async function saveStyleProfileEvaluation(id, evaluation) {
+  return usesDirectus() ? saveDirectusStyleProfileEvaluation(id, evaluation) : saveJsonStyleProfileEvaluation(id, evaluation);
 }
 
 export async function activateStyleProfile(id) {

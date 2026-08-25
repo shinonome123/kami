@@ -59,7 +59,15 @@ function publicJob(job) {
   };
 }
 
-export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, concurrency = 5, now = () => new Date().toISOString() } = {}) {
+/**
+ * @param kind        Job kind stored on every checkpoint. A runner only ever
+ *   restores its own kind from disk, so several runners (skill evaluation,
+ *   style-profile evaluation) can share one jobs directory without stealing
+ *   each other's checkpoints.
+ * @param guardrails  Extra promotion guardrails merged into every conclusion,
+ *   e.g. restricting which metrics may justify a style-profile promotion.
+ */
+export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, concurrency = 5, kind = "skill-evaluation", guardrails = {}, now = () => new Date().toISOString() } = {}) {
   if (typeof benchmark !== "function") throw new TypeError("benchmark 必须是函数");
   for (const name of ["getSkill", "getCurrentChampion", "validatePromotionState", "saveEvaluation", "updateSkillMetrics", "buildUiReport"]) {
     if (typeof deps?.[name] !== "function") throw new TypeError(`evaluation job deps 缺少 ${name}`);
@@ -93,7 +101,7 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
       if (!file.endsWith(".json")) continue;
       try {
         const job = JSON.parse(await readFile(join(jobsDirectory, file), "utf8"));
-        if (!job?.jobId || job.kind !== "skill-evaluation") continue;
+        if (!job?.jobId || job.kind !== kind) continue;
         if ([QUEUED, RUNNING].includes(job.status)) {
           job.status = INTERRUPTED;
           job.error = "服务重启中断了本次评测，可续跑剩余样本";
@@ -136,7 +144,7 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
     await persist(job);
 
     // Fail fast when the pairing is already stale, before spending model calls.
-    const [champion, candidate] = await Promise.all([deps.getSkill(job.championId), deps.getSkill(job.challengerId)]);
+    const [champion, candidate] = await Promise.all([deps.getSkill(job.championId, job.scope), deps.getSkill(job.challengerId, job.scope)]);
     const currentChampion = await deps.getCurrentChampion(job.scope);
     const initialValidation = deps.validatePromotionState({ candidate, currentChampion });
     if (!initialValidation.valid) {
@@ -184,7 +192,7 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
       // pair makes the whole run insufficient instead of pretending a zero.
       minSamples: job.requestedCaseIds.length,
       minimumCoverage: 0.8,
-      guardrails: { requireCost: job.requireCost === true }
+      guardrails: { ...guardrails, requireCost: job.requireCost === true }
     });
     const report = deps.buildUiReport(result);
     report.benchmark = {
@@ -211,7 +219,7 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
 
     // Revalidate after the potentially long benchmark: the champion may have
     // changed or the candidate may have been rejected while model calls ran.
-    const [refreshedCandidate, refreshedChampion] = await Promise.all([deps.getSkill(job.challengerId), deps.getCurrentChampion(job.scope)]);
+    const [refreshedCandidate, refreshedChampion] = await Promise.all([deps.getSkill(job.challengerId, job.scope), deps.getCurrentChampion(job.scope)]);
     const revalidation = deps.validatePromotionState({ candidate: refreshedCandidate, currentChampion: refreshedChampion });
     if (!revalidation.valid) {
       await markFailed(job, revalidation.reasons.join("；"));
@@ -247,7 +255,7 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
     async create({ scope, champion, challenger, trajectories, requireCost = false }) {
       const job = {
         jobId: randomUUID(),
-        kind: "skill-evaluation",
+        kind,
         scope,
         championId: String(champion.id || ""),
         challengerId: String(challenger.id || ""),

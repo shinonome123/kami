@@ -87,3 +87,36 @@ test("风格规范保留来源批次和风格学习记录血缘", async () => {
   assert.equal(listed.sourceBatchId, "batch-style");
   assert.equal(listed.learningRunId, "learning-run-1");
 });
+
+test("风格证据落盘并读回机器初稿、极性与否决理由", async () => {
+  const revised = await saveStyleEvidence({
+    locale: "ja-JP", contentType: "dialogue", domain: "game",
+    source: "先走一步了", target: "お先に失礼！", machineTranslation: "先に一歩行く。",
+    polarity: "positive", provenance: "human-accept", status: "accepted"
+  });
+  const rejected = await saveStyleEvidence({
+    locale: "ja-JP", contentType: "dialogue", domain: "game",
+    source: "这波稳了", target: "この波は安定だ。",
+    polarity: "negative", note: "翻译腔，日语玩家不会这么说", provenance: "colleague-reject", status: "accepted"
+  });
+  assert.equal(revised.machineTranslation, "先に一歩行く。");
+  assert.equal(rejected.polarity, "negative");
+
+  const stored = await getStyleEvidence("ja-JP", { contentType: "dialogue", domain: "game", exactScope: true, limit: 100 });
+  const back = new Map(stored.map((item) => [item.id, item]));
+  assert.equal(back.get(revised.id).machineTranslation, "先に一歩行く。");
+  assert.equal(back.get(revised.id).polarity, "positive");
+  assert.equal(back.get(rejected.id).polarity, "negative");
+  assert.match(back.get(rejected.id).note, /翻译腔/);
+});
+
+test("历史证据没有新字段时按正例回落，不影响既有数据", async () => {
+  const legacy = await saveStyleEvidence({
+    locale: "ko-KR", contentType: "ui", domain: "game",
+    source: "确认", target: "확인", provenance: "table-import", status: "accepted"
+  });
+  assert.equal(legacy.polarity, "positive");
+  assert.equal(legacy.machineTranslation, "");
+  const [stored] = await getStyleEvidence("ko-KR", { contentType: "ui", domain: "game", exactScope: true, limit: 10 });
+  assert.equal(stored.polarity, "positive");
+});
