@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { extname } from "node:path";
 import { CONTENT_TYPES, LOCALES, assertLocale } from "./config.mjs";
-import { classifyContent } from "./classifier.mjs";
+import { classifyContent, inferDomainFromText } from "./classifier.mjs";
 
 const HEADER_SCAN_LIMIT = 12;
 const MAX_ROWS = 10_000;
@@ -232,14 +232,11 @@ function quality(source, target, locale, sheetMode = "mixed") {
   };
 }
 
+/** 领域规则集中在 classifier.mjs，导入与翻译两条路径共用一份，避免各自漂移。 */
 function inferDomain(candidate, contentType) {
-  if (contentType === "marketing") return "marketing";
-  if (contentType === "social") return "community";
-  const text = String(candidate.source || "");
-  if (/(社媒|社区|关注|转发|评论|粉丝|直播|discord|twitter|facebook|instagram)/iu.test(text)) return "community";
-  if (/(游戏|玩家|通行证|道具|装备|武器|技能|角色|关卡|副本|商城|赛季|客户端|服务器|dlc|playstation|steam|xbox)/iu.test(text)) return "game";
-  if (/(促销|折扣|购买|商品|限时|优惠|营销|宣发|预约|发售)/u.test(text)) return "marketing";
-  return candidate.assetType === "memory" ? "game" : "general";
+  return inferDomainFromText(candidate.source, contentType, {
+    fallback: candidate.assetType === "memory" ? "game" : "general"
+  });
 }
 
 export function classifyImportCandidate(candidate) {

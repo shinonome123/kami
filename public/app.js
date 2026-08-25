@@ -368,7 +368,7 @@ function autoQaScoreTone(score) {
 }
 
 function renderAutoQaReport(payload) {
-  const { scores, summary, segments = [], alignmentIssues = [], alignmentNote, tagsStripped, segmentCounts, fallbackReason, references, qaCases, classification, styleProfile } = payload;
+  const { scores, summary, segments = [], alignmentIssues = [], alignmentNote, tagsStripped, segmentCounts, fallbackReason, references, qaCases, classification, domainResolution, styleProfile } = payload;
   const scoreCard = (score, label, caption, tone) => `
     <div class="autoqa-score-card ${tone}"><strong>${score}</strong><span>${escapeHtml(label)}</span><small>${escapeHtml(caption)}</small></div>`;
   $("#autoQaScores").innerHTML =
@@ -386,7 +386,15 @@ function renderAutoQaReport(payload) {
   if (styleProfile?.name) evidenceLines.push(`风格规范：${styleProfile.name} v${styleProfile.version || 1}`);
   if (references?.length) evidenceLines.push(`已批准译例 ${references.length} 条`);
   if (qaCases?.length) evidenceLines.push(`历史 QA 反例 ${qaCases.length} 条`);
-  if (classification?.contentType) evidenceLines.push(`识别语体：${classification.contentType}`);
+  if (classification?.contentType) {
+    const label = state.bootstrap?.contentTypes?.[classification.contentType]?.label || classification.contentType;
+    evidenceLines.push(`识别语体：${label}（${CLASSIFY_SOURCE_LABELS[classification.source] || classification.source || "识别"}）`);
+  }
+  if (domainResolution?.domain) {
+    const label = DOMAIN_LABELS[domainResolution.domain] || domainResolution.domain;
+    const note = domainResolution.relaxedRetrieval ? "，该领域无资产，检索已放宽到全部" : "";
+    evidenceLines.push(`识别领域：${label}（${CLASSIFY_SOURCE_LABELS[domainResolution.source] || domainResolution.source}${note}）`);
+  }
   const evidenceBox = evidenceLines.length
     ? `<div class="reflection-box"><strong>Nuance 对照证据</strong>\n${escapeHtml(evidenceLines.join("\n"))}</div>`
     : "";
@@ -510,6 +518,31 @@ function setResultStatus(issues = [], aiQa = null) {
   else setTranslationStatus("success", "QA 通过");
 }
 
+const CLASSIFY_SOURCE_LABELS = {
+  manual: "人工指定", descriptor: "表格声明", "content-type": "语体决定",
+  model: "模型识别", heuristic: "正文推断", fallback: "默认值"
+};
+
+const DOMAIN_LABELS = { game: "游戏", general: "通用", marketing: "市场营销", community: "社区运营" };
+
+/**
+ * 「自动识别」选项此前只能等翻译跑完、在结果区的小字里才知道判成了什么。
+ * 语体与领域都直接决定取哪份风格规范和哪批记忆，判定结果必须当场可见。
+ */
+function resolutionSummary(classification, domainResolution) {
+  const parts = [];
+  if (classification?.contentType) {
+    const label = state.bootstrap?.contentTypes?.[classification.contentType]?.label || classification.contentType;
+    parts.push(`语体 <strong>${escapeHtml(label)}</strong>（${escapeHtml(CLASSIFY_SOURCE_LABELS[classification.source] || classification.source || "识别")}）`);
+  }
+  if (domainResolution?.domain) {
+    const label = DOMAIN_LABELS[domainResolution.domain] || domainResolution.domain;
+    const note = domainResolution.relaxedRetrieval ? "，该领域无资产，检索已放宽到全部" : "";
+    parts.push(`领域 <strong>${escapeHtml(label)}</strong>（${escapeHtml(CLASSIFY_SOURCE_LABELS[domainResolution.source] || domainResolution.source)}${escapeHtml(note)}）`);
+  }
+  return parts.join(" · ");
+}
+
 function renderTranslationOutput() {
   const result = state.lastResult;
   if (!result) return;
@@ -616,10 +649,10 @@ function previewClassificationAndMatches() {
     $("#sourceCount").textContent = `${[...text].length} 字`;
     if (!text || !state.bootstrap) return;
     try {
-      const classification = await api("/api/classify", { method: "POST", body: JSON.stringify({ text, hint: $("#contentType").value }) });
-      const matched = await api("/api/match", { method: "POST", body: JSON.stringify({ text, locale: state.workbenchLocale, contentType: classification.contentType, domain: $("#domain").value }) });
-      const label = state.bootstrap.contentTypes[classification.contentType].label;
-      $("#classificationPreview").innerHTML = `<span class="pulse-dot"></span><span>识别为 <strong>${label}</strong> · 置信度 ${Math.round(classification.confidence * 100)}% · 命中 ${matched.matches.length} 条术语</span>`;
+      const classification = await api("/api/classify", { method: "POST", body: JSON.stringify({ text, hint: $("#contentType").value, domain: $("#domain").value }) });
+      const resolvedDomain = classification.domainResolution?.domain || $("#domain").value;
+      const matched = await api("/api/match", { method: "POST", body: JSON.stringify({ text, locale: state.workbenchLocale, contentType: classification.contentType, domain: resolvedDomain }) });
+      $("#classificationPreview").innerHTML = `<span class="pulse-dot"></span><span>${resolutionSummary(classification, classification.domainResolution)} · 置信度 ${Math.round(classification.confidence * 100)}% · 命中 ${matched.matches.length} 条术语</span>`;
       renderMatches(matched.matches);
     } catch (error) {
       $("#classificationPreview").textContent = error.message;
@@ -639,7 +672,7 @@ async function translate() {
     }) });
     state.lastResult = result;
     renderTranslationOutput();
-    $("#classificationPreview").innerHTML = `<span class="pulse-dot"></span><span>语体：<strong>${state.bootstrap.contentTypes[result.classification.contentType].label}</strong> · ${result.classification.source === "model" ? "模型识别" : "规则识别"}</span>`;
+    $("#classificationPreview").innerHTML = `<span class="pulse-dot"></span><span>${resolutionSummary(result.classification, result.domainResolution)}</span>`;
     renderMatches(result.matches);
     renderQa(result);
     setResultStatus(result.issues, result.aiQa);

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { calculateQaScore, presentAiQaIssues } from "../src/qa.mjs";
-import { rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "../src/translation-memory.mjs";
+import { narrowByDomain, rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "../src/translation-memory.mjs";
 
 test("翻译记忆检索优先同义近似且已验证的译例", () => {
   const ranked = rankTranslationMemories("高级通行证现已开放购买", [
@@ -87,4 +87,35 @@ test("输入非数组时安全返回两个空档", () => {
   const { approved, machineDrafts } = splitReferenceAuthority(null);
   assert.deepEqual(approved, []);
   assert.deepEqual(machineDrafts, []);
+});
+
+test("领域收窄命中时只保留本领域与通用资产", () => {
+  const { items, relaxed } = narrowByDomain([
+    { id: "a", domain: "marketing" },
+    { id: "b", domain: "game" },
+    { id: "c", domain: "general" }
+  ], "marketing");
+  assert.deepEqual(items.map((item) => item.id), ["a", "c"]);
+  assert.equal(relaxed, false);
+});
+
+test("收窄后为空时退回全量，避免选错领域让检索归零", () => {
+  // 实测：全库 592 条记忆都归在 game 下，选「市场营销」会把它们全部滤掉。
+  const pool = Array.from({ length: 5 }, (_, index) => ({ id: `m${index}`, domain: "game" }));
+  const { items, relaxed } = narrowByDomain(pool, "marketing");
+  assert.equal(items.length, 5, "宁可放宽领域，也不能让模型失去全部参考译例");
+  assert.equal(relaxed, true, "放宽过要能被界面说明");
+});
+
+test("领域为 general 或缺省时本就不收窄", () => {
+  const pool = [{ id: "a", domain: "game" }, { id: "b", domain: "marketing" }];
+  assert.equal(narrowByDomain(pool, "general").items.length, 2);
+  assert.equal(narrowByDomain(pool, "").items.length, 2);
+  assert.equal(narrowByDomain(pool, "general").relaxed, false);
+});
+
+test("空池不会被误报成放宽", () => {
+  const { items, relaxed } = narrowByDomain([], "marketing");
+  assert.deepEqual(items, []);
+  assert.equal(relaxed, false, "本来就没有资产，不是领域收窄造成的");
 });

@@ -11,6 +11,47 @@ const RULES = [
   ["dialogue", 4, /([“「『].+[”」』]|说道|问道|喊道|低声|笑着说|[，,].{1,24}(啊|吧|呢|罢|哩|呀|么|吗|嘛|呐|喽|咯|了|来|去|走|住|听|看|小心|留心)[。！？!?…]*)/u]
 ];
 
+export const DOMAINS = Object.freeze(["game", "general", "marketing", "community"]);
+
+/** 语体本身就已经决定领域的两种情况。 */
+const CONTENT_TYPE_DOMAIN = Object.freeze({ marketing: "marketing", social: "community" });
+
+const DOMAIN_RULES = Object.freeze([
+  ["community", /社媒|社区|关注|转发|评论|粉丝|直播|discord|twitter|facebook|instagram/iu],
+  ["game", /游戏|玩家|通行证|道具|装备|武器|技能|角色|关卡|副本|商城|赛季|客户端|服务器|dlc|playstation|steam|xbox/iu],
+  ["marketing", /促销|折扣|购买|商品|限时|优惠|营销|宣发|预约|发售/u]
+]);
+
+/** 纯文本层面的领域推断，术语导入与翻译路径共用同一份规则。 */
+export function inferDomainFromText(text, contentType = "general", { fallback = "general" } = {}) {
+  if (CONTENT_TYPE_DOMAIN[contentType]) return CONTENT_TYPE_DOMAIN[contentType];
+  const value = String(text ?? "");
+  for (const [domain, pattern] of DOMAIN_RULES) if (pattern.test(value)) return domain;
+  return fallback;
+}
+
+/**
+ * 业务领域此前完全没有自动识别：服务端一律 `body.domain || "game"`，
+ * 唯一的推断实现只服务于术语导入。这里补上与语体同构的判定链。
+ *
+ * 注意领域是**收窄**维度：记忆与证据检索按它做严格过滤，选错会让检索归零，
+ * 所以调用方必须配合"取不到就放宽领域"的回退，不能只依赖这里判得准。
+ */
+export function resolveDomain(text, hint = "auto", { contentType = "general", fallback = "game" } = {}) {
+  if (hint && hint !== "auto" && DOMAINS.includes(hint)) {
+    return { domain: hint, source: "manual", evidence: "用户指定领域" };
+  }
+  if (CONTENT_TYPE_DOMAIN[contentType]) {
+    return { domain: CONTENT_TYPE_DOMAIN[contentType], source: "content-type", evidence: `语体决定领域` };
+  }
+  const value = String(text ?? "");
+  for (const [domain, pattern] of DOMAIN_RULES) {
+    const match = value.match(pattern);
+    if (match) return { domain, source: "heuristic", evidence: `正文命中「${match[0]}」` };
+  }
+  return { domain: DOMAINS.includes(fallback) ? fallback : "game", source: "fallback", evidence: "未命中领域规则，使用默认" };
+}
+
 /**
  * Descriptor keywords → content type.
  *

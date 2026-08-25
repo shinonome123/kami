@@ -5,7 +5,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONTENT_TYPES, LOCALES, assertLocale } from "./src/config.mjs";
-import { classifyContent, descriptorFromContext } from "./src/classifier.mjs";
+import { classifyContent, descriptorFromContext, resolveDomain } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
@@ -16,7 +16,7 @@ import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineS
 import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
-import { rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./src/translation-memory.mjs";
+import { narrowByDomain, rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./src/translation-memory.mjs";
 import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 import { runTaskPool } from "./src/task-pool.mjs";
@@ -322,6 +322,16 @@ async function classify(body) {
     return { ...heuristic, fallbackReason: error.message };
   }
 }
+
+/**
+ * 界面上「业务领域」现在可以是 auto，但写入与检索都需要一个具体值：
+ * 存下 "auto" 会污染作用域，让这条资产永远匹配不上任何真实领域。
+ * 所有入口统一经过这里落到具体领域。
+ */
+function concreteDomain(value, { text = "", contentType = "general" } = {}) {
+  return resolveDomain(text, value, { contentType }).domain;
+}
+
 
 async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, contentType, domain, batchId, providedReferences = null, humanDecisions = [], passScore = 90, maxRevisions = 2 }) {
   const queryEmbedding = await embedSource(contextPack.source);
@@ -738,7 +748,13 @@ async function apiHandler(req, res, url) {
     return json(res, deleted ? 200 : 404, { deleted });
   }
   if (req.method === "POST" && url.pathname === "/api/classify") {
-    return json(res, 200, await classify(await readJsonBody(req)));
+    const body = await readJsonBody(req);
+    const classification = await classify(body);
+    // 领域与语体一起返回，界面在开始翻译前就能看出「自动识别」会落到哪里。
+    return json(res, 200, {
+      ...classification,
+      domainResolution: resolveDomain(body.text, body.domain, { contentType: classification.contentType })
+    });
   }
   if (req.method === "POST" && url.pathname === "/api/match") {
     const body = await readJsonBody(req);
@@ -868,7 +884,7 @@ async function apiHandler(req, res, url) {
       throw error;
     }
     const contentType = body.contentType || "general";
-    const domain = body.domain || "game";
+    const domain = concreteDomain(body.domain, { text: source, contentType });
     const project = body.project || "default";
     let linkedTrajectory = null;
     if (body.trajectoryId) {
@@ -1260,7 +1276,7 @@ async function apiHandler(req, res, url) {
     const body = await readJsonBody(req);
     const analyzeSpreadsheet = body.useAiStructure === false ? undefined : (snapshot, ruleAnalysis) => analyzeSpreadsheetStructureWithModel(snapshot, ruleAnalysis, body.locale || "ja-JP");
     const prepared = await prepareBatchDocument(body, { analyzeSpreadsheet });
-    const { batchId } = await saveBatchRun({ ...prepared, locale: assertLocale(body.locale || "ja-JP"), contentType: body.contentType || "general", domain: body.domain || "game", segments: prepared.segments });
+    const { batchId } = await saveBatchRun({ ...prepared, locale: assertLocale(body.locale || "ja-JP"), contentType: body.contentType || "general", domain: concreteDomain(body.domain, { contentType: body.contentType || "general" }), segments: prepared.segments });
     return json(res, 200, { ...prepared, batchId });
   }
   if (req.method === "POST" && url.pathname === "/api/batch/run") {
@@ -1442,7 +1458,7 @@ async function apiHandler(req, res, url) {
     }
 
     const contentType = body.contentType || "general";
-    const domain = body.domain || "game";
+    const domain = concreteDomain(body.domain, { text: source, contentType });
     const project = body.project || "default";
     const batchId = body.batchId || "manual-review";
     let linkedTrajectory = null;
@@ -1534,7 +1550,7 @@ async function apiHandler(req, res, url) {
     const locale = assertLocale(body.locale);
     const assets = await getAssets(locale);
     const contentType = body.contentType || "general";
-    const domain = body.domain || "game";
+    const domain = concreteDomain(body.domain, { text: body.source || "", contentType });
     const matches = matchTerms(body.source || "", assets, { contentType, domain });
     if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches, locale }) });
     const classification = await classify({ text: body.source || "", hint: contentType, useModel: false });
@@ -1556,7 +1572,6 @@ async function apiHandler(req, res, url) {
       throw error;
     }
     const contentType = body.contentType || "general";
-    const domain = body.domain || "game";
     // 网页粘贴常带 HTML 标签：剥离后参与分析，但必须保留换行作为多语言段落边界。
     const stripTags = normalizeQaInputText;
     const tagsStripped = /<[^>]*>/u.test(source) || /<[^>]*>/u.test(translation);
@@ -1568,13 +1583,19 @@ async function apiHandler(req, res, url) {
       throw error;
     }
     const assets = await getAssets(locale);
-    const matches = matchTerms(cleanSource, assets, { contentType, domain });
     const classification = await classify({ text: cleanSource, hint: contentType, useModel: false });
     const scopeContentType = classification.contentType || "general";
+    const domainResolution = resolveDomain(cleanSource, body.domain, { contentType: scopeContentType });
+    const domain = domainResolution.domain;
+    // 术语匹配放在识别之后，用真正生效的语体与领域加权，而不是界面提交的原始值。
+    const matches = matchTerms(cleanSource, assets, { contentType: scopeContentType, domain });
     const styleProfile = await getStyleProfile(locale, scopeContentType, domain);
     const queryEmbedding = await embedSource(cleanSource);
-    const references = rankTranslationMemories(cleanSource, await getMemories(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
-    const qaCases = rankQaCases(cleanSource, await getQaCases(locale, { contentType: scopeContentType, domain, limit: -1 }), { limit: 3, queryEmbedding });
+    const narrowedMemories = narrowByDomain(await getMemories(locale, { contentType: scopeContentType, domain: "general", limit: -1 }), domain);
+    const narrowedQaCases = narrowByDomain(await getQaCases(locale, { contentType: scopeContentType, domain: "general", limit: -1 }), domain);
+    domainResolution.relaxedRetrieval = narrowedMemories.relaxed || narrowedQaCases.relaxed;
+    const references = rankTranslationMemories(cleanSource, narrowedMemories.items, { limit: 5, queryEmbedding });
+    const qaCases = rankQaCases(cleanSource, narrowedQaCases.items, { limit: 3, queryEmbedding });
     const evidence = positiveEvidenceOnly(await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 12 })).slice(0, 6);
     // 只有人工批准的译例能充当"标准"；机器译文另开一档，仅供一致性参考。
     const { approved: approvedReferences, machineDrafts } = splitReferenceAuthority(references);
@@ -1701,7 +1722,7 @@ async function apiHandler(req, res, url) {
       segmentCounts: { source: sourceSegments.length, translation: translationSegments.length },
       segments, alignmentIssues,
       scores, summary,
-      classification, styleProfile,
+      classification, domainResolution, styleProfile,
       references: references.filter((item) => item.kind !== "qa_case"),
       qaCases,
       fallbackReason
@@ -2050,7 +2071,8 @@ async function apiHandler(req, res, url) {
     }
     const classification = await classify({ text: body.source, hint: body.contentType, useModel: body.useModelClassification, neighborContext: body.neighborContext });
     const assets = await getAssets(locale);
-    const domain = body.domain || "game";
+    const domainResolution = resolveDomain(body.source, body.domain, { contentType: classification.contentType });
+    const domain = domainResolution.domain;
     const scope = learningScope({ locale, contentType: classification.contentType, domain, project: body.project || "default" });
     const translationSkill = await ensureChampionTranslationSkill(scope);
     const memoryLimit = Math.min(10, Math.max(1, Number(translationSkill.strategy?.retrieval?.translationMemory?.limit) || 5));
@@ -2062,14 +2084,17 @@ async function apiHandler(req, res, url) {
       domain
     });
     const queryEmbedding = await embedSource(body.source);
-    const [storedStyleProfile, allQaCases, allMemories, userProfile] = await Promise.all([
+    const [storedStyleProfile, localeQaCases, localeMemories, userProfile] = await Promise.all([
       getStyleProfile(locale, classification.contentType, domain),
-      getQaCases(locale, { contentType: classification.contentType, domain, limit: -1 }),
-      getMemories(locale, { contentType: classification.contentType, domain, limit: -1 }),
+      getQaCases(locale, { contentType: classification.contentType, domain: "general", limit: -1 }),
+      getMemories(locale, { contentType: classification.contentType, domain: "general", limit: -1 }),
       getUserProfile(locale)
     ]);
-    const qaGuidance = rankQaCases(body.source, allQaCases, { limit: qaCaseLimit, queryEmbedding });
-    const translationReferences = rankTranslationMemories(body.source, allMemories, { limit: memoryLimit, queryEmbedding });
+    const narrowedQaCases = narrowByDomain(localeQaCases, domain);
+    const narrowedMemories = narrowByDomain(localeMemories, domain);
+    domainResolution.relaxedRetrieval = narrowedMemories.relaxed || narrowedQaCases.relaxed;
+    const qaGuidance = rankQaCases(body.source, narrowedQaCases.items, { limit: qaCaseLimit, queryEmbedding });
+    const translationReferences = rankTranslationMemories(body.source, narrowedMemories.items, { limit: memoryLimit, queryEmbedding });
     // 批次排比/韵文检测：同一批次的多行共用一种句式时，注入模板约束；
     // 客户端顺序翻译时还会带上本批已定稿译文作为风格锚点。
     let batchVerse = null;
@@ -2159,6 +2184,7 @@ async function apiHandler(req, res, url) {
       return json(res, 200, {
         locale,
         classification,
+        domainResolution,
         matches,
         contextPack,
         ...result,

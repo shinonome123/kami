@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyContent, contentTypeFromDescriptor, descriptorFromContext } from "../src/classifier.mjs";
+import { classifyContent, contentTypeFromDescriptor, descriptorFromContext, inferDomainFromText, resolveDomain } from "../src/classifier.mjs";
 import { LOCALES } from "../src/config.mjs";
 import { buildContextPack } from "../src/context-pack.mjs";
 import { refineCorpus } from "../src/corpus.mjs";
@@ -254,4 +254,32 @@ test("从 Context Pack 的相邻元数据里认出位置与描述列", () => {
 test("没有元数据时返回空串而不是抛错", () => {
   assert.deepEqual(descriptorFromContext(), { descriptor: "", location: "" });
   assert.deepEqual(descriptorFromContext({ metadata: null }), { descriptor: "", location: "" });
+});
+
+test("业务领域此前完全没有自动识别，现在与语体同构地判定", () => {
+  assert.equal(resolveDomain("任意正文", "auto", { contentType: "marketing" }).source, "content-type");
+  assert.equal(resolveDomain("任意正文", "auto", { contentType: "marketing" }).domain, "marketing");
+  assert.equal(resolveDomain("任意正文", "auto", { contentType: "social" }).domain, "community");
+  assert.equal(resolveDomain("道具与装备说明", "auto", { contentType: "general" }).domain, "game");
+  assert.equal(resolveDomain("欢迎关注我们的社媒账号", "auto", { contentType: "general" }).domain, "community");
+});
+
+test("人工指定领域压过一切推断", () => {
+  const result = resolveDomain("道具与装备说明", "community", { contentType: "marketing" });
+  assert.equal(result.domain, "community");
+  assert.equal(result.source, "manual");
+});
+
+test("非法领域值不会被当成真实领域存下去", () => {
+  for (const bad of ["auto", "", null, undefined, "不存在的领域"]) {
+    const result = resolveDomain("无线索文本", bad, { contentType: "ui" });
+    assert.ok(["game", "general", "marketing", "community"].includes(result.domain), `${bad} 应回落到合法领域`);
+  }
+  assert.equal(resolveDomain("无线索文本", "auto", { contentType: "ui" }).source, "fallback");
+});
+
+test("翻译与术语导入共用同一份领域规则", () => {
+  assert.equal(inferDomainFromText("道具与装备说明", "general", { fallback: "general" }), "game");
+  assert.equal(inferDomainFromText("无任何线索", "general", { fallback: "general" }), "general");
+  assert.equal(inferDomainFromText("无任何线索", "general", { fallback: "game" }), "game", "导入侧按 assetType 传不同兜底");
 });

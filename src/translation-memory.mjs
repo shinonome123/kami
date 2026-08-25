@@ -96,3 +96,20 @@ export function splitReferenceAuthority(references = []) {
     machineDrafts: list.filter((item) => item?.qualityStatus !== "human_approved")
   };
 }
+
+/**
+ * 领域是**收窄**维度，不是必要条件。记忆、QA 案例与风格证据都按
+ * `item.domain === domain || item.domain === "general"` 严格过滤，而本项目
+ * 99% 资产都归在 game 下（风格规范 7/7、记忆 592/597、证据 1951/1966）——
+ * 一旦领域判成或选成别的值，检索会静默归零，模型失去全部参考译例。
+ *
+ * 因此统一用不限领域的一次查询取回，再在内存里收窄；收窄后为空就退回全量，
+ * 只保留语体维度。这样领域既能在资产积累起来后真正起作用，也永远不会把
+ * 检索打空。返回 relaxed 供界面说明本次是否放宽过。
+ */
+export function narrowByDomain(items, domain) {
+  const list = Array.isArray(items) ? items : [];
+  if (!domain || domain === "general") return { items: list, relaxed: false };
+  const scoped = list.filter((item) => item?.domain === domain || item?.domain === "general");
+  return scoped.length ? { items: scoped, relaxed: false } : { items: list, relaxed: list.length > 0 };
+}
