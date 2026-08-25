@@ -6,25 +6,26 @@ import { runQa } from "../src/qa.mjs";
 
 const TITLE_SOURCE = "《黑神话：钟馗》X分钟实机演示";
 
-test("韩语译文照搬中文书名号时给出约定提示", () => {
+test("韩语作品名约定是《》：符合约定时不提示", () => {
+  // 已入库的人工批准韩语译例统一用《검은 신화: 오공》，本项目以此为准。
   const issues = checkOrthography({
     source: TITLE_SOURCE,
     translation: "《검은 신화: 종규》 X분 실제 플레이 영상",
     locale: "ko-KR"
   });
-  const title = issues.find((issue) => issue.type === "orthography_title_bracket");
-  assert.ok(title, "实测样本里 7 处书名号全部照搬，此前无任何拦截");
-  assert.match(title.message, /「」/);
-  assert.equal(title.severity, "warning", "标点是可秒改的格式问题，不该像硬错误一样封顶");
+  assert.equal(issues.length, 0);
 });
 
-test("使用约定括号时不再提示", () => {
+test("韩语改用其他括号标作品名时给出约定提示", () => {
   const issues = checkOrthography({
     source: TITLE_SOURCE,
     translation: "「검은 신화: 종규」 X분 실제 플레이 영상",
     locale: "ko-KR"
   });
-  assert.equal(issues.length, 0);
+  const title = issues.find((issue) => issue.type === "orthography_title_bracket");
+  assert.ok(title);
+  assert.match(title.message, /《》/);
+  assert.equal(title.severity, "warning", "标点是可秒改的格式问题，不该像硬错误一样封顶");
 });
 
 test("中文标点混进韩语译文按无效标点报告，重复出现只报一条", () => {
@@ -47,7 +48,7 @@ test("日语允许【】但不接受中文书名号", () => {
 });
 
 test("原文没有标作品名时不误判普通括号", () => {
-  const issues = checkOrthography({ source: "实机演示", translation: "「실제 플레이」", locale: "ko-KR" });
+  const issues = checkOrthography({ source: "实机演示", translation: "〈실제 플레이〉", locale: "ko-KR" });
   assert.equal(issues.filter((issue) => issue.type === "orthography_title_bracket").length, 0);
 });
 
@@ -97,7 +98,7 @@ test("数字真的丢掉时仍然报告，但只是待确认而非硬错误", ()
 test("硬 QA 会带出标点约定问题，且不影响强制术语判定", () => {
   const issues = runQa({
     source: TITLE_SOURCE,
-    translation: "《검은 신화: 종규》 X분",
+    translation: "「검은 신화: 종규」 X분",
     locale: "ko-KR",
     matches: []
   });
