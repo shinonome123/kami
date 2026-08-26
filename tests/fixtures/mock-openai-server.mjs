@@ -50,7 +50,11 @@ const server = http.createServer(async (req, res) => {
     : prompt.includes("译者画像编辑")
     ? JSON.stringify({ name: "译者画像", instructions: "偏好短句、口语化收尾，避免书面腔。", examples: [{ type: "positive", source: "先走一步了", target: "お先に失礼！", reason: "客套话用目标语言固定表达" }] })
     : prompt.includes("风格资产编辑")
-    ? JSON.stringify({ name: "日语宣发风格", instructions: "使用自然、克制且具有期待感的敬体；保留事实、日期和 CTA。", examples: [{ type: "positive", source: "活动现已开启。", target: "イベントが開始しました。", reason: "自然敬体" }] })
+    // 规则蒸馏返回的是增量操作，不再是整篇 instructions。
+    ? JSON.stringify({ name: "日语宣发风格", summary: "本轮新增敬体与 CTA 两条规则", operations: [
+      { op: "add", category: "语气", rule: "使用自然、克制且具有期待感的敬体", reason: "多条证据一致" },
+      { op: "add", category: "格式", rule: "保留事实、日期与 CTA 不改写", reason: "多条证据一致" }
+    ] })
     : prompt.includes("独立于翻译器")
     ? JSON.stringify({ issues: [] })
     : prompt.includes("最终修订译者")

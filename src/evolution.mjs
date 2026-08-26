@@ -2,6 +2,7 @@ import { distillBatchStyleLearningWithModel, distillStyleProfileWithModel, disti
 import { getQaRuns, getStyleEvidence, getStyleProfile, listStyleProfiles, saveStyleLearningRun, saveStyleProfile, saveUserProfile } from "./store.mjs";
 import { STYLE_DISTILL_GROWTH_WINDOW, STYLE_DISTILL_THRESHOLD, evaluateStyleDistillDecision, readStyleDistillState } from "./style-distill-gate.mjs";
 import { positiveEvidenceOnly, shapeDistillEvidence } from "./style-delta.mjs";
+import { DEFAULT_STALE_ROUNDS, applyRulePatch, renderInstruction, summarizeRules } from "./style-rules.mjs";
 
 // 阈值统一由设置面板提供（环境变量已在 settings-store 里优先合并）。
 // 这几个导出保留为出厂值，供未注入设置时的纯函数默认与测试使用。
@@ -9,10 +10,10 @@ export const DISTILL_THRESHOLD = STYLE_DISTILL_THRESHOLD;
 export const DISTILL_GROWTH_WINDOW = STYLE_DISTILL_GROWTH_WINDOW;
 export const PROFILE_THRESHOLD = 3;
 
-function sampleEvidence(evidence) {
+function sampleEvidence(evidence, limits = {}) {
   const human = evidence.filter((item) => item.provenance === "human-accept");
   const rest = evidence.filter((item) => item.provenance !== "human-accept");
-  return shapeDistillEvidence([...human, ...rest]);
+  return shapeDistillEvidence([...human, ...rest], limits);
 }
 
 function dedupeQaRuns(runs) {
@@ -81,7 +82,8 @@ export async function distillBatchStyleLearning({ batchId, filename, locale, con
 
 export async function distillStyleProfileIfReady({
   locale, contentType, domain, sourceBatchId = "", learningRunId = "",
-  threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW
+  threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW,
+  positiveLimit = 50, negativeLimit = 15, staleRounds = DEFAULT_STALE_ROUNDS
 }) {
   const [evidence, existingProfiles] = await Promise.all([
     getStyleEvidence(locale, { contentType, domain, exactScope: true, limit: 1_000 }),
@@ -95,10 +97,25 @@ export async function distillStyleProfileIfReady({
   });
   if (!decision.distill) return { distilled: null, ...decision };
   const previousProfile = await getStyleProfile(locale, contentType, domain);
-  const { examples, counterExamples } = sampleEvidence(evidence);
-  const distilled = await distillStyleProfileWithModel({ locale, contentType, domain, examples, counterExamples, previousProfile });
+  const { examples, counterExamples } = sampleEvidence(evidence, { positiveLimit, negativeLimit });
+  // 规则跨轮累积：模型看到已有规则并只提出增量操作，没提到的规则不会被删掉。
+  const existingRules = Array.isArray(previousProfile?.rules) ? previousProfile.rules : [];
+  const round = Math.max(0, ...existingRules.map((rule) => Number(rule.lastRound) || 0)) + 1;
+  const distilled = await distillStyleProfileWithModel({
+    locale, contentType, domain, examples, counterExamples, previousProfile, existingRules
+  });
+  const applied = applyRulePatch(existingRules, distilled.operations, {
+    round,
+    now: new Date().toISOString(),
+    evidenceCount: evidence.length,
+    staleRounds
+  });
   const profile = await saveStyleProfile({
-    locale, contentType, domain, ...distilled,
+    locale, contentType, domain,
+    name: distilled.name,
+    instruction: renderInstruction(applied.rules, previousProfile?.instruction),
+    rules: applied.rules,
+    examples: (previousProfile?.examples || []).slice(0, 12),
     evidenceCount: evidence.length,
     evidenceIds: evidence.slice(0, 200).map((item) => item.id),
     generatedBy: getProviderConfig().model,
@@ -106,7 +123,18 @@ export async function distillStyleProfileIfReady({
     learningRunId,
     status: "draft"
   });
-  return { distilled: profile, ...decision };
+  return {
+    distilled: profile,
+    ...decision,
+    ruleChange: {
+      round,
+      summary: distilled.summary,
+      confirmed: applied.confirmedIds.length,
+      retiredByAge: applied.retiredByAge.length,
+      warnings: applied.warnings,
+      ...summarizeRules(applied.rules)
+    }
+  };
 }
 
 export async function distillUserProfileIfReady(locale, { threshold = PROFILE_THRESHOLD } = {}) {
@@ -119,22 +147,17 @@ export async function distillUserProfileIfReady(locale, { threshold = PROFILE_TH
   return { profile, acceptedCount: accepted.length, threshold };
 }
 
-export async function runEvolutionReview({ locale, contentType, domain, batchId = "", threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW }) {
-  const [evidence, existingProfiles, qaRunsRaw, previousProfile] = await Promise.all([
+export async function runEvolutionReview({
+  locale, contentType, domain, batchId = "",
+  threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW,
+  positiveLimit = 50, negativeLimit = 15, staleRounds = DEFAULT_STALE_ROUNDS
+}) {
+  const [evidence, qaRunsRaw, previousProfile] = await Promise.all([
     getStyleEvidence(locale, { contentType, domain, exactScope: true, limit: 1_000 }),
-    listStyleProfiles(locale, null, { contentType, domain }),
     getQaRuns(locale, { contentType, domain, limit: 60 }),
     getStyleProfile(locale, contentType, domain)
   ]);
   const qaRuns = dedupeQaRuns(qaRunsRaw);
-  // The review's stylePatch is a distillation like any other and must clear the
-  // same gate; otherwise every finished batch mints another unreviewed draft.
-  const gate = evaluateStyleDistillDecision({
-    evidenceCount: evidence.length,
-    ...readStyleDistillState(existingProfiles.styleProfiles, { contentType, domain }),
-    threshold,
-    growthWindow
-  });
   const result = {
     locale, contentType, domain, batchId,
     evidenceCount: evidence.length,
@@ -149,31 +172,17 @@ export async function runEvolutionReview({ locale, contentType, domain, batchId 
   } catch (error) {
     result.fallbackReasons.review = error.message;
   }
-  if (result.review?.stylePatch && !gate.distill) {
-    result.distillPending = gate;
-  } else if (result.review?.stylePatch) {
-    try {
-      result.distilled = await saveStyleProfile({
-        locale, contentType, domain,
-        name: `${previousProfile?.name || `${locale} ${contentType} 风格`} 复盘修订`,
-        instruction: result.review.stylePatch.instruction,
-        examples: result.review.stylePatch.examples,
-        evidenceCount: evidence.length,
-        evidenceIds: evidence.slice(0, 200).map((item) => item.id),
-        generatedBy: getProviderConfig().model,
-        status: "draft"
-      });
-    } catch (error) {
-      result.fallbackReasons.stylePatch = error.message;
-    }
-  } else {
-    try {
-      const { distilled, ...pending } = await distillStyleProfileIfReady({ locale, contentType, domain, threshold, growthWindow });
-      if (distilled) result.distilled = distilled;
-      else result.distillPending = pending;
-    } catch (error) {
-      result.fallbackReasons.distill = error.message;
-    }
+  // 风格规范只有一个写入口：规则蒸馏。复盘的价值在 trend（问题趋势），
+  // 它此前那条直接写 profile 的旁路会绕过规则累积，把整份规范退回成散文，
+  // 等于把刚攒起来的规则一次性抹平。
+  try {
+    const { distilled, ...pending } = await distillStyleProfileIfReady({
+      locale, contentType, domain, threshold, growthWindow, positiveLimit, negativeLimit, staleRounds
+    });
+    if (distilled) result.distilled = distilled;
+    else result.distillPending = pending;
+  } catch (error) {
+    result.fallbackReasons.distill = error.message;
   }
   try {
     const profileResult = await distillUserProfileIfReady(locale);

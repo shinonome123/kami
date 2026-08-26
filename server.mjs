@@ -703,7 +703,10 @@ async function commitTermImport(body, onProgress = null) {
         sourceBatchId: body.batchId,
         learningRunId: learning?.id || "",
         threshold: getSettings().learning.styleDistillThreshold,
-        growthWindow: getSettings().learning.styleDistillGrowthWindow
+        growthWindow: getSettings().learning.styleDistillGrowthWindow,
+        positiveLimit: getSettings().learning.distillPositiveSamples,
+        negativeLimit: getSettings().learning.distillNegativeSamples,
+        staleRounds: getSettings().learning.ruleStaleRounds
       });
       if (distilled) {
         styleProfiles.push(distilled);
@@ -1115,7 +1118,10 @@ async function apiHandler(req, res, url) {
       domain: body.domain || "general",
       batchId: body.batchId || "",
       threshold: getSettings().learning.styleDistillThreshold,
-      growthWindow: getSettings().learning.styleDistillGrowthWindow
+      growthWindow: getSettings().learning.styleDistillGrowthWindow,
+      positiveLimit: getSettings().learning.distillPositiveSamples,
+      negativeLimit: getSettings().learning.distillNegativeSamples,
+      staleRounds: getSettings().learning.ruleStaleRounds
     });
     return json(res, 200, result);
   }
@@ -2086,7 +2092,10 @@ async function apiHandler(req, res, url) {
           domain: share.domain,
           sourceBatchId: share.batchId,
           threshold: getSettings().learning.styleDistillThreshold,
-          growthWindow: getSettings().learning.styleDistillGrowthWindow
+          growthWindow: getSettings().learning.styleDistillGrowthWindow,
+          positiveLimit: getSettings().learning.distillPositiveSamples,
+          negativeLimit: getSettings().learning.distillNegativeSamples,
+          staleRounds: getSettings().learning.ruleStaleRounds
         });
       } catch {
         // 未达阈值或蒸馏失败不阻断采纳

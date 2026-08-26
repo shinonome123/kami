@@ -242,7 +242,7 @@ export async function saveDirectusMemory(locale, input) {
 
 export async function getDirectusStyleProfile(locale, contentType, domain = "general") {
   assertLocale(locale);
-  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
+  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,rules,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
   params.set("filter[target_locale][_eq]", locale);
   params.set("filter[content_type][_eq]", contentType || "general");
   params.set("filter[status][_eq]", "active");
@@ -379,6 +379,7 @@ export async function saveDirectusStyleProfile(input) {
     domain: input.domain || "general",
     instructions: input.instruction,
     examples: input.examples || [],
+    rules: input.rules || [],
     version: (Number(previous?.version) || 0) + 1,
     parent_id: previous?.id || null,
     evidence_count: Number(input.evidenceCount) || 0,
@@ -389,7 +390,7 @@ export async function saveDirectusStyleProfile(input) {
     status: input.status || "active"
   } });
   if (previous?.id && saved.status === "active") await request(`/items/style_profiles/${previous.id}`, { method: "PATCH", body: { status: "inactive" } });
-  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], version: saved.version, locale, contentType: saved.content_type, domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
+  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], rules: arrayValue(saved.rules), version: saved.version, locale, contentType: saved.content_type, domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
 }
 
 function mapStyleLearningRun(item) {
@@ -1034,11 +1035,11 @@ export async function deleteDirectusBackgroundTask(id) {
 }
 
 export async function findDirectusStyleProfile(id) {
-  const fields = "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated";
+  const fields = "id,name,target_locale,content_type,domain,instructions,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated";
   const shape = (item, kind) => ({
     id: item.id, name: item.name, locale: item.target_locale,
     contentType: item.content_type || "", domain: item.domain || "general",
-    instruction: item.instructions, examples: arrayValue(item.examples),
+    instruction: item.instructions, examples: arrayValue(item.examples), rules: arrayValue(item.rules),
     version: Number(item.version) || 1, parentId: item.parent_id || null,
     evidenceCount: Number(item.evidence_count) || 0, evaluation: item.evaluation || null,
     status: item.status, kind, updatedAt: item.date_updated
@@ -1061,7 +1062,7 @@ export async function saveDirectusStyleProfileEvaluation(id, evaluation) {
 
 export async function listDirectusStyleProfiles(locale, status, scope = null) {
   assertLocale(locale);
-  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
+  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
   styleParams.set("filter[target_locale][_eq]", locale);
   if (status) styleParams.set("filter[status][_eq]", status);
   if (scope?.contentType) {
@@ -1079,14 +1080,14 @@ export async function listDirectusStyleProfiles(locale, status, scope = null) {
   return {
     styleProfiles: styleProfiles.map((item) => ({
       id: item.id, name: item.name, locale: item.target_locale, contentType: item.content_type, domain: item.domain || "general",
-      instruction: item.instructions, examples: arrayValue(item.examples), version: Number(item.version) || 1,
+      instruction: item.instructions, examples: arrayValue(item.examples), rules: arrayValue(item.rules), version: Number(item.version) || 1,
       parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0,
       sourceBatchId: item.source_batch_id || "", learningRunId: item.learning_run_id || "",
       evaluation: item.evaluation || null,
       status: item.status, updatedAt: item.date_updated
     })),
     userProfiles: userProfiles.map((item) => ({
-      id: item.id, name: item.name, locale: item.target_locale, instruction: item.instructions, examples: arrayValue(item.examples),
+      id: item.id, name: item.name, locale: item.target_locale, instruction: item.instructions, examples: arrayValue(item.examples), rules: arrayValue(item.rules),
       version: Number(item.version) || 1, parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0, status: item.status, updatedAt: item.date_updated
     }))
   };

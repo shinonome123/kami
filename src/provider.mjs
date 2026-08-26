@@ -381,34 +381,44 @@ export async function analyzeTermTableStructureWithModel(snapshot, requestedLoca
   return payload;
 }
 
-export async function distillStyleProfileWithModel({ locale, contentType, domain, examples, counterExamples = [], previousProfile = null }) {
+export async function distillStyleProfileWithModel({ locale, contentType, domain, examples, counterExamples = [], previousProfile = null, existingRules = [] }) {
   const language = LOCALE_NAMES[locale] || locale;
+  const active = (existingRules || []).filter((rule) => rule.status !== "retired");
   const content = await chat([
     {
       role: "system",
-      content: `你是${language}游戏本地化风格资产编辑。请只根据给定的已对齐中外文证据，为“${contentType}”这一种内容语体提炼稳定、可执行的风格规范。不得混入其他语体，不得编造作品设定。规则应覆盖语气、句式、称谓、标点、信息顺序、长度倾向、禁用表达，并提供简短正反例。
-`
-        + `证据分三类，信息量不同，请区别对待：
-`
-        + `1. change="revised"：machineDraft 是机器初稿，target 是人工改写后的定稿。**两者的差异就是这个团队的风格偏好本身**，请逐条读出人改了什么（语气/长度/称谓/句式/标点/用词），并归纳成可复用的规则；machineDraft 一律视为不合格写法，可直接用作反例。
-`
-        + `2. change="confirmed"：人工原样采纳了机器译文，说明该写法已达标，可作正例但不携带改动信息。
-`
-        + `3. change="imported"：外部导入的既有对照，没有经过本项目审校，权重最低。
-`
-        + `counterExamples 是同事明确否决但尚未给出改写的译文，只能当反例，绝不可作为 target 复用。
-`
-        + `revised 与 counterExamples 应当主导规则；如果两者都很少，请在 instructions 中说明证据以既有对照为主、规则置信度有限。
-`
-        + `输出严格 JSON：{"name":"名称","instructions":"详实规则","examples":[{"type":"positive|negative","source":"原文","target":"译文或反例","reason":"原因"}]}`
+      content: `你是${language}游戏本地化风格资产编辑。你的产出不是重写整份规范，而是对**已有规则集**提出增量操作——规则是跨轮累积的，历史规则不会因为你这轮没提到就被删掉。\n`
+        + `对每条已有规则，如果本批证据仍然支持它就 keep，措辞需要修正就 update，本批证据明确与它冲突才 retire（必须写明冲突在哪）。本批出现了已有规则未覆盖的稳定现象，才 add。\n`
+        + `不要为了凑数而 add：只在同一现象至少出现两次时才立规则。也不要把一次性的偶然译法写成通用规则。\n\n`
+        + `证据分三类，信息量不同：\n`
+        + `1. change="revised"：machineDraft 是机器初稿，target 是人工改写后的定稿。**两者的差异就是这个团队的风格偏好本身**，请读出人改了什么（语气/长度/称谓/句式/标点/用词）并归纳成规则；machineDraft 一律视为不合格写法。\n`
+        + `2. change="confirmed"：人工原样采纳，说明该写法已达标，但不携带改动信息。\n`
+        + `3. change="imported"：外部导入的既有对照，没有经过本项目审校，权重最低。\n`
+        + `counterExamples 是同事明确否决但尚未给出改写的译文，只能当反例。\n\n`
+        + `规则要具体到可执行：写"句尾用敬体ます形，不用だ・である"，不要写"注意语气"。category 从 语气/句式/称谓/句尾/标点/长度/用词/格式 中选。\n`
+        + `输出严格 JSON：{"operations":[{"op":"keep","id":"r-xxx"},{"op":"update","id":"r-xxx","rule":"修正后的规则","reason":"为何修正"},{"op":"add","category":"语气","rule":"新规则","reason":"依据"},{"op":"retire","id":"r-xxx","reason":"与本批哪条证据冲突"}],"summary":"本轮变化摘要"}`
     },
-    { role: "user", content: JSON.stringify({ locale, contentType, domain, previousProfile, examples: examples.slice(0, 30), counterExamples: (counterExamples || []).slice(0, 10) }) }
-  ]);
+    {
+      role: "user",
+      content: JSON.stringify({
+        locale, contentType, domain,
+        existingRules: active.map((rule) => ({ id: rule.id, category: rule.category, rule: rule.rule, evidenceCount: rule.evidenceCount, rounds: rule.rounds })),
+        // 尚未结构化的历史规范：首次按规则蒸馏时让模型把它转成 add 操作。
+        legacyInstruction: active.length ? undefined : (previousProfile?.instruction || undefined),
+        examples: examples.slice(0, 200),
+        counterExamples: (counterExamples || []).slice(0, 40)
+      })
+    }
+  ], runtimeConfig, { temperature: 0.2, timeoutMs: 120_000, maxTokens: 4_000, requestLabel: "风格规则蒸馏", responseFormat: { type: "json_object" } });
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("风格精炼模型未返回 JSON");
   const payload = JSON.parse(match[0]);
-  if (!payload.instructions || !Array.isArray(payload.examples)) throw new Error("风格精炼模型返回格式无效");
-  return { name: String(payload.name || `${language} ${contentType} 风格`), instruction: String(payload.instructions), examples: payload.examples.slice(0, 12) };
+  if (!Array.isArray(payload.operations)) throw new Error("风格精炼模型未返回 operations 数组");
+  return {
+    name: String(payload.name || `${language} ${contentType} 风格`),
+    operations: payload.operations,
+    summary: String(payload.summary || "")
+  };
 }
 
 export async function distillBatchStyleLearningWithModel({ batchId, filename, locale, contentType, domain, examples = [] }) {

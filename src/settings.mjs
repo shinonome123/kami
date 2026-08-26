@@ -50,6 +50,9 @@ export const SETTING_SPECS = Object.freeze({
   "learning.autoProposeGrowthWindow": { min: 1, max: 200, step: 1, default: 10, label: "自动提议增长窗口", hint: "上次提议后需再新增多少条" },
   "learning.styleEvaluationMinSamples": { min: 5, max: 200, step: 1, default: 12, label: "风格评测最小样本", hint: "留出集不足这么多条时拒绝开始评测" },
   "learning.skillEvaluationMinSamples": { min: 5, max: 200, step: 1, default: 20, label: "技能评测最小样本", hint: "少于此数的评测结论不允许晋升" },
+  "learning.distillPositiveSamples": { min: 10, max: 200, step: 5, default: 50, label: "蒸馏取样：正例条数", hint: "每轮喂给模型的双语证据上限；50 条约 3k 字符，200 条约 13k，上限不是上下文而是注意力稀释" },
+  "learning.distillNegativeSamples": { min: 0, max: 60, step: 5, default: 15, label: "蒸馏取样：反例条数", hint: "同事否决但尚未改写的译文上限" },
+  "learning.ruleStaleRounds": { min: 2, max: 20, step: 1, default: 4, label: "规则退休轮数", hint: "连续多少轮蒸馏没被证据确认才退休。设小了退回滚动重写，设大了过时规则赖着不走" },
 
   "share.glossLimit": { min: 5, max: 200, step: 5, default: 30, label: "分享页语素拆解上限", hint: "每个分享链接后台生成的逐句拆解段数" }
 });

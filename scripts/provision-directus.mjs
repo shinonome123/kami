@@ -349,6 +349,7 @@ const definitions = [
       textField("generated_by", "生成模型", { width: "half", sort: 12 }),
       textField("source_batch_id", "来源导入批次 ID", { width: "half", sort: 13 }),
       textField("learning_run_id", "风格学习记录 ID", { width: "half", sort: 14 }),
+      jsonField("rules", "累积风格规则", { note: "跨轮累积的规则集，含 id、类别、累计证据数与退休状态；instructions 是它的渲染结果。", sort: 15 }),
       jsonField("evaluation", "评测结论", { note: "本草稿与当前生效版本在人工终稿留出集上的配对评测结果；未评测为空。", sort: 15 }),
       selectField("status", "状态", [["启用", "active"], ["草稿", "draft"], ["停用", "inactive"]], { defaultValue: "draft", sort: 16 }),
       dateField("date_updated", "更新时间", "date-updated", 17)

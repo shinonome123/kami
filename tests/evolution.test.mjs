@@ -83,13 +83,13 @@ test("池子过线后不再每条证据都重烧模型：待审草稿先挡，�
   assert.equal(drafts.styleProfiles.length, 1, "同一作用域任何时刻最多只有一个待审草稿");
 });
 
-test("复盘的 stylePatch 也要过同一道闸门，不再每个批次都生成草稿", async () => {
+test("复盘不再自己写风格规范，统一走规则蒸馏这一个入口", async () => {
   const scope = { locale: "ko-KR", contentType: "marketing", domain: "review-patch" };
   await seedEvidence("ko-KR", "marketing", "review-patch", DISTILL_THRESHOLD, "human-accept");
 
   const first = await runEvolutionReview({ ...scope, batchId: "batch-1" });
-  assert.ok(first.review?.stylePatch, "本作用域的复盘模型确实返回了增量补丁");
-  assert.ok(first.distilled?.id, "首次达到阈值时复盘补丁落为草稿");
+  assert.ok(first.distilled?.id, "首次达到阈值时复盘触发规则蒸馏并落为草稿");
+  assert.ok(Array.isArray(first.distilled.rules) && first.distilled.rules.length, "产出必须是累积规则而不是散文");
 
   const second = await runEvolutionReview({ ...scope, batchId: "batch-2" });
   assert.equal(second.distilled, null, "已有待审草稿时复盘不再落新草稿");
