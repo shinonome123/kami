@@ -168,6 +168,21 @@ function toDirectusTerm(input) {
   };
 }
 
+/**
+ * Directus 对"条目不存在"和"无权访问"一律返回 403 FORBIDDEN，从不返回 404
+ * ——这是它刻意的设计，避免用 404/403 的差别泄露某个 id 是否存在。
+ *
+ * 代码里十处"取不到就当没有"的判断原本只认 404，于是全部失效。最直接的后果是
+ * 激活译者画像：先查 style_profiles 拿到 403，本该回退去查 user_profiles，
+ * 却把 403 当成真错误抛给了用户。
+ *
+ * 把两者一并视为"没有这条"。代价是真正的权限配置错误也会被当成不存在，因此
+ * 服务账号的权限由 provision 统一保证，出问题时看 provision 输出而不是这里。
+ */
+function isMissingItem(error) {
+  return [403, 404].includes(Number(error?.statusCode));
+}
+
 export async function initializeDirectusStore() {
   const health = await fetch(`${config().baseUrl}/server/ping`, { signal: AbortSignal.timeout(5_000) });
   if (!health.ok) throw new Error(`Directus health check failed (${health.status})`);
@@ -772,7 +787,7 @@ export async function getDirectusBatchRun(batchId) {
       updatedAt: item.date_updated || null
     };
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }
@@ -846,7 +861,7 @@ export async function getDirectusQaTask(id) {
       report: item.report ?? null, createdAt: item.date_created || null, updatedAt: item.date_updated || null
     };
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }
@@ -873,7 +888,7 @@ export async function deleteDirectusQaTask(id) {
     await request(`/items/qa_tasks/${encodeURIComponent(String(id))}`, { method: "DELETE" });
     return true;
   } catch (error) {
-    if (error.statusCode === 404) return false;
+    if (isMissingItem(error)) return false;
     throw error;
   }
 }
@@ -918,7 +933,7 @@ export async function getDirectusShare(token) {
       createdAt: item.date_created || null, updatedAt: item.date_updated || null
     };
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }
@@ -1004,7 +1019,7 @@ export async function getDirectusBackgroundTask(id) {
       createdAt: item.date_created || null, updatedAt: item.date_updated || null
     };
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }
@@ -1029,7 +1044,7 @@ export async function deleteDirectusBackgroundTask(id) {
     await request(`/items/background_tasks/${encodeURIComponent(String(id))}`, { method: "DELETE" });
     return true;
   } catch (error) {
-    if (error.statusCode === 404) return false;
+    if (isMissingItem(error)) return false;
     throw error;
   }
 }
@@ -1098,7 +1113,7 @@ export async function activateDirectusStyleProfile(id) {
   try {
     target = await request(`/items/style_profiles/${encodeURIComponent(id)}?fields=id,target_locale,content_type,domain,status`);
   } catch (error) {
-    if (error.statusCode === 404) {
+    if (isMissingItem(error)) {
       target = await request(`/items/user_profiles/${encodeURIComponent(id)}?fields=id,target_locale,status`);
       const deactivate = await request(`/items/user_profiles?limit=-1&fields=id,status&filter[target_locale][_eq]=${target.target_locale}&filter[status][_eq]=active`);
       if (deactivate.length) await request("/items/user_profiles", { method: "PATCH", body: deactivate.map((item) => ({ id: item.id, status: "inactive" })) });
@@ -1333,7 +1348,7 @@ export async function getDirectusLearningTrajectory(id) {
   try {
     return mapLearningTrajectory(await request(`/items/learning_trajectories/${encodeURIComponent(String(id))}?fields=*`));
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }
@@ -1455,7 +1470,7 @@ export async function getDirectusTranslationSkill(id) {
   try {
     return mapTranslationSkill(await request(`/items/translation_skills/${encodeURIComponent(String(id))}?fields=*`));
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }
@@ -1638,7 +1653,7 @@ export async function getDirectusSkillEvaluation(id) {
   try {
     return mapSkillEvaluation(await request(`/items/skill_evaluations/${encodeURIComponent(String(id))}?fields=*`));
   } catch (error) {
-    if (error.statusCode === 404) return null;
+    if (isMissingItem(error)) return null;
     throw error;
   }
 }

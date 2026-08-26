@@ -1221,7 +1221,8 @@ export async function disposeQaCase(id) {
 export async function findStyleProfile(id) {
   if (usesDirectus()) return findDirectusStyleProfile(id);
   const located = await locateJsonStyleProfile(id);
-  return located ? located.target : null;
+  // kind 让调用方能区分风格规范与译者画像：两者只有前者参与配对评测。
+  return located ? { ...located.target, kind: located.kind || "style" } : null;
 }
 
 /** Attach (or clear, with null) the paired-benchmark conclusion for a style draft. */

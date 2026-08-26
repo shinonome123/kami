@@ -1057,7 +1057,7 @@ async function apiHandler(req, res, url) {
     const body = await readJsonBody(req).catch(() => ({}));
     const located = await findStyleProfile(id);
     // 有评测结论且结论反对时必须显式 force，并把这次越过闸门的事实记在规范上。
-    if (located?.evaluation && located.evaluation.promotable !== true && body.force !== true) {
+    if (located?.kind !== "user_profile" && located?.evaluation && located.evaluation.promotable !== true && body.force !== true) {
       const error = new Error(`评测结论不支持启用：${located.evaluation.conclusion || "未达晋升门槛"}。确认仍要启用请勾选“忽略评测结论”。`);
       error.statusCode = 409;
       throw error;
@@ -1068,7 +1068,8 @@ async function apiHandler(req, res, url) {
       error.statusCode = 404;
       throw error;
     }
-    if (located) {
+    // 译者画像不参与配对评测，也不在 style_profiles 表里，不能往那儿写激活依据。
+    if (located && located.kind !== "user_profile") {
       const basis = !located.evaluation ? "unevaluated" : located.evaluation.promotable === true ? "evaluated" : "forced";
       await saveStyleProfileEvaluation(id, { ...(located.evaluation || {}), activationBasis: basis, activatedAt: new Date().toISOString() });
       activated.evaluation = { ...(located.evaluation || {}), activationBasis: basis };

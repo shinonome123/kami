@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { saveBackgroundTask, getBackgroundTask, deleteBackgroundTask, activateStyleProfile, deleteAsset, disposeQaCase, getAssets, getAssetStats, getBatchRun, getMemories, getQaCases, getQaRuns, getStyleEvidence, getStyleLearningRuns, getStyleProfile, initializeStore, listBatchRuns, listStyleProfiles, rejectStyleProfile, saveAsset, saveBatchRun, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile } from "../src/store.mjs";
+import { saveBackgroundTask, getBackgroundTask, deleteBackgroundTask, findStyleProfile, saveUserProfile, activateStyleProfile, deleteAsset, disposeQaCase, getAssets, getAssetStats, getBatchRun, getMemories, getQaCases, getQaRuns, getStyleEvidence, getStyleLearningRuns, getStyleProfile, initializeStore, listBatchRuns, listStyleProfiles, rejectStyleProfile, saveAsset, saveBatchRun, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile } from "../src/store.mjs";
 
 const enabled = process.env.KAMI_STORE === "directus";
 
@@ -190,5 +190,22 @@ test("跨语言后台任务允许没有目标语言，术语导入不因非空�
     assert.ok(!stored.locale, "跨语言任务的 locale 应为空而不是被塞一个假语言");
   } finally {
     await deleteBackgroundTask(task.id);
+  }
+});
+
+test("激活译者画像不会被 Directus 的 403 挡住，也不写风格评测", { skip: !enabled }, async () => {
+  await initializeStore();
+  // Directus 对"条目不存在"和"无权访问"一律返回 403，从不返回 404。
+  // 激活先查 style_profiles 拿到 403，本该回退查 user_profiles，
+  // 旧代码只认 404 于是把 403 当真错误抛给用户，画像永远激活不了。
+  const draft = await saveUserProfile({ locale: "th-TH", name: "回归测试画像", instruction: "回归测试", examples: [], evidenceCount: 3, status: "draft" });
+  try {
+    const located = await findStyleProfile(draft.id);
+    assert.equal(located?.kind, "user_profile", "两个后端都要能分辨画像与风格规范");
+    const activated = await activateStyleProfile(draft.id);
+    assert.equal(activated.status, "active");
+    assert.equal(activated.kind, "user_profile");
+  } finally {
+    await rejectStyleProfile(draft.id).catch(() => {});
   }
 });
