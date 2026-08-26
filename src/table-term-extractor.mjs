@@ -30,6 +30,7 @@ const TARGET_HEADERS = Object.freeze({
   "ja-JP": ["日语", "日文", "日本语", "日本語", "ja", "ja-jp", "japanese"],
   "ko-KR": ["韩语", "韩文", "韓語", "한국어", "ko", "ko-kr", "korean"],
   "zh-Hant-TW": ["繁中", "繁体", "繁體", "繁体中文", "繁體中文", "台湾", "臺灣", "zh-tw", "zh-hant", "zh-hant-tw"],
+  "fr-FR": ["法语", "法文", "français", "francais", "fr", "fr-fr", "french"],
   "th-TH": ["泰语", "泰文", "ภาษาไทย", "th", "th-th", "thai"]
 });
 

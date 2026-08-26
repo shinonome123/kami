@@ -18,3 +18,4 @@ tmp/
 /pe_manifest_dump.ps1
 /sx_stdout.txt
 /sx_stderr.txt
+data/exports/

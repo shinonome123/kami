@@ -256,6 +256,7 @@ function updateWorkbenchLocale(locale) {
   $("#targetOutput").contentEditable = "false";
   $("#toggleTargetEdit").hidden = true;
   $("#acceptTranslation").disabled = true;
+  $("#sendToAutoQa").hidden = true;
   $("#targetLegend").hidden = true;
   $("#termMatches").textContent = "尚未匹配";
   $("#termMatches").className = "term-matches empty-list";
@@ -330,6 +331,77 @@ function clearAutoQa() {
   $("#autoQaState").className = "badge neutral";
   $("#autoQaReport").hidden = true;
   refreshActions();
+}
+
+/**
+ * 把已完成的译文交接到 Auto QA。
+ *
+ * 翻译流程与质检流程此前是两个互不相通的入口：译完要复制原文、切页面、再粘贴
+ * 译文，长批次基本没人愿意做。这里把原文/译文/语言/语体/领域一次带过去，
+ * 语体与领域用**翻译时实际生效**的判定结果，而不是 Auto QA 页上的当前选择，
+ * 否则质检会用另一套作用域去比对，判出来的 nuance 问题没有意义。
+ */
+async function handOffToAutoQa({ source, translation, locale, contentType, domain, label }) {
+  const cleanSource = String(source || "").trim();
+  const cleanTranslation = String(translation || "").trim();
+  if (!cleanSource || !cleanTranslation) return toast("没有可质检的译文");
+
+  $("#autoQaSource").value = cleanSource;
+  $("#autoQaTarget").value = cleanTranslation;
+  $("#autoQaSourceCount").textContent = `${[...cleanSource].length} 字`;
+
+  if (locale && state.bootstrap?.locales?.[locale]) {
+    state.autoQaLocale = locale;
+    renderLocaleStrip($("#autoQaLocales"), state.autoQaLocale, updateAutoQaLocale);
+    $("#autoQaTargetKicker").textContent = `TARGET · ${locale.toUpperCase()}`;
+    $("#autoQaTargetTitle").textContent = `${state.bootstrap.locales[locale]?.label || locale}译文`;
+  }
+  // 沿用翻译时生效的作用域，让质检和翻译看同一份风格规范与译例。
+  if (contentType && [...$("#autoQaContentType").options].some((option) => option.value === contentType)) {
+    $("#autoQaContentType").value = contentType;
+  }
+  if (domain && [...$("#autoQaDomain").options].some((option) => option.value === domain)) {
+    $("#autoQaDomain").value = domain;
+  }
+
+  switchView("autoqa");
+  toast(`${label} 已送入 Auto QA，开始逐句质检…`);
+  await runAutoQa();
+}
+
+function sendCurrentTranslationToAutoQa() {
+  const result = state.lastResult;
+  if (!result?.translation) return toast("请先完成一次翻译");
+  return handOffToAutoQa({
+    source: $("#sourceText").value,
+    translation: result.translation,
+    locale: state.workbenchLocale,
+    contentType: result.classification?.contentType,
+    domain: result.domainResolution?.domain,
+    label: "当前译文"
+  });
+}
+
+/**
+ * 批次交接按原始顺序拼接已完成分段，原文与译文用同样的换行拼法，
+ * Auto QA 的逐句对齐才能把它们一一对上。未完成的分段直接跳过——
+ * 让空译文进去只会制造整句漏译的假问题。
+ */
+function sendBatchToAutoQa() {
+  const segments = (state.batchPreview?.segments || [])
+    .filter((segment) => segment.status === "done" && String(segment.translation || "").trim())
+    .sort((left, right) => (left.index || 0) - (right.index || 0));
+  if (!segments.length) return toast("批次里还没有完成的译文");
+  const skipped = (state.batchPreview?.segments || []).length - segments.length;
+  return handOffToAutoQa({
+    source: segments.map((segment) => segment.source).join("\n"),
+    translation: segments.map((segment) => segment.translation).join("\n"),
+    locale: state.workbenchLocale,
+    contentType: state.batchClassification?.contentType,
+    // 领域取服务端实际判定的结果；批次里各段作用域一致，取第一段即可。
+    domain: segments.find((segment) => segment.result?.domainResolution?.domain)?.result.domainResolution.domain || $("#domain").value,
+    label: skipped > 0 ? `批次 ${segments.length} 段（跳过未完成 ${skipped} 段）` : `批次全部 ${segments.length} 段`
+  });
 }
 
 async function runAutoQa() {
@@ -562,6 +634,7 @@ function renderTranslationOutput() {
   $("#toggleTargetEdit").hidden = false;
   $("#toggleTargetEdit").textContent = editable ? "完成编辑" : "编辑译文";
   $("#acceptTranslation").disabled = !result.translation;
+  $("#sendToAutoQa").hidden = !result.translation;
 }
 
 function toggleTargetEdit() {
@@ -872,6 +945,7 @@ function renderBatchSegments() {
     </div>`;
   }).join("");
   $("#acceptAllSegments").hidden = !segments.some((segment) => segment.status === "done" && segment.translation && !segment.accepted);
+  $("#batchToAutoQa").hidden = !segments.some((segment) => segment.status === "done" && String(segment.translation || "").trim());
   $$(".batch-segment-check").forEach((checkbox) => checkbox.addEventListener("change", () => {
     const segment = segments.find((item) => item.id === checkbox.dataset.id);
     if (segment) segment.selected = checkbox.checked;
@@ -1987,7 +2061,7 @@ function resetImport() {
   state.importBatchLearning = [];
   $("#termFile").value = "";
   $("#filePrompt").textContent = "拖入或点击选择 .xlsx / .csv";
-  $("#fileMeta").textContent = "拖入后自动识别；不要求表头，支持日、韩、繁中、泰列";
+  $("#fileMeta").textContent = "拖入后自动识别；不要求表头，支持日、韩、繁中、法、泰列";
   $("#dropZone").classList.remove("has-file");
   $("#mappingNote").textContent = "拖入表格后会自动识别结构并生成审核队列。";
   $("#importSummary").innerHTML = "<span>尚未清洗</span>";
@@ -2915,7 +2989,9 @@ function bindEvents() {
   $("#confirmTermReplace").addEventListener("click", applyTermSuggestion);
   $("#toggleTargetEdit").addEventListener("click", toggleTargetEdit);
   $("#acceptTranslation").addEventListener("click", acceptSingleTranslation);
+  $("#sendToAutoQa").addEventListener("click", sendCurrentTranslationToAutoQa);
   $("#acceptAllSegments").addEventListener("click", acceptAllSegments);
+  $("#batchToAutoQa").addEventListener("click", sendBatchToAutoQa);
   $$('[data-close]').forEach((button) => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));
 }
 
@@ -2924,12 +3000,7 @@ async function initialize() {
     const [bootstrap, health] = await Promise.all([api("/api/bootstrap"), api("/api/health")]);
     state.bootstrap = bootstrap;
     state.serverVersion = health.version || "0.0.0";
-    const fallback = bootstrap.storeFallback || health.storeFallback;
-    if (fallback?.active) {
-      const banner = $("#storeFallbackBanner");
-      banner.hidden = false;
-      banner.textContent = `资产后台（Directus）不可用，已回退到本地 JSON 存储：${fallback.reason}。当前写入保存在 data/ 下；Directus 恢复后重启服务即可回到资产后台模式（回退期间的写入不会自动同步）。`;
-    }
+    // 资产后台不可用时服务端直接拒绝启动，界面不会再出现"已回退到 JSON"的降级态。
     const batchModeButton = $('.translation-mode[data-translation-mode="batch"]');
     if (!supportsBatchApi(state.serverVersion)) {
       batchModeButton.title = "批次模块等待服务重启后启用";
@@ -2940,7 +3011,7 @@ async function initialize() {
     $("#providerLabel").textContent = `${state.bootstrap.provider.model} · ${new URL(state.bootstrap.provider.baseUrl).hostname}`;
     if (state.bootstrap.backend?.adminUrl) {
       $("#openAdmin").href = state.bootstrap.backend.adminUrl;
-      $("#openAdmin").title = `${state.bootstrap.backend.label} · 四语术语后台`;
+      $("#openAdmin").title = `${state.bootstrap.backend.label} · 五语术语后台`;
     } else $("#openAdmin").hidden = true;
     populateSelects();
     renderLocaleStrip($("#workbenchLocales"), state.workbenchLocale, updateWorkbenchLocale);

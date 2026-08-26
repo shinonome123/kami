@@ -9,7 +9,6 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="store-fallback-banner" id="storeFallbackBanner" hidden></div>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><img class="brand-logo" src="/assets/kami-sidebar-logo-v2.png" alt="Kami 本地化语言工作台" /></div>
@@ -73,7 +72,7 @@
               <label class="context-field" for="neighborContext"><span>可选上下文</span><input id="neighborContext" placeholder="活动背景、角色关系或上一段内容" /></label>
             </article>
             <article class="editor-card target-card">
-              <div class="card-head"><div><span class="card-kicker" id="targetKicker">TARGET · JA-JP</span><h2 id="targetTitle">日本語译文</h2></div><div class="target-status"><span class="term-legends" id="targetLegend" hidden><span class="term-legend official" id="officialLegend"><i></i><span id="officialCount">0 处正式术语</span></span><span class="term-legend suggestion" id="suggestionLegend"><i></i><span id="suggestionCount">0 处疑似术语</span></span></span><button class="button ghost small" id="toggleTargetEdit" hidden>编辑译文</button><button class="button ghost small" id="acceptTranslation" disabled>采纳为正式译法</button><span class="badge neutral" id="translationState">等待翻译</span></div></div>
+              <div class="card-head"><div><span class="card-kicker" id="targetKicker">TARGET · JA-JP</span><h2 id="targetTitle">日本語译文</h2></div><div class="target-status"><span class="term-legends" id="targetLegend" hidden><span class="term-legend official" id="officialLegend"><i></i><span id="officialCount">0 处正式术语</span></span><span class="term-legend suggestion" id="suggestionLegend"><i></i><span id="suggestionCount">0 处疑似术语</span></span></span><button class="button ghost small" id="toggleTargetEdit" hidden>编辑译文</button><button class="button ghost small" id="sendToAutoQa" hidden>转 Auto QA</button><button class="button ghost small" id="acceptTranslation" disabled>采纳为正式译法</button><span class="badge neutral" id="translationState">等待翻译</span></div></div>
               <div class="target-output empty" id="targetOutput">译文将在这里显示</div>
             </article>
           </div>
@@ -110,7 +109,7 @@
             <article class="panel batch-queue-panel">
               <div class="panel-head">
                 <div><span class="card-kicker">TRANSLATION QUEUE</span><h2>分段队列</h2></div>
-                <div class="batch-progress-summary"><strong id="batchProgressText">等待解析</strong><span id="batchProgressMeta">0 / 0</span><button class="button ghost small" id="acceptAllSegments" hidden>全部采纳</button></div>
+                <div class="batch-progress-summary"><strong id="batchProgressText">等待解析</strong><span id="batchProgressMeta">0 / 0</span><button class="button ghost small" id="batchToAutoQa" hidden>转 Auto QA</button><button class="button ghost small" id="acceptAllSegments" hidden>全部采纳</button></div>
               </div>
               <div class="batch-progress-track"><i id="batchProgressBar"></i></div>
               <div class="batch-segments" id="batchSegments"><div class="empty-list batch-empty">粘贴文本或拖入文件后，会自动识别正文并生成分句队列。</div></div>
@@ -177,7 +176,7 @@
               <span class="card-kicker">01 · DROP FILE</span><h2>上传中外文表格</h2>
               <label class="drop-zone" id="dropZone" for="termFile">
                 <input id="termFile" type="file" accept=".xlsx,.csv" hidden />
-                <span class="upload-mark">↑</span><strong id="filePrompt">拖入或点击选择 .xlsx / .csv</strong><small id="fileMeta">拖入后自动识别；不要求表头，支持日、韩、繁中、泰列</small>
+                <span class="upload-mark">↑</span><strong id="filePrompt">拖入或点击选择 .xlsx / .csv</strong><small id="fileMeta">拖入后自动识别；不要求表头，支持日、韩、繁中、法、泰列</small>
               </label>
               <div class="smart-import-capabilities" aria-label="自动识别能力">
                 <div><span>01</span><strong>识别表格结构</strong><small>无表头也能找到中外文列，排除位置、DDL 和字符限制。</small></div>
@@ -242,7 +241,7 @@
             <div class="panel-head"><div><span class="card-kicker">STYLE GUIDANCE LIBRARY</span><h2 id="styleGuidanceTitle">日本語翻译风格指导</h2></div><div class="asset-count" id="styleGuidanceCount">0 条规则</div></div>
             <div class="style-explainer">
               <div><span>01</span><strong>收集同类双语句段</strong><small>表格导入的完整译例、人工采纳译文和 AIQA 复盘分别记账；短术语不会冒充风格。</small></div>
-              <div><span>02</span><strong>按语言 × 语体 × 领域精炼</strong><small>同一分类累计 8 条风格证据后生成草稿，日韩繁泰互不混用。</small></div>
+              <div><span>02</span><strong>按语言 × 语体 × 领域精炼</strong><small>同一分类累计 8 条风格证据后生成草稿，日韩繁法泰互不混用。</small></div>
               <div><span>03</span><strong>人工启用后才生效</strong><small>待启用只是候选规则；只有已启用版本才会进入后续翻译提示。</small></div>
             </div>
             <div class="style-filter-row"><label><span>状态</span><select id="styleStatus"><option value="">全部</option><option value="active">已启用</option><option value="inactive">已关闭</option><option value="draft">待启用</option></select></label><button class="button secondary" id="refreshStyles">刷新风格</button></div>

@@ -136,7 +136,7 @@ test("Context Pack 注入当前范围的翻译技能版本与增量规则", () =
 });
 
 test("各语言本地化示范结构完整且源文一致", () => {
-  for (const locale of ["ja-JP", "ko-KR", "zh-Hant-TW"]) {
+  for (const locale of ["ja-JP", "ko-KR", "zh-Hant-TW", "fr-FR"]) {
     const examples = LOCALES[locale].localizationExamples || [];
     assert.ok(examples.length >= 2, `${locale} 应至少有两组示范`);
     for (const example of examples) {

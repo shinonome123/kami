@@ -38,6 +38,7 @@ services:
       ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL}
       ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD}
       ADMIN_TOKEN: ${DIRECTUS_ADMIN_TOKEN}
+      LICENSE_KEY: ${LICENSE_KEY}
       PUBLIC_URL: http://127.0.0.1:8055
       # The workbench is localhost-only and can expand one spreadsheet row into
       # four language candidates. Keep the API comfortably above the 10 MB

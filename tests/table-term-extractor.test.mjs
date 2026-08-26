@@ -10,17 +10,18 @@ async function workbookBase64(rows) {
   return Buffer.from(await workbook.xlsx.writeBuffer()).toString("base64");
 }
 
-test("自动识别同表中的日韩繁泰列并保持目标语言分组", async () => {
+test("自动识别同表中的日韩繁法泰列并保持目标语言分组", async () => {
   const base64 = await workbookBase64([
-    ["中文", "日语", "韩语", "繁體中文", "泰语"],
-    ["高级通行证", "プレミアムパス", "프리미엄 패스", "高級通行證", "บัตรผ่านพรีเมียม"],
-    ["维护", "メンテナンス", "점검", "維護", "การบำรุงรักษา"]
+    ["中文", "日语", "韩语", "繁體中文", "法语", "泰语"],
+    ["高级通行证", "プレミアムパス", "프리미엄 패스", "高級通行證", "Pass Premium", "บัตรผ่านพรีเมียม"],
+    ["维护", "メンテナンス", "점검", "維護", "maintenance", "การบำรุงรักษา"]
   ]);
-  const result = await extractTermPairs({ filename: "四语术语.xlsx", base64, locale: "auto" });
-  assert.equal(result.candidates.length, 8);
-  assert.deepEqual(new Set(result.candidates.map((item) => item.locale)), new Set(["ja-JP", "ko-KR", "zh-Hant-TW", "th-TH"]));
+  const result = await extractTermPairs({ filename: "五语术语.xlsx", base64, locale: "auto" });
+  assert.equal(result.candidates.length, 10);
+  assert.deepEqual(new Set(result.candidates.map((item) => item.locale)), new Set(["ja-JP", "ko-KR", "zh-Hant-TW", "fr-FR", "th-TH"]));
   assert.equal(result.sheets[0].sourceColumn, 1);
   assert.equal(result.sheets[0].targetColumns["ko-KR"], 3);
+  assert.equal(result.sheets[0].targetColumns["fr-FR"], 5);
 });
 
 test("重复术语对照合并，完整句子自动分流到翻译记忆", async () => {

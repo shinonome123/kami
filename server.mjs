@@ -13,7 +13,7 @@ import { adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSug
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, createStructuralAlignmentScorer, dedupeIssues, normalizeQaInputText, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreFallbackInfo, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { narrowByDomain, rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./src/translation-memory.mjs";
@@ -425,11 +425,17 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
     });
   }
   if (passed) {
-    await saveMemory(locale, {
-      source: contextPack.source, target: translation, domain, contentType,
-      styleProfileId: contextPack.styleProfile?.id, qualityStatus: "machine_verified", qaScore: score,
-      provenance: iterations ? "aiqa-corrected" : "aiqa-passed", batchId
-    });
+    // 沉淀记忆失败不该让已经译好、已经通过质检的结果整体失败——新接入的目标语言
+    // 在记忆表建好之前就是这种状态。失败原因带回给调用方，不静默吞掉。
+    try {
+      await saveMemory(locale, {
+        source: contextPack.source, target: translation, domain, contentType,
+        styleProfileId: contextPack.styleProfile?.id, qualityStatus: "machine_verified", qaScore: score,
+        provenance: iterations ? "aiqa-corrected" : "aiqa-passed", batchId
+      });
+    } catch (error) {
+      fallbackReason = [fallbackReason, `译文已通过质检，但未能写入翻译记忆：${error.message}`].filter(Boolean).join("；");
+    }
   }
   return { translation, issues, score, status, iterations, used, fallbackReason, references, qaCases, termDecisions, humanDecisions };
 }
@@ -722,7 +728,7 @@ async function commitTermImport(body, onProgress = null) {
 
 async function apiHandler(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
-    return json(res, 200, { ok: true, version: "0.7.0", locales: Object.keys(LOCALES), backend: getStoreMetadata(), storeFallback: getStoreFallbackInfo() });
+    return json(res, 200, { ok: true, version: "0.7.0", locales: Object.keys(LOCALES), backend: getStoreMetadata() });
   }
   if (req.method === "GET" && url.pathname === "/api/bootstrap") {
     const assets = {};
@@ -730,7 +736,7 @@ async function apiHandler(req, res, url) {
       const stats = await getAssetStats(locale);
       assets[locale] = { revision: stats.revision, termCount: stats.termCount };
     }
-    return json(res, 200, { locales: LOCALES, contentTypes: CONTENT_TYPES, provider: getProviderConfig(), backend: getStoreMetadata(), storeFallback: getStoreFallbackInfo(), assets });
+    return json(res, 200, { locales: LOCALES, contentTypes: CONTENT_TYPES, provider: getProviderConfig(), backend: getStoreMetadata(), assets });
   }
   if (req.method === "GET" && url.pathname === "/api/assets") {
     const locale = assertLocale(url.searchParams.get("locale"));
@@ -2237,7 +2243,23 @@ async function serveStatic(req, res, url) {
   }
 }
 
-await initializeStore();
+// 工作台只在 Directus 资产后台上运行。JSON 存储仅供单元测试，
+// 用它跑真实翻译会在没有术语、记忆与风格规范的情况下静默产出低质译文。
+if (process.env.KAMI_STORE !== "directus") {
+  console.error([
+    "[Kami] 拒绝启动：KAMI_STORE 必须为 directus。",
+    "本工作台的语言资产全部存放在 Directus，缺少它的翻译结果没有参考价值。",
+    "请使用 npm start（它会加载 directus/.env），并确认其中 KAMI_STORE=directus。"
+  ].join("\n"));
+  process.exit(1);
+}
+
+try {
+  await initializeStore();
+} catch (error) {
+  console.error(`[Kami] 启动失败\n${error.message}`);
+  process.exit(1);
+}
 
 // 恢复未完成任务，并修复旧版本错误写成 ready、实际却没有完成拆解的历史记录。
 try {

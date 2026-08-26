@@ -1006,36 +1006,35 @@ async function updateJsonSkillEvaluation(id, patch) {
 
 export const DATA_ROOT = ROOT;
 
-// Directus 启动检查失败后的回退状态：仅在进程内生效，重启后重新尝试 Directus。
-let directusFallback = null;
-
 function usesDirectus() {
-  return process.env.KAMI_STORE === "directus" && !directusFallback;
+  return process.env.KAMI_STORE === "directus";
 }
 
-/** 启动回退状态，供 health/bootstrap 接口与界面告警使用。 */
-export function getStoreFallbackInfo() {
-  if (directusFallback) {
-    return {
-      active: true,
-      requestedMode: "directus",
-      activeMode: "json",
-      reason: directusFallback.reason,
-      at: directusFallback.at
-    };
-  }
-  return { active: false, activeMode: usesDirectus() ? "directus" : "json" };
-}
-
+/**
+ * Directus 是唯一的生产存储，连不上就直接启动失败。
+ *
+ * 这里曾经会静默回退到本地 JSON。代价比看起来大得多：回退后 1966 条风格证据、
+ * 600+ 条翻译记忆、7 份风格规范全部不可见，模型在零参考的情况下继续翻译，
+ * 同时新写入落到 data/ 形成数据分叉——界面横幅并不足以让人及时发现。
+ * 实测触发过一次：新增法语时其中一张表没建成，启动探针 Promise.all 整体失败，
+ * 四个原有语种也跟着一起失效。宁可起不来，也不要带着残缺资产跑。
+ *
+ * JSON 存储仍然保留，但只服务于单元测试（不设置 KAMI_STORE 时启用）。
+ */
 export async function initializeStore() {
   if (process.env.KAMI_STORE !== "directus") return initializeJsonStore();
   try {
     await initializeDirectusStore();
-    return;
   } catch (error) {
-    directusFallback = { reason: error.message, at: new Date().toISOString() };
-    console.error(`[Kami] Directus 不可用（${error.message}），已自动回退到本地 JSON 存储。Directus 恢复后重启服务即可回到资产后台模式；回退期间的写入保存在 data/ 下，不会自动同步回 Directus。`);
-    await initializeJsonStore();
+    throw new Error([
+      `Directus 资产后台不可用：${error.message}`,
+      "本工作台的术语、翻译记忆、风格规范与学习轨迹全部存放在 Directus，缺少它无法提供有意义的翻译质量，因此不再回退到本地 JSON。",
+      "请依次检查：",
+      "  1. Docker Desktop 是否已启动",
+      "  2. npm run directus:up 是否已执行且容器处于 healthy",
+      "  3. 新增目标语言后是否执行过 npm run directus:provision（缺少某个语种的表会让整体探针失败）",
+      "  4. directus/.env 中的 DIRECTUS_URL 与 Service Token 是否正确"
+    ].join("\n"));
   }
 }
 

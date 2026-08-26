@@ -7,6 +7,7 @@ export const LOCALE_COLLECTIONS = Object.freeze({
   "ja-JP": "terms_ja_jp",
   "ko-KR": "terms_ko_kr",
   "zh-Hant-TW": "terms_zh_hant_tw",
+  "fr-FR": "terms_fr_fr",
   "th-TH": "terms_th_th"
 });
 
@@ -14,6 +15,7 @@ export const MEMORY_COLLECTIONS = Object.freeze({
   "ja-JP": "translation_memory_ja_jp",
   "ko-KR": "translation_memory_ko_kr",
   "zh-Hant-TW": "translation_memory_zh_hant_tw",
+  "fr-FR": "translation_memory_fr_fr",
   "th-TH": "translation_memory_th_th"
 });
 

@@ -50,6 +50,14 @@ export const PUNCTUATION_POLICY = Object.freeze({
     title: ["《", "》"],
     guidance: "引號用「」與『』，不使用簡體的成對彎引號；書名仍用《》。"
   },
+  "fr-FR": {
+    // 法语不使用任何中日式标点；破折号与省略号本身合法，故不在 CJK_PUNCTUATION 里剔除后单独排除。
+    invalid: CJK_PUNCTUATION.filter((character) => !["…", "—"].includes(character)).map((character) => [character, ""]),
+    title: ["«", "»"],
+    // 法语排版硬性要求：; ! ? 前用窄不断行空格，: 前用不断行空格，« » 内侧同样留空格。
+    frenchSpacing: true,
+    guidance: "使用法语标点：引号用 « »（内侧留不断行空格），; ! ? 前留窄不断行空格、: 前留不断行空格；不要出现任何中日式标点（，。、；：！？（）【】《》「」）。"
+  },
   "th-TH": {
     invalid: CJK_PUNCTUATION.map((character) => [character, ""]),
     title: null,
@@ -111,7 +119,12 @@ export function checkOrthography({ source = "", translation = "", locale = "" } 
   if (policy.title) {
     const [open, close] = policy.title;
     const sourceMarksTitle = TITLE_OPENERS.some((character) => String(source).includes(character));
-    const wrongOpeners = TITLE_OPENERS.filter((character) => character !== open && countOf(target, character) > 0);
+    // 已经作为"非本语言标点"报过的符号不再重复计入书名号约定，
+    // 否则一次照搬会同时产生「符号无效」和「括号不符约定」两条。
+    const alreadyReported = new Set(issues.map((issue) => issue.character));
+    const wrongOpeners = TITLE_OPENERS
+      .filter((character) => character !== open && countOf(target, character) > 0)
+      .filter((character) => !alreadyReported.has(character));
     // 只有原文确实标了作品名、而译文用了别的括号且完全没用约定括号时才提示，
     // 避免把正常的引用、强调括号误判成书名号问题。
     if (sourceMarksTitle && wrongOpeners.length && !target.includes(open)) {
@@ -125,5 +138,61 @@ export function checkOrthography({ source = "", translation = "", locale = "" } 
     }
   }
 
+  if (policy.frenchSpacing) issues.push(...checkFrenchSpacing(target));
+
+  return issues;
+}
+
+/** 用转义写死：这两个空格不可见，字面字符一次复制粘贴就可能被静默换成普通空格。 */
+const NARROW_NBSP = " ";
+const NBSP = " ";
+
+/**
+ * 引号内按原样引用，其中的标点不受法语间距约束。
+ *
+ * 实测 « Black Myth: Zhong Kui » 里的冒号属于英文原标题，法语排版不改外文引文
+ * 自身的标点；不排除的话这条规则会在几乎每条含游戏名的文案上误报。用等长空格
+ * 替换而非删除，保证计数与原文位置仍然对得上。
+ */
+function withoutQuotedSpans(text) {
+  // 只抹掉引号内部，保留 « » 本身：紧跟在 » 后面的 ! ? 仍然属于法语正文，必须继续检查。
+  return String(text).replace(/«([^»]*)»/gu, (span, inner) => `«${" ".repeat([...inner].length)}»`);
+}
+
+/**
+ * 法语标点间距。模型几乎总是按英语习惯直接贴着写 Bonjour!，法语要求分开。
+ *
+ * 只判「完全没有空格」这一种确定错误：普通空格与不断行空格都放行。窄不断行空格
+ * 是排版理想值，但各家风格不一，把普通空格也判成问题会制造大量噪声，因此提示里
+ * 只说需要留空，不谎称已经校验过空格种类。每类问题汇总一条。
+ */
+export function checkFrenchSpacing(translation = "") {
+  const text = String(translation ?? "");
+  if (!text.trim()) return [];
+  const issues = [];
+  const tight = [...withoutQuotedSpans(text).matchAll(/(\S)([;!?:])/gu)]
+    .filter(([, before]) => before !== NARROW_NBSP && before !== NBSP);
+  if (tight.length) {
+    issues.push({
+      severity: "warning",
+      type: "orthography_french_spacing",
+      category: "spacing",
+      character: tight[0][2],
+      occurrences: tight.length,
+      message: `译文有 ${tight.length} 处 ; ! ? : 直接贴着前一个词，法语排版需要在其前留空格（理想为不断行空格 U+00A0 或窄不断行空格 U+202F）`
+    });
+  }
+  const guillemets = [...text.matchAll(/«(\S)|(\S)»/gu)]
+    .filter((match) => ![NARROW_NBSP, NBSP].includes(match[1] ?? match[2]));
+  if (guillemets.length) {
+    issues.push({
+      severity: "warning",
+      type: "orthography_french_guillemets",
+      category: "spacing",
+      character: "«",
+      occurrences: guillemets.length,
+      message: `译文有 ${guillemets.length} 处 « » 内侧未留不断行空格，法语引号写法应为 « texte »`
+    });
+  }
   return issues;
 }

@@ -105,3 +105,23 @@ test("硬 QA 会带出标点约定问题，且不影响强制术语判定", () =
   assert.ok(issues.some((issue) => issue.type === "orthography_title_bracket"));
   assert.equal(issues.filter((issue) => issue.severity === "error").length, 0);
 });
+
+test("法语接受本地化引号与不可断行空格", () => {
+  const issues = checkOrthography({
+    source: TITLE_SOURCE,
+    translation: "X minutes de gameplay de « Black Myth : Zhong Kui »",
+    locale: "fr-FR"
+  });
+  assert.deepEqual(issues, []);
+});
+
+test("法语会指出英文式紧贴标点和未留空的书名号", () => {
+  const issues = checkOrthography({
+    source: TITLE_SOURCE,
+    translation: "X minutes de gameplay de «Black Myth: Zhong Kui»!",
+    locale: "fr-FR"
+  });
+  assert.ok(issues.some((issue) => issue.type === "orthography_french_spacing"));
+  assert.ok(issues.some((issue) => issue.type === "orthography_french_guillemets"));
+  assert.equal(issues.filter((issue) => issue.severity === "error").length, 0);
+});

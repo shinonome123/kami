@@ -4,10 +4,10 @@ import { activateStyleProfile, deleteAsset, disposeQaCase, getAssets, getAssetSt
 
 const enabled = process.env.KAMI_STORE === "directus";
 
-test("Directus 四语集合可读、可统计并保持写入隔离", { skip: !enabled }, async () => {
+test("Directus 五语集合可读、可统计并保持写入隔离", { skip: !enabled }, async () => {
   await initializeStore();
 
-  const locales = ["ja-JP", "ko-KR", "zh-Hant-TW", "th-TH"];
+  const locales = ["ja-JP", "ko-KR", "zh-Hant-TW", "fr-FR", "th-TH"];
   const stats = await Promise.all(locales.map((locale) => getAssetStats(locale)));
   assert.deepEqual(stats.map((entry) => entry.locale), locales);
   assert.ok(stats.every((entry) => entry.termCount >= 1));
@@ -17,6 +17,8 @@ test("Directus 四语集合可读、可统计并保持写入隔离", { skip: !en
   assert.equal(japanese.terms.find((term) => term.source === "高级通行证")?.target, "プレミアムパス");
   assert.equal(korean.terms.find((term) => term.source === "高级通行证")?.target, "프리미엄 패스");
   assert.equal(japanese.terms.some((term) => term.target === "프리미엄 패스"), false);
+  const french = await getAssets("fr-FR");
+  assert.equal(french.terms.find((term) => term.source === "高级通行证")?.target, "Pass Premium");
 
   const temporary = await saveAsset("th-TH", {
     source: "集成测试术语",
@@ -34,6 +36,41 @@ test("Directus 四语集合可读、可统计并保持写入隔离", { skip: !en
     assert.equal(japaneseAfterWrite.terms.some((term) => term.source === "集成测试术语"), false);
   } finally {
     await deleteAsset("th-TH", temporary.id);
+  }
+});
+
+test("法语术语与翻译记忆使用独立集合", { skip: !enabled }, async () => {
+  await initializeStore();
+  const marker = `法语分库隔离-${Date.now()}`;
+  const term = await saveAsset("fr-FR", {
+    source: marker,
+    target: "terme de test",
+    domains: ["integration"],
+    contentTypes: ["general"],
+    status: "draft",
+    provenance: "integration-test"
+  });
+  const memory = await saveMemory("fr-FR", {
+    source: marker,
+    target: "Phrase française de test.",
+    domain: "integration",
+    contentType: "general",
+    qualityStatus: "human_approved",
+    qaScore: 100,
+    provenance: "integration-test"
+  });
+  const base = String(process.env.DIRECTUS_URL || "http://127.0.0.1:8055").replace(/\/$/, "");
+  const headers = { Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}` };
+  try {
+    const assets = await getAssets("fr-FR");
+    const memories = await getMemories("fr-FR", { domain: "integration", contentType: "general", limit: -1 });
+    assert.equal(assets.terms.some((item) => item.id === term.id), true);
+    assert.equal(assets.terms.some((item) => item.id === memory.id), false, "记忆不能进入术语检索");
+    assert.equal(memories.some((item) => item.id === memory.id), true);
+    assert.equal(memories.some((item) => item.id === term.id), false, "术语不能进入记忆召回");
+  } finally {
+    await fetch(`${base}/items/terms_fr_fr/${term.id}`, { method: "DELETE", headers });
+    await fetch(`${base}/items/translation_memory_fr_fr/${memory.id}`, { method: "DELETE", headers });
   }
 });
 
