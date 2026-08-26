@@ -283,3 +283,58 @@ test("翻译与术语导入共用同一份领域规则", () => {
   assert.equal(inferDomainFromText("无任何线索", "general", { fallback: "general" }), "general");
   assert.equal(inferDomainFromText("无任何线索", "general", { fallback: "game" }), "game", "导入侧按 assetType 传不同兜底");
 });
+
+function scaleAssets(count, extras = []) {
+  const terms = Array.from({ length: count }, (_, index) => ({
+    id: `bulk-${index}`, source: `无关术语${index}`, aliases: [], target: `T${index}`,
+    forbidden: [], domains: ["game"], contentTypes: ["general"], enforcement: "preferred", status: "approved", note: ""
+  }));
+  return { locale: "ja-JP", terms: [...terms, ...extras], memories: [], styleExamples: [] };
+}
+
+test("大术语库不改变匹配结果：命中的仍然命中", () => {
+  // 廉价前置筛选只能剔除"字符重合度低到不可能达标"的术语，
+  // 不能让真正该命中的漏掉。
+  const real = {
+    id: "pass", source: "高级通行证", aliases: ["高级战令"], target: "プレミアムパス",
+    forbidden: [], domains: ["game"], contentTypes: ["general"], enforcement: "required", status: "approved", note: ""
+  };
+  const source = "高级通行证现已开放购买";
+  const small = matchTerms(source, scaleAssets(5, [real]), { contentType: "general", domain: "game" });
+  const large = matchTerms(source, scaleAssets(5_000, [real]), { contentType: "general", domain: "game" });
+  assert.equal(small.length, 1);
+  assert.deepEqual(
+    large.map((item) => [item.term.id, item.mode]),
+    small.map((item) => [item.term.id, item.mode]),
+    "术语库从 5 条涨到 5000 条，命中集合必须完全一致"
+  );
+});
+
+test("错字与字符重排在大术语库下仍走模糊/智能路径", () => {
+  // 前置筛选只剔除字符重合度过低的候选，必须放行这三类真实命中。
+  // 注意阈值是实测出来的：4 字词错 1 字相似度 0.75，低于 0.78 的模糊阈值本就不命中，
+  // 所以这里用 5 字词，错 1 字为 0.8 才真正进入模糊路径。
+  const term = {
+    id: "pass", source: "高级通行证", aliases: [], target: "プレミアムパス",
+    forbidden: [], domains: ["game"], contentTypes: ["general"], enforcement: "preferred", status: "approved", note: ""
+  };
+  for (const [source, expected, label] of [
+    ["购买高级通行证", "exact", "精确"],
+    ["购买高级通行証", "fuzzy", "错字"],
+    ["购买高级行通证", "smart", "字符重排"]
+  ]) {
+    const small = matchTerms(source, scaleAssets(5, [term]), { contentType: "general", domain: "game" });
+    const large = matchTerms(source, scaleAssets(5_000, [term]), { contentType: "general", domain: "game" });
+    assert.equal(small[0]?.mode, expected, `${label}情形应走 ${expected} 路径`);
+    assert.equal(large[0]?.mode, expected, `${label}情形在 5000 条术语下必须得到同样结果`);
+  }
+});
+
+test("大术语库在合理时间内完成匹配", () => {
+  // 加前置筛选前实测：1 万条术语单句要 10 秒，模型还没开始调用。
+  const assets = scaleAssets(10_000);
+  const started = Date.now();
+  matchTerms("《黑神话：钟馗》高级通行证限时七折，停机维护后可在商城领取道具。", assets, { contentType: "general", domain: "game" });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 2_000, `1 万条术语的单句匹配耗时 ${elapsed}ms，已回到秒级以上，前置筛选可能被破坏`);
+});

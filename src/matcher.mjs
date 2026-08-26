@@ -20,9 +20,28 @@ function unorderedCharacterSimilarity(left, right) {
   return maximum ? overlap / maximum : 0;
 }
 
+/**
+ * 术语能不能进入模糊/智能匹配的廉价前置判断。
+ *
+ * 模糊路径要求编辑相似度 ≥0.78，智能路径要求无序字符相似度 ≥0.86（或全字符命中），
+ * 两者都蕴含"术语的大部分字符必须出现在原文里"。所以先按字符集合算一次重合度，
+ * 低于 0.6 的直接跳过——这个界远低于两条真实阈值，不会改变任何匹配结果。
+ *
+ * 不做这一步的代价是实测出来的：滑窗 × 每窗一次 Levenshtein + 一次无序比较，
+ * 单句耗时随术语量线性上涨到 1 万条 10 秒、5 万条 48 秒，模型还没开始调用。
+ */
+function couldFuzzyMatch(sourceCharacters, normalizedVariant) {
+  const variantCharacters = [...normalizedVariant];
+  if (!variantCharacters.length) return false;
+  let shared = 0;
+  for (const character of variantCharacters) if (sourceCharacters.has(character)) shared += 1;
+  return shared / variantCharacters.length >= 0.6;
+}
+
 export function matchTerms(text, assets, { contentType = "general", domain = "general", limit = 20 } = {}) {
   if (!assets?.locale) throw new Error("Asset collection must have an explicit locale");
   const normalizedText = normalizeSource(text);
+  const sourceCharacters = new Set([...normalizedText]);
   const matches = [];
   for (const term of assets.terms ?? []) {
     if (term.status !== "approved") continue;
@@ -37,7 +56,7 @@ export function matchTerms(text, assets, { contentType = "general", domain = "ge
         if (!best || candidate.score > best.score) best = candidate;
         continue;
       }
-      if (normalizedVariant.length >= 3) {
+      if (normalizedVariant.length >= 3 && couldFuzzyMatch(sourceCharacters, normalizedVariant)) {
         const windows = [];
         const characters = [...normalizedText];
         const size = [...normalizedVariant].length;
