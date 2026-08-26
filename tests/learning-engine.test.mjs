@@ -14,8 +14,7 @@ import {
   pairedBenchmarkOrder,
   selectSkillHoldout,
   summarizeTrajectoryAttribution,
-  validateCandidatePromotionState
-} from "../src/learning-engine.mjs";
+  validateCandidatePromotionState, effectiveStrategyValue } from "../src/learning-engine.mjs";
 
 const scope = {
   locale: "ja-JP",
@@ -409,4 +408,21 @@ test("晋升评测拒绝跨项目或跨语种混用", () => {
     champion: { scope, samples: [sample(1)] },
     challenger: { scope: { ...scope, locale: "ko-KR" }, samples: [sample(1)] }
   }), /Challenger 作用域不一致/);
+});
+
+test("技能没被学习循环动过时听设置面板的，动过了就尊重技能", () => {
+  // 直接 skill.limit || setting 会让出厂值（truthy）永远短路掉面板设置，
+  // 面板看着能改实际没用——这正是参数面板上线时踩到的坑。
+  assert.equal(effectiveStrategyValue(5, 5, 8), 8, "仍等于出厂值 = 没被动过，听面板");
+  assert.equal(effectiveStrategyValue(9, 5, 8), 9, "已偏离出厂值 = 评测晋升的结果，尊重技能");
+});
+
+test("技能里没有该项或值非法时回落设置面板", () => {
+  assert.equal(effectiveStrategyValue(undefined, 5, 8), 8);
+  assert.equal(effectiveStrategyValue(null, 5, 8), 8);
+  assert.equal(effectiveStrategyValue("不是数字", 5, 8), 8);
+});
+
+test("0 是合法取值，不会被当成缺失", () => {
+  assert.equal(effectiveStrategyValue(0, 2, 3), 0, "最大修订轮数设为 0 表示不自动修订，必须保留");
 });

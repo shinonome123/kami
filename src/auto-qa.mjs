@@ -300,8 +300,8 @@ function escapeRegExp(value) {
  * 复用硬 QA（受保护内容、强制/禁用术语、空译文）并叠加拼写、品牌名、标点与语气启发式。
  * 返回的每条 issue 都带 dimension: "basic"。
  */
-export function runBasicQa({ source, translation, matches = [], locale = "" }) {
-  const issues = runQa({ source, translation, matches, locale }).map((issue) => ({
+export function runBasicQa({ source, translation, matches = [], locale = "", titleOverrides = null }) {
+  const issues = runQa({ source, translation, matches, locale, titleOverrides }).map((issue) => ({
     ...issue,
     dimension: "basic",
     category: issue.category || "basic"
@@ -399,16 +399,20 @@ export function runBasicQa({ source, translation, matches = [], locale = "" }) {
 }
 
 /** 单条问题的扣分：error/critical 35，major 12，minor/warning 3；低置信模型问题不计分。 */
-export function issuePenalty(issue) {
+export function issuePenalty(issue, penalties = DEFAULT_PENALTIES) {
   if (issue.confidence !== undefined && Number(issue.confidence) < 0.55) return 0;
-  if (issue.severity === "error" || issue.severity === "critical") return 35;
-  if (issue.severity === "major") return 12;
-  return 3;
+  if (issue.severity === "error" || issue.severity === "critical") return penalties.critical;
+  if (issue.severity === "major") return penalties.major;
+  return penalties.minor;
 }
 
+/** 扣分与三维权重可在设置面板调整；这里是未注入时的出厂值。 */
+export const DEFAULT_PENALTIES = Object.freeze({ critical: 35, major: 12, minor: 3 });
+export const DEFAULT_WEIGHTS = Object.freeze({ basic: 20, fidelity: 50, nuance: 30 });
+
 /** 单个维度、单个段落的得分：扣分累加后套用阻断封顶。 */
-function segmentDimensionScore(issues) {
-  let score = Math.max(0, 100 - issues.reduce((sum, issue) => sum + issuePenalty(issue), 0));
+function segmentDimensionScore(issues, penalties = DEFAULT_PENALTIES) {
+  let score = Math.max(0, 100 - issues.reduce((sum, issue) => sum + issuePenalty(issue, penalties), 0));
   if (issues.some((issue) => issue.severity === "error")) score = Math.min(score, 60);
   if (issues.some((issue) => issue.severity === "critical" && (issue.confidence === undefined || Number(issue.confidence) >= 0.7))) {
     score = Math.min(score, 65);
@@ -434,7 +438,7 @@ function isBlocking(issue) {
  * 65 分。因此 overall 在"有阻断问题"之后会饱和——区分"坏一段"和"全坏"要看
  * summary 里的 blockedSegments，单一分数无法同时承载这两件事。
  */
-export function calculateAutoQaScores(issues = [], { segmentCount = 1 } = {}) {
+export function calculateAutoQaScores(issues = [], { segmentCount = 1, penalties = DEFAULT_PENALTIES, weights = DEFAULT_WEIGHTS } = {}) {
   const total = Math.max(1, Math.trunc(Number(segmentCount)) || 1);
   const dimensions = {};
   let blockedSegments = 0;
@@ -455,7 +459,7 @@ export function calculateAutoQaScores(issues = [], { segmentCount = 1 } = {}) {
     const extraEntries = entries.filter(([key]) => typeof key !== "number");
     const segmentSlots = Math.max(total, segmentEntries.length);
     const cleanSegments = segmentSlots - segmentEntries.length;
-    const sum = entries.reduce((carry, [, list]) => carry + segmentDimensionScore(list), 0);
+    const sum = entries.reduce((carry, [, list]) => carry + segmentDimensionScore(list, penalties), 0);
     let score = (sum + cleanSegments * 100) / (segmentSlots + extraEntries.length);
     if (list.some((issue) => issue.severity === "error")) score = Math.min(score, 60);
     if (list.some((issue) => issue.severity === "critical" && (issue.confidence === undefined || Number(issue.confidence) >= 0.7))) {
@@ -464,7 +468,7 @@ export function calculateAutoQaScores(issues = [], { segmentCount = 1 } = {}) {
     dimensions[dimension] = Math.round(score);
   }
   blockedSegments = blocked.size;
-  const overall = Math.round(dimensions.basic * 0.2 + dimensions.fidelity * 0.5 + dimensions.nuance * 0.3);
+  const overall = Math.round((dimensions.basic * weights.basic + dimensions.fidelity * weights.fidelity + dimensions.nuance * weights.nuance) / 100);
   return { overall, dimensions, blockedSegments, segmentCount: total };
 }
 

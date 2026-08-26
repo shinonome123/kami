@@ -404,6 +404,94 @@ function sendBatchToAutoQa() {
   });
 }
 
+
+const SETTING_GROUP_LABELS = {
+  quality: "质量与评分",
+  retrieval: "检索与上下文",
+  learning: "学习与蒸馏",
+  share: "分享验证"
+};
+
+/**
+ * 参数面板。字段规格由服务端 /api/settings 提供，前端不再抄一份字段表——
+ * 抄一份就意味着说明文案和校验区间迟早各说各话。
+ */
+// 字段规格、括号选项与语言表在一次会话内不变，取一次缓存起来；
+// 保存后只需要用响应里的新值重绘。
+let settingsMeta = null;
+
+async function openSettingsPanel() {
+  try {
+    const payload = await api("/api/settings");
+    settingsMeta = { groups: payload.groups, titleBracketChoices: payload.titleBracketChoices, locales: payload.locales };
+    renderSettingsPanel(payload);
+    $("#settingsDialog").showModal();
+  } catch (error) { toast(error.message); }
+}
+
+function renderSettingsPanel({ settings, groups, titleBracketChoices, locales, environmentOverrides }) {
+  const read = (path) => path.split(".").reduce((carry, key) => carry?.[key], settings);
+  const sections = groups.map(({ group, fields }) => `
+    <section class="settings-group">
+      <h3>${escapeHtml(SETTING_GROUP_LABELS[group] || group)}</h3>
+      ${fields.map((field) => {
+        const override = environmentOverrides?.[field.path];
+        return `<label class="settings-field${override ? " overridden" : ""}">
+          <span>${escapeHtml(field.label)}<small>${escapeHtml(field.hint)}</small></span>
+          <input type="number" data-path="${escapeHtml(field.path)}" value="${escapeHtml(String(read(field.path) ?? field.default))}"
+                 min="${field.min}" max="${field.max}" step="${field.step}" ${override ? "disabled" : ""} />
+          ${override ? `<em class="settings-override">由环境变量 ${escapeHtml(override.variable)} 接管</em>` : `<em class="settings-range">${field.min} ~ ${field.max}</em>`}
+        </label>`;
+      }).join("")}
+    </section>`).join("");
+
+  // 作品名括号是风格约定而非语言对错，按语种单独选；空表示不做这项检查。
+  const bracketRows = Object.entries(locales).map(([locale, label]) => `
+    <label class="settings-field">
+      <span>${escapeHtml(label)}<small>${escapeHtml(locale)}</small></span>
+      <select data-bracket="${escapeHtml(locale)}">
+        ${titleBracketChoices.map((choice) => `<option value="${escapeHtml(choice)}"${settings.orthography?.titleBrackets?.[locale] === choice ? " selected" : ""}>${escapeHtml(choice || "不检查")}</option>`).join("")}
+      </select>
+    </label>`).join("");
+
+  $("#settingsBody").innerHTML = `${sections}
+    <section class="settings-group">
+      <h3>作品名括号约定</h3>
+      <p class="settings-group-note">语言层面无效的标点（如韩语里的中文逗号）始终检查，不可关闭；这里只配置作品名用哪对括号。</p>
+      ${bracketRows}
+    </section>`;
+  $("#settingsNotes").hidden = true;
+}
+
+function collectSettingsForm() {
+  const settings = { orthography: { titleBrackets: {} } };
+  for (const input of $$("#settingsBody input[data-path]")) {
+    if (input.disabled) continue;
+    const keys = input.dataset.path.split(".");
+    const last = keys.pop();
+    const parent = keys.reduce((carry, key) => (carry[key] = carry[key] || {}), settings);
+    parent[last] = Number(input.value);
+  }
+  for (const select of $$("#settingsBody select[data-bracket]")) {
+    settings.orthography.titleBrackets[select.dataset.bracket] = select.value;
+  }
+  return settings;
+}
+
+async function submitSettings(payload) {
+  const result = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
+  renderSettingsPanel({ ...settingsMeta, ...result });
+  // 被夹紧或整组回落必须让人看见，不能悄悄改掉输入。
+  if (result.notes?.length) {
+    $("#settingsNotes").hidden = false;
+    $("#settingsNotes").innerHTML = `<strong>已自动校正 ${result.notes.length} 项</strong>${result.notes.map((note) => `<div>${escapeHtml(note.label)}：${escapeHtml(note.note)}</div>`).join("")}`;
+    toast(`设置已保存，其中 ${result.notes.length} 项被自动校正`);
+  } else {
+    toast("设置已保存并立即生效");
+    $("#settingsDialog").close();
+  }
+}
+
 async function runAutoQa() {
   const source = $("#autoQaSource").value.trim();
   const translation = $("#autoQaTarget").value.trim();
@@ -2990,6 +3078,17 @@ function bindEvents() {
   $("#toggleTargetEdit").addEventListener("click", toggleTargetEdit);
   $("#acceptTranslation").addEventListener("click", acceptSingleTranslation);
   $("#sendToAutoQa").addEventListener("click", sendCurrentTranslationToAutoQa);
+  $("#openSettings").addEventListener("click", openSettingsPanel);
+  $("#settingsForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try { await submitSettings({ settings: collectSettingsForm() }); }
+    catch (error) { toast(error.message); }
+  });
+  $("#settingsReset").addEventListener("click", async () => {
+    if (!confirm("恢复出厂值会覆盖当前全部参数设置，确认继续？")) return;
+    try { await submitSettings({ reset: true }); }
+    catch (error) { toast(error.message); }
+  });
   $("#acceptAllSegments").addEventListener("click", acceptAllSegments);
   $("#batchToAutoQa").addEventListener("click", sendBatchToAutoQa);
   $$('[data-close]').forEach((button) => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));

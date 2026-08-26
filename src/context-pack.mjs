@@ -25,7 +25,7 @@ function normalizeNeighborContext(neighborContext) {
   };
 }
 
-export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, translationSkill = null, qaGuidance = [], userProfile = null, translationReferences = [], batchVerse = null, batchReferences = [] }) {
+export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, translationSkill = null, qaGuidance = [], userProfile = null, translationReferences = [], batchVerse = null, batchReferences = [], titleOverrides = null }) {
   const required = matches.filter((item) => item.mode === "exact" && item.term.enforcement === "required");
   const preferred = matches.filter((item) => item.mode !== "exact" || item.term.enforcement !== "required");
   const defaultRegister = CONTENT_TYPES[classification.contentType].register;
@@ -70,7 +70,7 @@ export function buildContextPack({ source, locale, classification, matches, doma
       strategy: translationSkill.strategy || {}
     } : null,
     localeInstruction: LOCALES[locale].defaultInstruction,
-    punctuation: punctuationGuidance(locale),
+    punctuation: punctuationGuidance(locale, titleOverrides),
     requiredTerms: required.map(({ term }) => ({ source: term.source, target: term.target, forbidden: term.forbidden, note: term.note })),
     preferredTerms: preferred.map(({ term, mode, matchPhrase, score }) => ({
       source: term.source,

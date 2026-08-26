@@ -44,7 +44,7 @@
                 <span class="feedback-bell-badge" id="feedbackBellBadge" hidden>0</span>
               </div>
               <a class="text-action" id="openAdmin" href="http://127.0.0.1:8055/admin/content/terms_ja_jp" target="_blank" rel="noreferrer">Directus 后台</a>
-              <button class="text-action" id="openProvider">模型设置</button>
+              <button class="text-action" id="openProvider">模型设置</button><button class="text-action" id="openSettings" type="button">参数设置</button>
             </div>
             <span class="command-divider"></span>
             <button class="button ghost" id="tertiaryAction" hidden></button>
@@ -342,6 +342,19 @@
       </form>
     </dialog>
 
+    <dialog id="settingsDialog">
+      <form class="dialog-card settings-dialog-card" id="settingsForm">
+        <div class="dialog-head"><div><span class="card-kicker">WORKBENCH TUNING</span><h2>参数设置</h2></div><button class="icon-button" type="button" data-close="settingsDialog" aria-label="关闭">×</button></div>
+        <p class="settings-intro">这些参数原本写死在代码或环境变量里。改动即时生效，无需重启；被环境变量接管的项会标注并置灰。</p>
+        <div id="settingsBody"></div>
+        <div id="settingsNotes" class="settings-notes" hidden></div>
+        <div class="dialog-actions">
+          <button class="button ghost" type="button" id="settingsReset">恢复出厂值</button>
+          <button class="button ghost" type="button" data-close="settingsDialog">取消</button>
+          <button class="button primary" type="submit">保存设置</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="providerDialog">
       <form class="dialog-card" id="providerForm">
         <div class="dialog-head"><div><span class="card-kicker">OPENAI-COMPATIBLE</span><h2>模型服务设置</h2></div><button class="icon-button" type="button" data-close="providerDialog" aria-label="关闭">×</button></div>

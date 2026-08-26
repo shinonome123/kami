@@ -73,13 +73,26 @@ export const PUNCTUATION_POLICY = Object.freeze({
  */
 const TITLE_OPENERS = ["《", "〈", "「", "『"];
 
-function policyFor(locale) {
-  return PUNCTUATION_POLICY[String(locale)] || null;
+/**
+ * 作品名括号是**风格约定**而不是语言对错（韩语正字法对《》〈〉「」『』都允许），
+ * 所以允许设置面板按语种覆盖；无效标点那一档是语言层面的规则，不接受覆盖。
+ */
+function policyFor(locale, titleOverrides = null) {
+  const policy = PUNCTUATION_POLICY[String(locale)] || null;
+  if (!policy) return null;
+  const override = titleOverrides?.[String(locale)];
+  if (override === undefined) return policy;
+  const pair = String(override || "").trim();
+  const title = pair.length === 2 ? [pair[0], pair[1]] : null;
+  const guidance = title
+    ? policy.guidance.replace(/作品名用[《「『〈«][》」』〉»]/u, `作品名用${title[0]}${title[1]}`)
+    : policy.guidance;
+  return { ...policy, title, guidance };
 }
 
 /** One-line instruction for the translation prompt. Empty when the locale has no policy. */
-export function punctuationGuidance(locale) {
-  return policyFor(locale)?.guidance || "";
+export function punctuationGuidance(locale, titleOverrides = null) {
+  return policyFor(locale, titleOverrides)?.guidance || "";
 }
 
 function countOf(text, character) {
@@ -95,8 +108,8 @@ function countOf(text, character) {
  * Each offending character produces at most one issue no matter how often it
  * repeats — seven wrong brackets are one decision to fix, not seven defects.
  */
-export function checkOrthography({ source = "", translation = "", locale = "" } = {}) {
-  const policy = policyFor(locale);
+export function checkOrthography({ source = "", translation = "", locale = "", titleOverrides = null } = {}) {
+  const policy = policyFor(locale, titleOverrides);
   const target = String(translation ?? "");
   if (!policy || !target.trim()) return [];
   const issues = [];

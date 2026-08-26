@@ -1062,3 +1062,19 @@ dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 36px); 
   .locale-button .locale-label { display: none; }
   .share-known-issues-intro { align-items: flex-start; flex-direction: column; gap: 3px; }
 }
+
+.settings-dialog-card { max-width: 720px; max-height: 82vh; overflow-y: auto; }
+.settings-intro { margin: 0 0 4px; color: #6f7671; font-size: 12px; line-height: 1.7; }
+.settings-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid #ececea; }
+.settings-group:first-of-type { border-top: none; padding-top: 0; }
+.settings-group h3 { margin: 0 0 8px; font-size: 13px; font-weight: 850; }
+.settings-group-note { margin: 0 0 8px; color: #8a918b; font-size: 12px; line-height: 1.6; }
+.settings-field { display: grid; grid-template-columns: 1fr 120px; gap: 6px 12px; align-items: center; margin-bottom: 8px; }
+.settings-field > span { display: flex; flex-direction: column; font-size: 13px; }
+.settings-field > span small { color: #8a918b; font-size: 11px; line-height: 1.5; }
+.settings-field input, .settings-field select { padding: 6px 8px; font-size: 13px; }
+.settings-field.overridden > span { color: #8a918b; }
+.settings-range { grid-column: 2; color: #a3a9a4; font-size: 11px; font-style: normal; text-align: right; }
+.settings-override { grid-column: 1 / -1; color: #7a3c14; font-size: 11px; font-style: normal; }
+.settings-notes { margin-top: 12px; padding: 9px 11px; border-radius: 7px; color: #7a3c14; background: #fff0d5; font-size: 12px; line-height: 1.7; }
+.settings-notes strong { display: block; margin-bottom: 4px; }

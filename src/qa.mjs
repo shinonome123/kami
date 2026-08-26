@@ -1,7 +1,7 @@
 import { digitSequence, digitsRecoverable, extractProtectedTokens, normalizeSource } from "./text.mjs";
 import { checkOrthography } from "./orthography.mjs";
 
-export function runQa({ source, translation, matches = [], locale = "" }) {
+export function runQa({ source, translation, matches = [], locale = "", titleOverrides = null }) {
   const issues = [];
   for (const token of extractProtectedTokens(source)) {
     if (!String(translation).includes(token)) {
@@ -31,7 +31,7 @@ export function runQa({ source, translation, matches = [], locale = "" }) {
     }
   }
   // 目标语言标点约定是确定性规则，交给本地检查而不是靠模型自觉。
-  issues.push(...checkOrthography({ source, translation, locale }));
+  issues.push(...checkOrthography({ source, translation, locale, titleOverrides }));
   // 裸数字按数值等价校验而不是字面包含：8月20日 / 8월 20일 是 820 的正确本地化，
   // 不该判成漏掉受保护内容。仅当数字确实无法从译文还原时提示复核。
   if (!digitsRecoverable(source, translation)) {

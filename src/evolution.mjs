@@ -3,13 +3,10 @@ import { getQaRuns, getStyleEvidence, getStyleProfile, listStyleProfiles, saveSt
 import { STYLE_DISTILL_GROWTH_WINDOW, STYLE_DISTILL_THRESHOLD, evaluateStyleDistillDecision, readStyleDistillState } from "./style-distill-gate.mjs";
 import { positiveEvidenceOnly, shapeDistillEvidence } from "./style-delta.mjs";
 
-function positiveEnv(name, fallback) {
-  const value = Math.trunc(Number(process.env[name]));
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-export const DISTILL_THRESHOLD = positiveEnv("KAMI_STYLE_DISTILL_THRESHOLD", STYLE_DISTILL_THRESHOLD);
-export const DISTILL_GROWTH_WINDOW = positiveEnv("KAMI_STYLE_DISTILL_GROWTH_WINDOW", STYLE_DISTILL_GROWTH_WINDOW);
+// 阈值统一由设置面板提供（环境变量已在 settings-store 里优先合并）。
+// 这几个导出保留为出厂值，供未注入设置时的纯函数默认与测试使用。
+export const DISTILL_THRESHOLD = STYLE_DISTILL_THRESHOLD;
+export const DISTILL_GROWTH_WINDOW = STYLE_DISTILL_GROWTH_WINDOW;
 export const PROFILE_THRESHOLD = 3;
 
 function sampleEvidence(evidence) {
@@ -112,14 +109,14 @@ export async function distillStyleProfileIfReady({
   return { distilled: profile, ...decision };
 }
 
-export async function distillUserProfileIfReady(locale) {
+export async function distillUserProfileIfReady(locale, { threshold = PROFILE_THRESHOLD } = {}) {
   const evidence = await getStyleEvidence(locale, { limit: 1_000 });
   // 画像描述"这位译者会怎么写"，只能由正例构成；反例走风格规范那条线。
   const accepted = positiveEvidenceOnly(evidence).filter((item) => item.provenance === "human-accept");
-  if (accepted.length < PROFILE_THRESHOLD) return { profile: null, acceptedCount: accepted.length, threshold: PROFILE_THRESHOLD };
+  if (accepted.length < threshold) return { profile: null, acceptedCount: accepted.length, threshold };
   const distilled = await distillUserProfileWithModel({ locale, examples: sampleEvidence(accepted).examples });
   const profile = await saveUserProfile({ locale, ...distilled, evidenceCount: accepted.length, status: "draft" });
-  return { profile, acceptedCount: accepted.length, threshold: PROFILE_THRESHOLD };
+  return { profile, acceptedCount: accepted.length, threshold };
 }
 
 export async function runEvolutionReview({ locale, contentType, domain, batchId = "", threshold = DISTILL_THRESHOLD, growthWindow = DISTILL_GROWTH_WINDOW }) {

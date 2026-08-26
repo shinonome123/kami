@@ -20,11 +20,13 @@ import { narrowByDomain, rankQaCases, rankTranslationMemories, splitReferenceAut
 import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 import { runTaskPool } from "./src/task-pool.mjs";
-import { createDefaultTranslationSkill, evaluateSkillPromotion, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
+import { DEFAULT_TRANSLATION_STRATEGY, createDefaultTranslationSkill, effectiveStrategyValue, evaluateSkillPromotion, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
 import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
 import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
 import { detectBatchVerse } from "./src/batch-verse.mjs";
 import { createAutoProposer } from "./src/auto-proposal.mjs";
+import { SETTING_SPECS, TITLE_BRACKET_CHOICES, settingGroups } from "./src/settings.mjs";
+import { environmentOverrides, getSettings, resetSettings, saveSettings } from "./src/settings-store.mjs";
 import { classifyChange, isNegativeEvidence, positiveEvidenceOnly } from "./src/style-delta.mjs";
 import { NO_STYLE_PROFILE_ID, STYLE_MIN_EVALUATION_SAMPLES, STYLE_PROMOTION_GUARDRAILS, benchmarkStyleVariant, selectStyleHoldout, styleVariant, validateStylePromotionState } from "./src/style-benchmark.mjs";
 import { proposeChallengerSkill, selectProposalTrajectories } from "./src/skill-proposal.mjs";
@@ -94,6 +96,7 @@ function feedbackEntry(share, feedback) {
 }
 
 /** 单个分享最多生成的语素拆解段数。 */
+/** 出厂值；实际生效值来自设置面板（getSettings().share.glossLimit）。 */
 const SHARE_GLOSS_LIMIT = 30;
 
 /** 创建后台任务记录（术语导入 / Embedding 重建 / 批次导出）。 */
@@ -124,17 +127,17 @@ async function generateShareGlosses(token) {
   const share = await getShare(token);
   if (!share || share.status === "ready" || share.status === "failed") return;
   const targets = (share.segments || [])
-    .slice(0, SHARE_GLOSS_LIMIT)
+    .slice(0, getSettings().share.glossLimit)
     .map((segment, index) => ({ index, segment }))
     .filter(({ segment }) => !segment.gloss);
   if (!targets.length) {
-    await updateShare(token, (item) => finalizeShareGlossGeneration(item, { maxSegments: SHARE_GLOSS_LIMIT }));
+    await updateShare(token, (item) => finalizeShareGlossGeneration(item, { maxSegments: getSettings().share.glossLimit }));
     return;
   }
   try {
     await probeModelAvailability({ timeoutMs: 20_000 });
   } catch (error) {
-    await updateShare(token, (item) => finalizeShareGlossGeneration(item, { failures: [error], maxSegments: SHARE_GLOSS_LIMIT }));
+    await updateShare(token, (item) => finalizeShareGlossGeneration(item, { failures: [error], maxSegments: getSettings().share.glossLimit }));
     return;
   }
   const flush = async (updates) => {
@@ -173,7 +176,7 @@ function startShareGlossGeneration(token, label = "分享拆解生成失败") {
   generateShareGlosses(token).catch(async (error) => {
     console.error(`${label} ${token}:`, error.message);
     try {
-      await updateShare(token, (item) => finalizeShareGlossGeneration(item, { failures: [error], maxSegments: SHARE_GLOSS_LIMIT }));
+      await updateShare(token, (item) => finalizeShareGlossGeneration(item, { failures: [error], maxSegments: getSettings().share.glossLimit }));
     } catch (updateError) {
       console.error(`分享拆解失败状态写回失败 ${token}:`, updateError.message);
     }
@@ -341,7 +344,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
   const { approved: approvedReferences, machineDrafts } = splitReferenceAuthority(references);
   const qaCases = contextPack.qaGuidance || [];
   let translation = initialTranslation;
-  let hardIssues = runQa({ source: contextPack.source, translation, matches, locale });
+  let hardIssues = runQa({ source: contextPack.source, translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
   let aiIssues = [];
   let score = calculateQaScore({ hardIssues, aiIssues });
   let initialScore = score;
@@ -378,7 +381,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
         }));
       }
       iterations += 1;
-      hardIssues = runQa({ source: contextPack.source, translation, matches, locale });
+      hardIssues = runQa({ source: contextPack.source, translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
       const notApplicable = new Set(termDecisions.filter((item) => item.decision === "not_applicable").map((item) => `${item.officialSource}\u0000${item.officialTarget}`));
       hardIssues = hardIssues.filter((issue) => issue.type !== "potential_term" || !notApplicable.has(`${issue.sourceTerm}\u0000${issue.targetTerm}`));
       for (const issue of hardIssues) {
@@ -398,7 +401,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
       const actionable = [...hardIssues.map((issue) => ({ severity: "critical", category: issue.type, message: issue.message })), ...aiIssues];
       translation = await reviseTranslationWithQa({ contextPack, translation, issues: actionable, references, qaCases });
       iterations += 1;
-      hardIssues = runQa({ source: contextPack.source, translation, matches, locale });
+      hardIssues = runQa({ source: contextPack.source, translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
       aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references: approvedReferences, machineDrafts, qaCases });
       score = calculateQaScore({ hardIssues, aiIssues });
     }
@@ -698,7 +701,9 @@ async function commitTermImport(body, onProgress = null) {
         contentType,
         domain,
         sourceBatchId: body.batchId,
-        learningRunId: learning?.id || ""
+        learningRunId: learning?.id || "",
+        threshold: getSettings().learning.styleDistillThreshold,
+        growthWindow: getSettings().learning.styleDistillGrowthWindow
       });
       if (distilled) {
         styleProfiles.push(distilled);
@@ -752,6 +757,21 @@ async function apiHandler(req, res, url) {
     const id = decodeURIComponent(url.pathname.slice("/api/assets/".length));
     const deleted = await deleteAsset(locale, id);
     return json(res, deleted ? 200 : 404, { deleted });
+  }
+  if (req.method === "GET" && url.pathname === "/api/settings") {
+    return json(res, 200, {
+      settings: getSettings(),
+      groups: settingGroups(),
+      titleBracketChoices: TITLE_BRACKET_CHOICES,
+      locales: Object.fromEntries(Object.entries(LOCALES).map(([locale, meta]) => [locale, meta.label])),
+      environmentOverrides: environmentOverrides()
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/settings") {
+    const body = await readJsonBody(req);
+    // 净化明细一并返回：被夹紧或整组回落时必须让人看见，不能悄悄改掉用户输入。
+    const { settings, notes } = body?.reset === true ? resetSettings() : saveSettings(body?.settings ?? body);
+    return json(res, 200, { settings, notes, environmentOverrides: environmentOverrides() });
   }
   if (req.method === "POST" && url.pathname === "/api/classify") {
     const body = await readJsonBody(req);
@@ -1014,8 +1034,9 @@ async function apiHandler(req, res, url) {
         .filter((item) => evidenceIds.has(String(item.id))).map((item) => item.source)
       : [];
     const holdout = selectStyleHoldout(await listLearningTrajectories({ ...scope, limit: 500 }), { scope, distilledFromSources });
-    if (holdout.length < STYLE_MIN_EVALUATION_SAMPLES) {
-      const error = new Error(`可用留出终稿 ${holdout.length} 条，未达风格评测所需的 ${STYLE_MIN_EVALUATION_SAMPLES} 条（已排除蒸馏用过的 ${distilledFromSources.length} 条原文）`);
+    const minStyleSamples = getSettings().learning.styleEvaluationMinSamples;
+    if (holdout.length < minStyleSamples) {
+      const error = new Error(`可用留出终稿 ${holdout.length} 条，未达风格评测所需的 ${minStyleSamples} 条（已排除蒸馏用过的 ${distilledFromSources.length} 条原文）`);
       error.statusCode = 409;
       throw error;
     }
@@ -1092,7 +1113,9 @@ async function apiHandler(req, res, url) {
       locale,
       contentType: body.contentType || "general",
       domain: body.domain || "general",
-      batchId: body.batchId || ""
+      batchId: body.batchId || "",
+      threshold: getSettings().learning.styleDistillThreshold,
+      growthWindow: getSettings().learning.styleDistillGrowthWindow
     });
     return json(res, 200, result);
   }
@@ -1480,7 +1503,8 @@ async function apiHandler(req, res, url) {
     const styleProfile = await getStyleProfile(locale, contentType, domain);
     const translationSkill = await ensureChampionTranslationSkill(learningScope({ locale, contentType, domain, project }));
     const qaGuidance = rankQaCases(source, await getQaCases(locale, { contentType, domain, limit: -1 }), { limit: 3, queryEmbedding: await embedSource(source) });
-    const contextPack = buildContextPack({ source, locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
+    const contextPack = buildContextPack({
+      titleOverrides: getSettings().orthography.titleBrackets, source, locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
     const priorDecisions = Array.isArray(body.humanDecisions) ? body.humanDecisions.slice(0, 30) : [];
     const decision = {
       decision: action === "approve" ? "approved_as_is" : "revision_requested",
@@ -1558,12 +1582,13 @@ async function apiHandler(req, res, url) {
     const contentType = body.contentType || "general";
     const domain = concreteDomain(body.domain, { text: body.source || "", contentType });
     const matches = matchTerms(body.source || "", assets, { contentType, domain });
-    if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches, locale }) });
+    if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches, locale, titleOverrides: getSettings().orthography.titleBrackets }) });
     const classification = await classify({ text: body.source || "", hint: contentType, useModel: false });
     const styleProfile = await getStyleProfile(locale, contentType, domain);
     const translationSkill = await ensureChampionTranslationSkill(learningScope({ locale, contentType, domain, project: body.project || "default" }));
     const qaGuidance = rankQaCases(body.source || "", await getQaCases(locale, { contentType, domain, limit: -1 }), { limit: 3, queryEmbedding: await embedSource(body.source || "") });
-    const contextPack = buildContextPack({ source: body.source || "", locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
+    const contextPack = buildContextPack({
+      titleOverrides: getSettings().orthography.titleBrackets, source: body.source || "", locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
     const aiQa = await runAiQaLoop({ contextPack, initialTranslation: body.translation || "", matches, locale, contentType, domain, batchId: body.batchId || "manual-recheck" });
     return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, styleProfile: contextPack.styleProfile });
   }
@@ -1591,6 +1616,11 @@ async function apiHandler(req, res, url) {
     const assets = await getAssets(locale);
     const classification = await classify({ text: cleanSource, hint: contentType, useModel: false });
     const scopeContentType = classification.contentType || "general";
+    const settings = getSettings();
+    const qaTuning = {
+      penalties: { critical: settings.quality.penaltyCritical, major: settings.quality.penaltyMajor, minor: settings.quality.penaltyMinor },
+      weights: { basic: settings.quality.weightBasic, fidelity: settings.quality.weightFidelity, nuance: settings.quality.weightNuance }
+    };
     const domainResolution = resolveDomain(cleanSource, body.domain, { contentType: scopeContentType });
     const domain = domainResolution.domain;
     // 术语匹配放在识别之后，用真正生效的语体与领域加权，而不是界面提交的原始值。
@@ -1675,7 +1705,7 @@ async function apiHandler(req, res, url) {
       const pairSource = pair.sourceIndices.map((index) => sourceSegments[index]).join("\n");
       const pairTranslation = pair.translationIndices.map((index) => translationSegments[index]).join("\n");
       const segmentMatches = matchTerms(pairSource, assets, { contentType: scopeContentType, domain });
-      const basicIssues = runBasicQa({ source: pairSource, translation: pairTranslation, matches: segmentMatches, locale });
+      const basicIssues = runBasicQa({ source: pairSource, translation: pairTranslation, matches: segmentMatches, locale, titleOverrides: getSettings().orthography.titleBrackets });
       const [grammarResult, aiResult] = await Promise.allSettled([
         evaluateGrammarWithModel({ translation: pairTranslation, locale, contentType: scopeContentType }),
         evaluateAutoQaWithModel({
@@ -1698,7 +1728,7 @@ async function apiHandler(req, res, url) {
         source: pairSource,
         translation: pairTranslation,
         issues,
-        scores: calculateAutoQaScores(issues),
+        scores: calculateAutoQaScores(issues, { penalties: qaTuning.penalties, weights: qaTuning.weights }),
         summary: summarizeIssues(issues),
         // 每段的扣分只能记在自己头上，文档级打分才能按段封顶后再平均。
         fallbackReason: failures.join("；")
@@ -1717,7 +1747,7 @@ async function apiHandler(req, res, url) {
       ...segments.flatMap((segment) => segment.issues.map((issue) => ({ ...issue, segmentIndex: segment.index }))),
       ...alignmentIssues.map((issue, index) => ({ ...issue, segmentIndex: `alignment-${index}` }))
     ];
-    const scores = calculateAutoQaScores(allIssues, { segmentCount: Math.max(1, segments.length) });
+    const scores = calculateAutoQaScores(allIssues, { segmentCount: Math.max(1, segments.length), penalties: qaTuning.penalties, weights: qaTuning.weights });
     const summary = summarizeIssues(allIssues);
     const fallbackReason = segments
       .filter((segment) => segment.fallbackReason)
@@ -2054,7 +2084,9 @@ async function apiHandler(req, res, url) {
           locale: share.locale,
           contentType: share.contentType,
           domain: share.domain,
-          sourceBatchId: share.batchId
+          sourceBatchId: share.batchId,
+          threshold: getSettings().learning.styleDistillThreshold,
+          growthWindow: getSettings().learning.styleDistillGrowthWindow
         });
       } catch {
         // 未达阈值或蒸馏失败不阻断采纳
@@ -2081,10 +2113,16 @@ async function apiHandler(req, res, url) {
     const domain = domainResolution.domain;
     const scope = learningScope({ locale, contentType: classification.contentType, domain, project: body.project || "default" });
     const translationSkill = await ensureChampionTranslationSkill(scope);
-    const memoryLimit = Math.min(10, Math.max(1, Number(translationSkill.strategy?.retrieval?.translationMemory?.limit) || 5));
-    const qaCaseLimit = Math.min(10, Math.max(1, Number(translationSkill.strategy?.retrieval?.qaCases?.limit) || 3));
-    const passScore = Math.min(100, Math.max(70, Number(translationSkill.strategy?.qa?.minimumScore) || 90));
-    const maxRevisions = Math.min(4, Math.max(0, Number(translationSkill.strategy?.qa?.maximumRevisionAttempts) ?? 2));
+    const tuning = getSettings();
+    const factory = DEFAULT_TRANSLATION_STRATEGY;
+    const memoryLimit = Math.min(20, Math.max(1, effectiveStrategyValue(
+      translationSkill.strategy?.retrieval?.translationMemory?.limit, factory.retrieval.translationMemory.limit, tuning.retrieval.translationMemoryLimit)));
+    const qaCaseLimit = Math.min(20, Math.max(1, effectiveStrategyValue(
+      translationSkill.strategy?.retrieval?.qaCases?.limit, factory.retrieval.qaCases.limit, tuning.retrieval.qaCaseLimit)));
+    const passScore = Math.min(100, Math.max(60, effectiveStrategyValue(
+      translationSkill.strategy?.qa?.minimumScore, factory.qa.minimumScore, tuning.quality.qaPassScore)));
+    const maxRevisions = Math.min(4, Math.max(0, effectiveStrategyValue(
+      translationSkill.strategy?.qa?.maximumRevisionAttempts, factory.qa.maximumRevisionAttempts, tuning.quality.maxRevisionAttempts)));
     const matches = matchTerms(body.source, assets, {
       contentType: classification.contentType,
       domain
@@ -2111,6 +2149,7 @@ async function apiHandler(req, res, url) {
       } catch { /* 批次记录不可用不影响翻译 */ }
     }
     const contextPack = buildContextPack({
+      titleOverrides: getSettings().orthography.titleBrackets,
       source: body.source,
       locale,
       classification,
@@ -2153,7 +2192,7 @@ async function apiHandler(req, res, url) {
           contentType: classification.contentType, domain, batchId: body.batchId || "",
           providedReferences: translationReferences, passScore, maxRevisions
         })
-        : { translation: result.translation, issues: runQa({ source: body.source, translation: result.translation, matches, locale }), score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
+        : { translation: result.translation, issues: runQa({ source: body.source, translation: result.translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets }), score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
       const suggestionCandidates = buildSuggestionCandidates(aiQa.translation, matches);
       let alignment = { requested: suggestionCandidates.length > 0, used: false, fallbackReason: "" };
       let modelSuggestions = [];
@@ -2166,7 +2205,7 @@ async function apiHandler(req, res, url) {
         }
       }
       const termSuggestions = resolveTermSuggestions(aiQa.translation, suggestionCandidates, modelSuggestions);
-      const initialIssues = runQa({ source: body.source, translation: result.initial || result.translation, matches, locale });
+      const initialIssues = runQa({ source: body.source, translation: result.initial || result.translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
       let completedTrajectory = trajectory;
       if (trajectory) {
         try {
@@ -2356,8 +2395,9 @@ await styleEvaluationJobs.initialize();
 
 // 自动候选生成：人工批准终稿达到阈值后，在后台提议 challenger；评测与激活仍走人工闸门。
 const autoProposer = createAutoProposer({
-  threshold: Math.max(1, Number(process.env.KAMI_AUTO_PROPOSE_THRESHOLD) || 10),
-  growthWindow: Math.max(1, Number(process.env.KAMI_AUTO_PROPOSE_GROWTH_WINDOW) || 10),
+  // 设置面板里的值；环境变量已在 settings-store 里优先合并过。
+  threshold: getSettings().learning.autoProposeThreshold,
+  growthWindow: getSettings().learning.autoProposeGrowthWindow,
   deps: {
     getCurrentChampion: async (scope) => (await listTranslationSkills({ ...scope, status: "champion", limit: 1 }))[0] || null,
     countAcceptedTrajectories: async (scope) => {

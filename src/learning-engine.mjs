@@ -258,6 +258,26 @@ function codePoints(text) {
 }
 
 /** Unicode-code-point Levenshtein distance normalized to 0..1. */
+/**
+ * 技能策略与设置面板的优先级。
+ *
+ * 每个作用域的 champion 技能里都存着一份策略，新建时用的是出厂值。直接
+ * `skill.limit || setting` 会让出厂值（truthy）永远短路掉面板设置——面板看着
+ * 能改，实际一点用没有。反过来让面板无条件压过技能，又会把学习循环真正调出来
+ * 的参数吞掉。
+ *
+ * 所以按"是否被动过"区分：技能里的值仍等于出厂值 = 学习循环没碰过它，听面板的；
+ * 已经偏离出厂值 = 是评测晋升后的结果，尊重技能。
+ */
+export function effectiveStrategyValue(skillValue, factoryDefault, settingValue) {
+  // Number(null) 和 Number("") 都是 0，而 0 是这里的合法取值（最大修订轮数设 0
+  // 表示不自动修订），所以"没有这一项"必须在数值判断之前先排除掉。
+  const blank = skillValue === null || skillValue === undefined || skillValue === "";
+  const skill = blank ? Number.NaN : Number(skillValue);
+  if (!Number.isFinite(skill)) return settingValue;
+  return skill === Number(factoryDefault) ? settingValue : skill;
+}
+
 export function normalizedEditDistance(left, right) {
   const a = codePoints(left);
   const b = codePoints(right);
