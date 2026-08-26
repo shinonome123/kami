@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 const dataDir = mkdtempSync(join(tmpdir(), "kami-feedback-"));
 process.env.KAMI_DATA_DIR = dataDir;
+delete process.env.KAMI_STORE; // 建了临时 KAMI_DATA_DIR 就是要隔离：继承 directus 会把测试夹具写进生产库
 
 const { initializeStore, saveMemory, saveStyleEvidence, saveQaCase, demoteMemories, approveQaCase, getMemories, getQaCases } = await import("../src/store.mjs");
 const { rankTranslationMemories } = await import("../src/translation-memory.mjs");

@@ -67,7 +67,13 @@ function jsonField(field, translation, { note = null, sort } = {}) {
   };
 }
 
-function selectField(field, translation, values, { defaultValue = null, width = "half", sort } = {}) {
+/**
+ * `nullable` 必须显式声明：这里原本一律 is_nullable: false，于是任何"这一项可以
+ * 没有"的下拉都成了非空列。后台任务的 target_locale 就栽在这上面——一张术语表
+ * 可以同时含四个目标语言，本来就没有单一 locale，写 null 直接被约束拒绝，
+ * 术语导入与全语言 Embedding 重建在 Directus 模式下必然 400。
+ */
+function selectField(field, translation, values, { defaultValue = null, width = "half", sort, nullable = false } = {}) {
   return {
     field,
     type: "string",
@@ -80,7 +86,7 @@ function selectField(field, translation, values, { defaultValue = null, width = 
       sort,
       translations: label(translation)
     },
-    schema: { is_nullable: false, default_value: defaultValue }
+    schema: { is_nullable: nullable, default_value: defaultValue }
   };
 }
 
@@ -621,7 +627,8 @@ const definitions = [
       uuidField(),
       selectField("task_type", "任务类型", [["术语导入", "term_import"], ["Embedding 重建", "embedding_rebuild"], ["批次导出", "batch_export"]], { required: true, sort: 2 }),
       textField("title", "任务标题", { required: true, sort: 3 }),
-      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { width: "half", sort: 4 }),
+      // 跨语言的术语导入与全语言 Embedding 重建没有单一目标语言，必须允许为空。
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { width: "half", sort: 4, nullable: true }),
       selectField("status", "任务状态", [["进行中", "in_progress"], ["已完成", "completed"], ["失败", "failed"]], { defaultValue: "in_progress", sort: 5 }),
       jsonField("progress", "进度快照", { note: "percent、phase、message、completed、total。", sort: 6 }),
       jsonField("payload", "结果载荷", { note: "导出文件下载地址、导入汇总、重建统计等。", sort: 7 }),
@@ -682,6 +689,15 @@ async function ensureCollection(definition) {
     else if (typeMigrations.has(`${definition.collection}.${field.field}`) && current.type !== field.type) {
       await api(`/fields/${definition.collection}/${field.field}`, { method: "PATCH", body: field });
       console.log(`migrated ${definition.collection}.${field.field} from ${current.type} to ${field.type}`);
+    }
+    // 已有字段原本只建不改，声明改成可空也不会落到库上——background_tasks.target_locale
+    // 就是这样长期停留在 NOT NULL，让没有单一语言的术语导入必然 400。
+    // 放宽约束对已有数据永远安全，所以自动收敛；收紧可能让历史行违规，只告警不执行。
+    else if (field.schema?.is_nullable === true && current.schema?.is_nullable === false) {
+      await api(`/fields/${definition.collection}/${field.field}`, { method: "PATCH", body: { schema: { ...field.schema, is_nullable: true } } });
+      console.log(`relaxed ${definition.collection}.${field.field} to nullable`);
+    } else if (field.schema?.is_nullable === false && current.schema?.is_nullable === true) {
+      console.warn(`skip ${definition.collection}.${field.field}: 声明为非空但库中可空，收紧约束需人工确认历史数据`);
     }
   }
   console.log(`checked ${definition.collection}`);

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { activateStyleProfile, deleteAsset, disposeQaCase, getAssets, getAssetStats, getBatchRun, getMemories, getQaCases, getQaRuns, getStyleEvidence, getStyleLearningRuns, getStyleProfile, initializeStore, listBatchRuns, listStyleProfiles, rejectStyleProfile, saveAsset, saveBatchRun, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile } from "../src/store.mjs";
+import { saveBackgroundTask, getBackgroundTask, deleteBackgroundTask, activateStyleProfile, deleteAsset, disposeQaCase, getAssets, getAssetStats, getBatchRun, getMemories, getQaCases, getQaRuns, getStyleEvidence, getStyleLearningRuns, getStyleProfile, initializeStore, listBatchRuns, listStyleProfiles, rejectStyleProfile, saveAsset, saveBatchRun, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfile } from "../src/store.mjs";
 
 const enabled = process.env.KAMI_STORE === "directus";
 
@@ -174,5 +174,21 @@ test("Directus 候选队列保存完整句段与句内术语的父子血缘", { 
   } finally {
     for (const candidate of preview.candidates) await fetch(`${base}/items/term_candidates/${candidate.candidateId}`, { method: "DELETE", headers });
     await fetch(`${base}/items/term_import_batches/${preview.batchId}`, { method: "DELETE", headers });
+  }
+});
+
+test("跨语言后台任务允许没有目标语言，术语导入不因非空约束失败", { skip: !enabled }, async () => {
+  await initializeStore();
+  // 一张术语表可以同时含五个目标语言，本来就没有单一 locale。
+  // background_tasks.target_locale 曾被建成 NOT NULL，导致术语导入与
+  // 全语言 Embedding 重建在 Directus 模式下必然 400——JSON 模式测不出来。
+  const task = await saveBackgroundTask({ type: "term_import", title: "跨语言导入回归测试", locale: "" });
+  assert.ok(task.id);
+  try {
+    const stored = await getBackgroundTask(task.id);
+    assert.ok(stored, "无目标语言的任务必须能落库并读回");
+    assert.ok(!stored.locale, "跨语言任务的 locale 应为空而不是被塞一个假语言");
+  } finally {
+    await deleteBackgroundTask(task.id);
   }
 });

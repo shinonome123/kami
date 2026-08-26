@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 const dataDir = mkdtempSync(join(tmpdir(), "kami-rebuild-"));
 process.env.KAMI_DATA_DIR = dataDir;
+delete process.env.KAMI_STORE; // 建了临时 KAMI_DATA_DIR 就是要隔离：继承 directus 会把测试夹具写进生产库
 process.env.LLM_BASE_URL = "http://127.0.0.1:11435/v1";
 process.env.LLM_EMBEDDING_MODEL = "mock-embed";
 
