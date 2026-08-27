@@ -1,10 +1,8 @@
 .docx-review-*/
 .reasonix/
-data/corpora/*.json
-data/learning/jobs/
+data/
 *.log
 node_modules/
-data/runtime/
 directus/.env
 tmp/
 
@@ -18,4 +16,3 @@ tmp/
 /pe_manifest_dump.ps1
 /sx_stdout.txt
 /sx_stderr.txt
-data/exports/
