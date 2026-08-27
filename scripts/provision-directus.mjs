@@ -109,7 +109,7 @@ function uniqueInternalField(field, sort) {
 }
 
 const statusValues = [["草稿", "draft"], ["待审核", "pending"], ["已批准", "approved"], ["已废弃", "deprecated"], ["已归档", "archived"]];
-const contentTypeValues = [["宣发文案", "marketing"], ["正式公告", "announcement"], ["游戏内道具名", "item_name"], ["游戏内道具描述", "item_description"], ["UI / 系统提示", "ui"], ["活动规则", "rules"], ["剧情对白", "dialogue"], ["社媒短文案", "social"], ["通用文本", "general"]];
+const contentTypeValues = [["诗词 / 韵文", "verse"], ["故事 / 叙事", "narrative"], ["图鉴 / 设定集", "codex"], ["剧情对白", "dialogue"], ["UI / 系统提示", "ui"], ["教程 / 操作指引", "tutorial"], ["活动规则", "rules"], ["游戏内道具名", "item_name"], ["游戏内道具描述", "item_description"], ["商店 / 商品说明", "store"], ["正式公告", "announcement"], ["宣发文案", "marketing"], ["社媒短文案", "social"], ["待分类文本", "general"]];
 
 function termFields() {
   return [
@@ -120,7 +120,8 @@ function termFields() {
     jsonField("forbidden", "禁用译法", { sort: 5 }),
     jsonField("domains", "业务领域", { sort: 6 }),
     jsonField("content_types", "适用语体", { sort: 7 }),
-    selectField("enforcement", "约束级别", [["强制采用", "required"], ["优先参考", "preferred"]], { defaultValue: "required", sort: 8 }),
+    jsonField("content_tags", "细分类标签", { note: "同一主语体内的场景标签；用于检索加权和来源解释。", sort: 8 }),
+    selectField("enforcement", "约束级别", [["强制采用", "required"], ["优先参考", "preferred"]], { defaultValue: "required", sort: 9 }),
     selectField("status", "审批状态", statusValues, { defaultValue: "draft", sort: 9 }),
     textField("provenance", "来源", { width: "half", sort: 10 }),
     textField("note", "备注", { multiline: true, sort: 11 }),
@@ -136,6 +137,7 @@ function memoryFields() {
     textField("target", "目标语言译文", { required: true, multiline: true, sort: 3 }),
     textField("domain", "业务领域", { width: "half", sort: 4 }),
     selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 5 }),
+    jsonField("content_tags", "细分类标签", { note: "主语体内的场景标签。", sort: 6 }),
     textField("channel", "使用渠道", { width: "half", sort: 6 }),
     textField("style_profile_id", "风格版本 ID", { width: "half", sort: 7 }),
     selectField("quality_status", "质量状态", [["人工批准", "human_approved"], ["机器验证", "machine_verified"], ["临时", "provisional"], ["已拒绝", "rejected"]], { defaultValue: "provisional", sort: 8 }),
@@ -239,6 +241,7 @@ const definitions = [
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { defaultValue: "ja-JP", sort: 4 }),
       selectField("asset_type", "资产类型", [["术语", "term"], ["翻译记忆", "memory"]], { defaultValue: "term", sort: 5 }),
       selectField("content_type", "自动识别语体", contentTypeValues, { defaultValue: "general", sort: 6 }),
+      jsonField("content_tags", "自动细分类标签", { sort: 7 }),
       selectField("domain", "自动识别领域", [["游戏", "game"], ["市场营销", "marketing"], ["社区运营", "community"], ["通用", "general"]], { defaultValue: "general", sort: 7 }),
       selectField("enforcement", "自动约束级别", [["强制采用", "required"], ["优先参考", "preferred"]], { defaultValue: "preferred", sort: 8 }),
       { field: "classification_confidence", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 9, translations: label("分类置信度") }, schema: { is_nullable: true } },
@@ -283,6 +286,7 @@ const definitions = [
       textField("filename", "文件名", { required: true, sort: 2 }),
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 3 }),
       selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 4 }),
+      jsonField("content_tags", "细分类标签", { note: "本风格规范覆盖的场景标签。", sort: 5 }),
       textField("domain", "业务领域", { width: "half", sort: 5 }),
       textField("format", "文件格式", { width: "half", sort: 6 }),
       textField("segmentation_mode", "分段模式", { width: "half", sort: 7 }),
@@ -339,6 +343,7 @@ const definitions = [
       textField("name", "配置名称", { required: true, sort: 2 }),
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 3 }),
       selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 4 }),
+      jsonField("content_tags", "细分类标签", { note: "本风格规范覆盖的场景标签。", sort: 5 }),
       textField("domain", "业务领域", { width: "half", sort: 5 }),
       textField("instructions", "翻译规则", { required: true, multiline: true, sort: 6 }),
       jsonField("examples", "正反例", { sort: 7 }),
@@ -377,6 +382,7 @@ const definitions = [
       uuidField(),
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
       selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      jsonField("content_tags", "细分类标签", { note: "该证据的场景标签。", sort: 4 }),
       textField("domain", "业务领域", { width: "half", sort: 4 }),
       textField("source", "简体中文原文", { required: true, multiline: true, sort: 5 }),
       textField("target", "目标语言译文", { required: true, multiline: true, sort: 6 }),
@@ -410,6 +416,7 @@ const definitions = [
       textField("filename", "来源文件", { width: "half", sort: 3 }),
       selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 4 }),
       selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 5 }),
+      jsonField("content_tags", "细分类标签", { note: "本批证据覆盖的场景标签。", sort: 6 }),
       textField("domain", "业务领域", { width: "half", sort: 6 }),
       { field: "evidence_count", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 7, translations: label("证据数量") }, schema: { is_nullable: false, default_value: 0 } },
       textField("summary", "本批风格摘要", { required: true, multiline: true, sort: 8 }),

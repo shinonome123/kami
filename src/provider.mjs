@@ -318,7 +318,7 @@ export async function reviewTermCandidatesWithModel(locale, candidates) {
       role: "system",
       content: `你是游戏本地化资产清洗员。用户只负责上传文件，你必须逐条完成资产归类，不要求用户设置任何参数。审核简体中文到${language}的候选对照。每一个输入 index 都必须且只能返回一次 decision，不能遗漏。
 
-rowKind 只能为 term 或 memory。sheetMode=dialogue 时整行必须保持 memory；不得因为译文长短或目标语言不同将同一句中文改成 term。term 是独立词条中的专名、系统名、功能名、道具名、角色名、地点名、技能名；memory 是语义对齐的台词、句子、UI 文本或完整文案。memory 的 contentType 必须从 ${Object.keys(CONTENT_TYPES).join(", ")} 中选择，term 固定 general。domain 只能为 game、marketing、community、general。
+rowKind 只能为 term 或 memory。sheetMode=dialogue 时整行必须保持 memory；不得因为译文长短或目标语言不同将同一句中文改成 term。term 是独立词条中的专名、系统名、功能名、道具名、角色名、地点名、技能名；memory 是语义对齐的台词、句子、UI 文本或完整文案。memory 的 contentType 必须从 ${Object.keys(CONTENT_TYPES).join(", ")} 中选择；term 的主分类继承所在行或来源文件的用途，不得把 general 当作跨分类通配。domain 只能为 game、marketing、community、general。
 
 对 keep=true 且 rowKind=memory 的完整句段，同时检查句内术语，放入 nestedTerms，不得用 nestedTerms 替换父 memory。nestedTerms.category 只能是 proper_name、character_name、place_name、item_name、skill_name、system_name、organization_name、species_name、currency_name、lore_concept、fixed_ui_label。必须是专名、官方命名或能稳定复用的固定标签；严禁抽取代词、动词/形容词短语、普通搭配、礼貌套话、一次性修辞和整分句。nestedTerms.source 必须逐字存在于 source，target 必须逐字存在于 target；不得补译、改写或猜测目标词。专名和官方命名 enforcement=required，其他固定标签 preferred。
 
@@ -1237,7 +1237,7 @@ export async function classifyWithModel(text, { descriptor = "", location = "" }
   const content = await chat([
     {
       role: "system",
-      content: "你是游戏本地化内容分类器。只能从 marketing, announcement, item_name, item_description, ui, rules, dialogue, social, general 中选择一个 contentType。输入是 JSON，其中 text 是正文；如果带有\"用途\"或\"位置\"字段，那是需求表自己声明的文案用途，应当优先于从正文推测。输出严格 JSON：{\"contentType\":\"...\",\"confidence\":0到1,\"evidence\":[\"简短依据\"]}。"
+      content: "你是游戏本地化内容分类器。只能从 verse, narrative, codex, dialogue, ui, tutorial, rules, item_name, item_description, store, announcement, marketing, social, general 中选择一个 contentType。诗词/韵文、故事叙事、图鉴设定、角色台词和商店说明必须彼此隔离；general 只用于确实无法确认用途的文本，不能充当通配类别。输入是 JSON，其中 text 是正文；如果带有\"用途\"或\"位置\"字段，那是需求表自己声明的文案用途，应当优先于从正文推测。输出严格 JSON：{\"contentType\":\"...\",\"confidence\":0到1,\"evidence\":[\"简短依据\"]}。"
     },
     { role: "user", content: JSON.stringify({ text: String(text).slice(0, 8000), 用途: descriptor || undefined, 位置: location || undefined }) }
   ]);

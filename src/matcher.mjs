@@ -10,6 +10,11 @@ function scopeBoost(term, contentType, domain) {
   return boost;
 }
 
+function isContentScopeCompatible(term, contentType) {
+  const scopes = Array.isArray(term.contentTypes) ? term.contentTypes.filter(Boolean) : [];
+  return !scopes.length || scopes.includes(contentType) || scopes.includes("general");
+}
+
 function unorderedCharacterSimilarity(left, right) {
   const leftCounts = new Map();
   const rightCounts = new Map();
@@ -80,6 +85,7 @@ export function matchTerms(text, assets, { contentType = "general", domain = "ge
       ...best,
       score: Math.min(1, best.score + scopeBoost(term, contentType, domain)),
       locale: assets.locale,
+      scopeMismatch: !isContentScopeCompatible(term, contentType),
       term
     });
   }

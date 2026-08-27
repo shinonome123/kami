@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONTENT_TYPES, LOCALES, assertLocale } from "./src/config.mjs";
-import { classifyContent, descriptorFromContext, resolveDomain } from "./src/classifier.mjs";
+import { CONTENT_TAGS, CONTENT_TYPES, LOCALES, assertLocale } from "./src/config.mjs";
+import { classifyContent, descriptorFromContext, inferContentTags, resolveDomain } from "./src/classifier.mjs";
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
@@ -322,7 +322,10 @@ async function classify(body) {
   try {
     const model = await classifyWithModel(body.text, { descriptor, location });
     if (!Object.hasOwn(CONTENT_TYPES, model.contentType)) throw new Error("模型返回不支持的内容类型");
-    return model;
+    return {
+      ...model,
+      contentTags: inferContentTags(body.text, model.contentType, { descriptor, location })
+    };
   } catch (error) {
     return { ...heuristic, fallbackReason: error.message };
   }
@@ -340,7 +343,11 @@ function concreteDomain(value, { text = "", contentType = "general" } = {}) {
 
 async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, contentType, domain, batchId, providedReferences = null, humanDecisions = [], passScore = 90, maxRevisions = 2 }) {
   const queryEmbedding = await embedSource(contextPack.source);
-  const references = providedReferences || rankTranslationMemories(contextPack.source, await getMemories(locale, { contentType, domain, limit: -1 }), { limit: 5, queryEmbedding });
+  const references = providedReferences || rankTranslationMemories(
+    contextPack.source,
+    await getMemories(locale, { contentType, domain, limit: -1, exactContentType: true }),
+    { limit: 5, queryEmbedding, contentTags: contextPack.contentTags || [] }
+  );
   // 审校环节只能引用人工批准的译例；本系统自己 QA 通过后写回的机器译文另开一档，
   // 否则一次错误会在下一次审校里被当成"已批准"的规范。
   const { approved: approvedReferences, machineDrafts } = splitReferenceAuthority(references);
@@ -435,6 +442,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
     try {
       await saveMemory(locale, {
         source: contextPack.source, target: translation, domain, contentType,
+        contentTags: contextPack.contentTags || [],
         styleProfileId: contextPack.styleProfile?.id, qualityStatus: "machine_verified", qaScore: score,
         provenance: iterations ? "aiqa-corrected" : "aiqa-passed", batchId
       });
@@ -539,7 +547,7 @@ async function previewTermImport(body, onProgress = () => {}) {
   const analyzeStructure = useModel ? (snapshot, requestedLocale) => analyzeTermTableStructureWithModel(snapshot, requestedLocale) : undefined;
   const extracted = await extractTermPairs(body, { analyzeStructure });
   onProgress({ phase: "assets", message: "正在读取四个独立术语库", percent: 24, completed: 1, total: 1 });
-  let candidates = extracted.candidates.map(classifyImportCandidate);
+  let candidates = extracted.candidates.map((candidate) => classifyImportCandidate({ ...candidate, sourceFile: body.filename || "" }));
   const assetsByLocale = {};
   const locales = [...new Set(candidates.map((candidate) => candidate.locale))];
   await Promise.all(locales.map(async (locale) => { assetsByLocale[locale] = (await getAssets(locale)).terms; }));
@@ -619,11 +627,14 @@ async function commitTermImport(body, onProgress = null) {
       const source = String(candidate.source || "").trim();
       const target = String(candidate.target || "").trim();
       if (!source || !target) throw new Error("源词或译法为空");
-      const fallback = classifyImportCandidate({ ...candidate, source, target });
+      const fallback = classifyImportCandidate({ ...candidate, source, target, sourceFile: body.filename || candidate.sourceFile || "" });
       const requestedContentType = String(body.contentType || "auto");
       const contentType = requestedContentType !== "auto" && Object.hasOwn(CONTENT_TYPES, requestedContentType)
         ? requestedContentType
         : (Object.hasOwn(CONTENT_TYPES, candidate.contentType) ? candidate.contentType : fallback.contentType);
+      const contentTags = requestedContentType !== "auto"
+        ? inferContentTags(source, contentType, { sourceFile: body.filename || candidate.sourceFile || "" })
+        : (candidate.contentTags || fallback.contentTags || []);
       const domain = ["game", "marketing", "community", "general"].includes(String(body.domain || ""))
         ? String(body.domain)
         : (["game", "marketing", "community", "general"].includes(candidate.domain) ? candidate.domain : fallback.domain);
@@ -633,11 +644,13 @@ async function commitTermImport(body, onProgress = null) {
       if (candidate.assetType === "memory") {
         const memory = await saveMemory(locale, {
           source, target, domain, contentType,
+          contentTags,
           qualityStatus: "human_approved", qaScore: 100, provenance: "table-import", sourceFile: body.filename,
           batchId: body.batchId, sourceRow: candidate.rowNumber
         });
         const evidence = await saveStyleEvidence({
           locale, source, target, contentType, domain,
+          contentTags,
           batchId: body.batchId, sourceFile: body.filename, sourceRow: candidate.rowNumber, status: "accepted", provenance: "table-import"
         });
         const scopeKey = `${locale}\u0000${contentType}\u0000${domain}`;
@@ -658,7 +671,7 @@ async function commitTermImport(body, onProgress = null) {
           continue;
         }
         const term = await saveAsset(locale, {
-          source, target, aliases: [], forbidden: [], domains: [domain], contentTypes: ["general"],
+          source, target, aliases: [], forbidden: [], domains: [domain], contentTypes: [contentType || "general"], contentTags,
           enforcement, status: "approved",
           provenance: `table-import:${String(body.filename || "unknown").slice(0, 120)}`,
           note: `批次 ${body.batchId} · 原表第 ${candidate.rowNumber || "?"} 行 · 清洗分 ${candidate.score ?? "-"}`
@@ -748,7 +761,7 @@ async function apiHandler(req, res, url) {
       const stats = await getAssetStats(locale);
       assets[locale] = { revision: stats.revision, termCount: stats.termCount };
     }
-    return json(res, 200, { locales: LOCALES, contentTypes: CONTENT_TYPES, provider: getProviderConfig(), backend: getStoreMetadata(), assets });
+    return json(res, 200, { locales: LOCALES, contentTypes: CONTENT_TYPES, contentTags: CONTENT_TAGS, provider: getProviderConfig(), backend: getStoreMetadata(), assets });
   }
   if (req.method === "GET" && url.pathname === "/api/assets") {
     const locale = assertLocale(url.searchParams.get("locale"));
@@ -989,8 +1002,12 @@ async function apiHandler(req, res, url) {
         { locale, source, contentType, domain, project, batchId: body.batchId || "" }
       );
     }
+    const contentTags = linkedTrajectory?.contextPack?.contentTags
+      || classifyContent(source, contentType, { sourceFile: body.sourceFile || "" }).contentTags
+      || [];
     const memory = await saveMemory(locale, {
       source, target: translation, domain, contentType,
+      contentTags,
       qualityStatus: "human_approved", qaScore: 100, provenance: "human-accept",
       styleProfileId: body.styleProfileId || "", batchId: body.batchId || "",
       sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
@@ -1003,6 +1020,7 @@ async function apiHandler(req, res, url) {
       : "";
     const evidence = await saveStyleEvidence({
       locale, source, target: translation, contentType, domain,
+      contentTags,
       machineTranslation, polarity: "positive",
       status: "accepted", provenance: "human-accept",
       sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
@@ -1703,10 +1721,10 @@ async function apiHandler(req, res, url) {
     const matches = matchTerms(cleanSource, assets, { contentType: scopeContentType, domain });
     const styleProfile = await getStyleProfile(locale, scopeContentType, domain);
     const queryEmbedding = await embedSource(cleanSource);
-    const narrowedMemories = narrowByDomain(await getMemories(locale, { contentType: scopeContentType, domain: "general", limit: -1 }), domain);
+    const narrowedMemories = narrowByDomain(await getMemories(locale, { contentType: scopeContentType, domain: "general", limit: -1, exactContentType: true }), domain);
     const narrowedQaCases = narrowByDomain(await getQaCases(locale, { contentType: scopeContentType, domain: "general", limit: -1 }), domain);
     domainResolution.relaxedRetrieval = narrowedMemories.relaxed || narrowedQaCases.relaxed;
-    const references = rankTranslationMemories(cleanSource, narrowedMemories.items, { limit: 5, queryEmbedding });
+    const references = rankTranslationMemories(cleanSource, narrowedMemories.items, { limit: 5, queryEmbedding, contentTags: classification.contentTags || [] });
     const qaCases = rankQaCases(cleanSource, narrowedQaCases.items, { limit: 3, queryEmbedding });
     const evidence = positiveEvidenceOnly(await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 12 })).slice(0, 6);
     // 只有人工批准的译例能充当"标准"；机器译文另开一档，仅供一致性参考。
@@ -2211,14 +2229,14 @@ async function apiHandler(req, res, url) {
     const [storedStyleProfile, localeQaCases, localeMemories, userProfile] = await Promise.all([
       getStyleProfile(locale, classification.contentType, domain),
       getQaCases(locale, { contentType: classification.contentType, domain: "general", limit: -1 }),
-      getMemories(locale, { contentType: classification.contentType, domain: "general", limit: -1 }),
+      getMemories(locale, { contentType: classification.contentType, domain: "general", limit: -1, exactContentType: true }),
       getUserProfile(locale)
     ]);
     const narrowedQaCases = narrowByDomain(localeQaCases, domain);
     const narrowedMemories = narrowByDomain(localeMemories, domain);
     domainResolution.relaxedRetrieval = narrowedMemories.relaxed || narrowedQaCases.relaxed;
     const qaGuidance = rankQaCases(body.source, narrowedQaCases.items, { limit: qaCaseLimit, queryEmbedding });
-    const translationReferences = rankTranslationMemories(body.source, narrowedMemories.items, { limit: memoryLimit, queryEmbedding });
+    const translationReferences = rankTranslationMemories(body.source, narrowedMemories.items, { limit: memoryLimit, queryEmbedding, contentTags: classification.contentTags || [] });
     // 批次排比/韵文检测：同一批次的多行共用一种句式时，注入模板约束；
     // 客户端顺序翻译时还会带上本批已定稿译文作为风格锚点。
     let batchVerse = null;

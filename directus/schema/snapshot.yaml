@@ -999,7 +999,7 @@ fields:
       max_length: 255
       numeric_precision: null
       numeric_scale: null
-      is_nullable: false
+      is_nullable: true
       is_unique: false
       is_indexed: false
       is_primary_key: false
@@ -1976,6 +1976,49 @@ fields:
       max_length: null
       numeric_precision: 32
       numeric_scale: 0
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: batch_runs
+    field: content_tags
+    type: json
+    meta:
+      collection: batch_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 本风格规范覆盖的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: batch_runs
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
       is_nullable: true
       is_unique: false
       is_indexed: false
@@ -7927,6 +7970,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: style_evidence
+    field: content_tags
+    type: json
+    meta:
+      collection: style_evidence
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 该证据的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 4
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: style_evidence
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: style_learning_runs
     field: id
     type: uuid
@@ -8666,6 +8752,49 @@ fields:
       name: date_created
       table: style_learning_runs
       data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_learning_runs
+    field: content_tags
+    type: json
+    meta:
+      collection: style_learning_runs
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 本批证据覆盖的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: style_learning_runs
+      data_type: json
       default_value: null
       max_length: null
       numeric_precision: null
@@ -9451,6 +9580,92 @@ fields:
       width: full
     schema:
       name: evaluation
+      table: style_profiles
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: rules
+    type: json
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: rules
+      group: null
+      hidden: false
+      interface: tags
+      note: 跨轮累积的规则集，含 id、类别、累计证据数与退休状态；instructions 是它的渲染结果。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 15
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 累积风格规则
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: rules
+      table: style_profiles
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: style_profiles
+    field: content_tags
+    type: json
+    meta:
+      collection: style_profiles
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 本风格规范覆盖的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 5
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
       table: style_profiles
       data_type: json
       default_value: null
@@ -10904,6 +11119,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: term_candidates
+    field: content_tags
+    type: json
+    meta:
+      collection: term_candidates
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: null
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 7
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 自动细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: term_candidates
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: term_import_batches
     field: id
     type: uuid
@@ -11964,6 +12222,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: terms_fr_fr
+    field: content_tags
+    type: json
+    meta:
+      collection: terms_fr_fr
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 同一主语体内的场景标签；用于检索加权和来源解释。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: terms_fr_fr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: terms_ja_jp
     field: id
     type: uuid
@@ -12547,6 +12848,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: terms_ja_jp
+    field: content_tags
+    type: json
+    meta:
+      collection: terms_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 同一主语体内的场景标签；用于检索加权和来源解释。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: terms_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: terms_ko_kr
     field: id
     type: uuid
@@ -13130,6 +13474,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: terms_ko_kr
+    field: content_tags
+    type: json
+    meta:
+      collection: terms_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 同一主语体内的场景标签；用于检索加权和来源解释。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: terms_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: terms_th_th
     field: id
     type: uuid
@@ -13713,6 +14100,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: terms_th_th
+    field: content_tags
+    type: json
+    meta:
+      collection: terms_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 同一主语体内的场景标签；用于检索加权和来源解释。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: terms_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: terms_zh_hant_tw
     field: id
     type: uuid
@@ -14283,6 +14713,49 @@ fields:
       name: date_updated
       table: terms_zh_hant_tw
       data_type: timestamp with time zone
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: terms_zh_hant_tw
+    field: content_tags
+    type: json
+    meta:
+      collection: terms_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 同一主语体内的场景标签；用于检索加权和来源解释。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 8
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: terms_zh_hant_tw
+      data_type: json
       default_value: null
       max_length: null
       numeric_precision: null
@@ -15026,6 +15499,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_memory_fr_fr
+    field: content_tags
+    type: json
+    meta:
+      collection: translation_memory_fr_fr
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 主语体内的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: translation_memory_fr_fr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: translation_memory_ja_jp
     field: id
     type: uuid
@@ -15741,6 +16257,49 @@ fields:
       width: full
     schema:
       name: embedding
+      table: translation_memory_ja_jp
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_memory_ja_jp
+    field: content_tags
+    type: json
+    meta:
+      collection: translation_memory_ja_jp
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 主语体内的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
       table: translation_memory_ja_jp
       data_type: json
       default_value: null
@@ -16486,6 +17045,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_memory_ko_kr
+    field: content_tags
+    type: json
+    meta:
+      collection: translation_memory_ko_kr
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 主语体内的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: translation_memory_ko_kr
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: translation_memory_th_th
     field: id
     type: uuid
@@ -17216,6 +17818,49 @@ fields:
       has_auto_increment: false
       foreign_key_table: null
       foreign_key_column: null
+  - collection: translation_memory_th_th
+    field: content_tags
+    type: json
+    meta:
+      collection: translation_memory_th_th
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 主语体内的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
+      table: translation_memory_th_th
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
   - collection: translation_memory_zh_hant_tw
     field: id
     type: uuid
@@ -17931,6 +18576,49 @@ fields:
       width: full
     schema:
       name: embedding
+      table: translation_memory_zh_hant_tw
+      data_type: json
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: null
+      foreign_key_column: null
+  - collection: translation_memory_zh_hant_tw
+    field: content_tags
+    type: json
+    meta:
+      collection: translation_memory_zh_hant_tw
+      conditions: null
+      display: null
+      display_options: null
+      field: content_tags
+      group: null
+      hidden: false
+      interface: tags
+      note: 主语体内的场景标签。
+      options: null
+      readonly: false
+      required: false
+      searchable: true
+      sort: 6
+      special:
+        - cast-json
+      translations:
+        - language: zh-CN
+          translation: 细分类标签
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: content_tags
       table: translation_memory_zh_hant_tw
       data_type: json
       default_value: null

@@ -143,6 +143,7 @@ function toTerm(item) {
     forbidden: arrayValue(item.forbidden),
     domains: arrayValue(item.domains),
     contentTypes: arrayValue(item.content_types),
+    contentTags: arrayValue(item.content_tags),
     enforcement: item.enforcement || "required",
     note: item.note || "",
     status: item.status || "observed",
@@ -161,6 +162,7 @@ function toDirectusTerm(input) {
     forbidden: [...new Set((input.forbidden || []).map((item) => String(item).trim()).filter(Boolean))],
     domains: [...new Set((input.domains || ["general"]).filter(Boolean))],
     content_types: [...new Set((input.contentTypes || ["general"]).filter(Boolean))],
+    content_tags: [...new Set((input.contentTags || []).filter(Boolean))],
     enforcement: input.enforcement || "required",
     note: String(input.note || "").trim(),
     status: input.status || "approved",
@@ -196,13 +198,13 @@ export async function initializeDirectusStore() {
   ].map((collection) => request(`/items/${collection}?limit=1&fields=id`)));
 }
 
-export async function getDirectusMemories(locale, { contentType = "general", domain = "general", limit = 500 } = {}) {
+export async function getDirectusMemories(locale, { contentType = "general", domain = "general", limit = 500, exactContentType = false } = {}) {
   const collection = memoryCollectionFor(locale);
   const directusLimit = Number(limit) <= 0 ? "-1" : String(Math.min(1000, limit));
-  const params = new URLSearchParams({ limit: directusLimit, sort: "-date_updated,-date_created", fields: "id,source,target,domain,content_type,channel,style_profile_id,quality_status,qa_score,provenance,source_file,batch_id,source_row,embedding,date_created,date_updated" });
+  const params = new URLSearchParams({ limit: directusLimit, sort: "-date_updated,-date_created", fields: "id,source,target,domain,content_type,content_tags,channel,style_profile_id,quality_status,qa_score,provenance,source_file,batch_id,source_row,embedding,date_created,date_updated" });
   const items = await request(`/items/${collection}?${params}`);
   return items.filter((item) =>
-    (!contentType || contentType === "general" || item.content_type === contentType || item.content_type === "general")
+    (!contentType || (exactContentType ? item.content_type === contentType : contentType === "general" || item.content_type === contentType || item.content_type === "general"))
     && (!domain || domain === "general" || item.domain === domain || item.domain === "general")
   ).map((item) => ({
     id: item.id,
@@ -210,6 +212,7 @@ export async function getDirectusMemories(locale, { contentType = "general", dom
     target: item.target,
     domain: item.domain || "general",
     contentType: item.content_type || "general",
+    contentTags: arrayValue(item.content_tags),
     channel: item.channel || "",
     styleProfileId: item.style_profile_id || "",
     qualityStatus: item.quality_status || "provisional",
@@ -239,6 +242,7 @@ export async function saveDirectusMemory(locale, input) {
     target,
     domain: input.domain || "general",
     content_type: input.contentType || "general",
+    content_tags: input.contentTags || [],
     channel: input.channel || "",
     style_profile_id: input.styleProfileId || "",
     quality_status: input.qualityStatus || "provisional",
@@ -257,7 +261,7 @@ export async function saveDirectusMemory(locale, input) {
 
 export async function getDirectusStyleProfile(locale, contentType, domain = "general") {
   assertLocale(locale);
-  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,rules,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
+  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,content_tags,domain,instructions,examples,rules,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
   params.set("filter[target_locale][_eq]", locale);
   params.set("filter[content_type][_eq]", contentType || "general");
   params.set("filter[status][_eq]", "active");
@@ -270,6 +274,7 @@ export async function getDirectusStyleProfile(locale, contentType, domain = "gen
     source: "style-library",
     locale: profile.target_locale,
     contentType: profile.content_type,
+    contentTags: arrayValue(profile.content_tags),
     domain: profile.domain || "general",
     instruction: profile.instructions,
     examples: arrayValue(profile.examples),
@@ -286,6 +291,7 @@ export async function saveDirectusStyleEvidence(input) {
   const saved = await request("/items/style_evidence", { method: "POST", body: {
     target_locale: assertLocale(input.locale),
     content_type: input.contentType || "general",
+    content_tags: input.contentTags || [],
     domain: input.domain || "general",
     source: String(input.source || "").trim(),
     target: String(input.target || "").trim(),
@@ -304,7 +310,7 @@ export async function saveDirectusStyleEvidence(input) {
 
 export async function getDirectusStyleEvidence(locale, options = {}) {
   assertLocale(locale);
-  const params = new URLSearchParams({ limit: String(Math.min(1000, options.limit || 1000)), sort: "-date_created", fields: "id,target_locale,content_type,domain,source,target,machine_translation,polarity,note,source_file,source_row,batch_id,status,provenance,embedding,date_created" });
+  const params = new URLSearchParams({ limit: String(Math.min(1000, options.limit || 1000)), sort: "-date_created", fields: "id,target_locale,content_type,content_tags,domain,source,target,machine_translation,polarity,note,source_file,source_row,batch_id,status,provenance,embedding,date_created" });
   params.set("filter[target_locale][_eq]", locale);
   if (options.contentType) params.set("filter[content_type][_eq]", options.contentType);
   if (options.exactScope && options.domain) params.set("filter[domain][_eq]", options.domain);
@@ -315,7 +321,7 @@ export async function getDirectusStyleEvidence(locale, options = {}) {
       ? (!options.contentType || item.content_type === options.contentType) && (!options.domain || item.domain === options.domain)
       : (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general"))
     .map((item) => ({
-      id: item.id, locale: item.target_locale, contentType: item.content_type || "general", domain: item.domain || "general",
+      id: item.id, locale: item.target_locale, contentType: item.content_type || "general", contentTags: arrayValue(item.content_tags), domain: item.domain || "general",
       source: item.source, target: item.target, sourceFile: item.source_file || "", sourceRow: Number(item.source_row) || null,
       machineTranslation: item.machine_translation || "",
       polarity: item.polarity === "negative" ? "negative" : "positive",
@@ -391,6 +397,7 @@ export async function saveDirectusStyleProfile(input) {
     name: input.name,
     target_locale: locale,
     content_type: input.contentType || "general",
+    content_tags: input.contentTags || [],
     domain: input.domain || "general",
     instructions: input.instruction,
     examples: input.examples || [],
@@ -405,7 +412,7 @@ export async function saveDirectusStyleProfile(input) {
     status: input.status || "active"
   } });
   if (previous?.id && saved.status === "active") await request(`/items/style_profiles/${previous.id}`, { method: "PATCH", body: { status: "inactive" } });
-  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], rules: arrayValue(saved.rules), version: saved.version, locale, contentType: saved.content_type, domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
+  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], rules: arrayValue(saved.rules), version: saved.version, locale, contentType: saved.content_type, contentTags: arrayValue(saved.content_tags), domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
 }
 
 function mapStyleLearningRun(item) {
@@ -415,6 +422,7 @@ function mapStyleLearningRun(item) {
     filename: item.filename || "",
     locale: item.target_locale,
     contentType: item.content_type || "general",
+    contentTags: arrayValue(item.content_tags),
     domain: item.domain || "general",
     evidenceCount: Number(item.evidence_count) || 0,
     summary: item.summary || "",
@@ -435,6 +443,7 @@ export async function saveDirectusStyleLearningRun(input) {
     filename: String(input.filename || ""),
     target_locale: assertLocale(input.locale),
     content_type: input.contentType || "general",
+    content_tags: input.contentTags || [],
     domain: input.domain || "general",
     evidence_count: Number(input.evidenceCount) || 0,
     summary: String(input.summary || ""),
@@ -452,6 +461,7 @@ export async function saveDirectusStyleLearningRun(input) {
       filename: ["filename", (value) => String(value || "")],
       locale: ["target_locale", (value) => assertLocale(value)],
       contentType: ["content_type", (value) => value || "general"],
+      contentTags: ["content_tags", (value) => value || []],
       domain: ["domain", (value) => value || "general"],
       evidenceCount: ["evidence_count", (value) => Number(value) || 0],
       summary: ["summary", (value) => String(value || "")],
@@ -477,7 +487,7 @@ export async function getDirectusStyleLearningRuns(locale, options = {}) {
   const params = new URLSearchParams({
     limit: String(Math.min(500, Math.max(1, Number(options.limit) || 100))),
     sort: "-date_created",
-    fields: "id,batch_id,filename,target_locale,content_type,domain,evidence_count,summary,rules,examples,caveat,confidence,status,promoted_profile_id,generated_by,date_created"
+    fields: "id,batch_id,filename,target_locale,content_type,content_tags,domain,evidence_count,summary,rules,examples,caveat,confidence,status,promoted_profile_id,generated_by,date_created"
   });
   params.set("filter[target_locale][_eq]", assertLocale(locale));
   if (options.batchId) params.set("filter[batch_id][_eq]", options.batchId);
@@ -519,7 +529,7 @@ export async function getDirectusQaCases(locale, { contentType = "general", doma
 
 export async function getDirectusAssets(locale) {
   const collection = collectionFor(locale);
-  const fields = "id,source,aliases,target,forbidden,domains,content_types,enforcement,note,status,provenance,date_created,date_updated";
+  const fields = "id,source,aliases,target,forbidden,domains,content_types,content_tags,enforcement,note,status,provenance,date_created,date_updated";
   const items = await request(`/items/${collection}?limit=-1&sort=-date_updated&fields=${fields}`);
   const latest = items.map((item) => item.date_updated || item.date_created).filter(Boolean).sort().at(-1);
   return {
@@ -609,6 +619,7 @@ export async function saveDirectusImportPreview(input) {
     target_locale: candidate.locale,
     asset_type: candidate.assetType || "term",
     content_type: candidate.contentType || "general",
+    content_tags: candidate.contentTags || [],
     domain: candidate.domain || "general",
     enforcement: candidate.enforcement || "preferred",
     classification_confidence: Number(candidate.contentTypeConfidence) || Number(candidate.score) || null,
@@ -673,7 +684,7 @@ export async function getDirectusImportPreview(batchId) {
     limit: "-1",
     sort: "row_number,target_locale",
     fields: [
-      "id", "source", "target", "target_locale", "asset_type", "content_type", "domain", "enforcement",
+      "id", "source", "target", "target_locale", "asset_type", "content_type", "content_tags", "domain", "enforcement",
       "classification_confidence", "classification_source", "candidate_key", "candidate_role", "parent_candidate_key",
       "parent_row_number", "parent_candidate_keys", "parent_evidence", "candidate_origin", "term_category",
       "extraction_confidence", "source_span", "target_span", "frequency", "score", "source_file", "row_number",
@@ -691,6 +702,7 @@ export async function getDirectusImportPreview(batchId) {
     locale: item.target_locale || "",
     assetType: item.asset_type || "term",
     contentType: item.content_type || "general",
+    contentTags: arrayValue(item.content_tags),
     domain: item.domain || "general",
     enforcement: item.enforcement || "preferred",
     contentTypeConfidence: Number(item.classification_confidence) || Number(item.score) || 0,
@@ -1162,7 +1174,7 @@ export async function saveDirectusStyleProfileEvaluation(id, evaluation) {
 
 export async function listDirectusStyleProfiles(locale, status, scope = null) {
   assertLocale(locale);
-  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,domain,instructions,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
+  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,content_tags,domain,instructions,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
   styleParams.set("filter[target_locale][_eq]", locale);
   if (status) styleParams.set("filter[status][_eq]", status);
   if (scope?.contentType) {
@@ -1179,7 +1191,7 @@ export async function listDirectusStyleProfiles(locale, status, scope = null) {
   const userProfiles = await request(`/items/user_profiles?${profileParams}`);
   return {
     styleProfiles: styleProfiles.map((item) => ({
-      id: item.id, name: item.name, locale: item.target_locale, contentType: item.content_type, domain: item.domain || "general",
+      id: item.id, name: item.name, locale: item.target_locale, contentType: item.content_type, contentTags: arrayValue(item.content_tags), domain: item.domain || "general",
       instruction: item.instructions, examples: arrayValue(item.examples), rules: arrayValue(item.rules), version: Number(item.version) || 1,
       parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0,
       sourceBatchId: item.source_batch_id || "", learningRunId: item.learning_run_id || "",
@@ -1222,9 +1234,12 @@ export async function rejectDirectusStyleProfile(id) {
   for (const collection of ["style_profiles", "user_profiles"]) {
     try {
       const saved = await request(`/items/${collection}/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: "inactive" } });
-      return { id: saved.id, kind: collection, status: "inactive" };
+      return { id: saved.id, kind: collection === "style_profiles" ? "style_profile" : "user_profile", status: "inactive" };
     } catch (error) {
-      if (error.statusCode !== 404) throw error;
+      // Directus deliberately returns 403 for a missing id as well as for an
+      // inaccessible one. An id from user_profiles therefore gets 403 on the
+      // first style_profiles probe and must continue to the second collection.
+      if (!isMissingItem(error)) throw error;
     }
   }
   const error = new Error("未找到该风格规范");

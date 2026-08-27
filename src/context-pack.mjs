@@ -26,8 +26,8 @@ function normalizeNeighborContext(neighborContext) {
 }
 
 export function buildContextPack({ source, locale, classification, matches, domain = "general", neighborContext = "", styleProfile = null, translationSkill = null, qaGuidance = [], userProfile = null, translationReferences = [], batchVerse = null, batchReferences = [], titleOverrides = null }) {
-  const required = matches.filter((item) => item.mode === "exact" && item.term.enforcement === "required");
-  const preferred = matches.filter((item) => item.mode !== "exact" || item.term.enforcement !== "required");
+  const required = matches.filter((item) => item.mode === "exact" && item.term.enforcement === "required" && !item.scopeMismatch);
+  const preferred = matches.filter((item) => item.mode !== "exact" || item.term.enforcement !== "required" || item.scopeMismatch);
   const defaultRegister = CONTENT_TYPES[classification.contentType].register;
   return {
     sourceLanguage: "Simplified Chinese",
@@ -36,12 +36,18 @@ export function buildContextPack({ source, locale, classification, matches, doma
     domain,
     contentType: classification.contentType,
     contentTypeLabel: CONTENT_TYPES[classification.contentType].label,
+    contentTags: Array.isArray(classification.contentTags) ? classification.contentTags.slice(0, 8) : [],
     register: defaultRegister,
     translationReferences: Array.isArray(translationReferences) ? translationReferences.slice(0, 5).map((item) => ({
       source: item.source,
       target: item.target,
       similarity: Number(item.similarity) || 0,
-      qualityStatus: item.qualityStatus || ""
+      qualityStatus: item.qualityStatus || "",
+      contentType: item.contentType || "general",
+      contentTags: Array.isArray(item.contentTags) ? item.contentTags.slice(0, 8) : [],
+      provenance: item.provenance || "",
+      sourceFile: item.sourceFile || "",
+      sourceRow: item.sourceRow || null
     })) : [],
     userProfile: userProfile ? {
       id: String(userProfile.id || ""),
@@ -72,13 +78,15 @@ export function buildContextPack({ source, locale, classification, matches, doma
     localeInstruction: LOCALES[locale].defaultInstruction,
     punctuation: punctuationGuidance(locale, titleOverrides),
     requiredTerms: required.map(({ term }) => ({ source: term.source, target: term.target, forbidden: term.forbidden, note: term.note })),
-    preferredTerms: preferred.map(({ term, mode, matchPhrase, score }) => ({
+    preferredTerms: preferred.map(({ term, mode, matchPhrase, score, scopeMismatch }) => ({
       source: term.source,
       matchedSource: matchPhrase,
       target: term.target,
       matchMode: mode,
       confidence: Number(score.toFixed(2)),
-      note: mode === "exact" ? term.note : `疑似术语，仅供参考，不得未经判断强制替换。${term.note || ""}`
+      note: scopeMismatch
+        ? `该术语不属于当前主分类，仅作跨场景参考，不得强制采用。${term.note || ""}`
+        : (mode === "exact" ? term.note : `疑似术语，仅供参考，不得未经判断强制替换。${term.note || ""}`)
     })),
     protectedTokens: extractProtectedTokens(source),
     rhymeLike: detectRhymeLike(source),

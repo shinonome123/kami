@@ -49,7 +49,7 @@ export async function benchmarkTranslationSkill(skill, trajectory, { styleProfil
   const [styleProfile, qaCases, memories, userProfile] = await Promise.all([
     getStyleProfile(scope.locale, scope.contentType, scope.domain),
     getQaCases(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
-    getMemories(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
+    getMemories(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1, exactContentType: true }),
     getUserProfile(scope.locale)
   ]);
   // Clean-room isolation: never feed this holdout case its own final translation
@@ -59,7 +59,7 @@ export async function benchmarkTranslationSkill(skill, trajectory, { styleProfil
   const isolated = isolateBenchmarkAssets({ source, memories, qaCases, styleProfile: translationStyleProfile, userProfile });
   const memoryLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.translationMemory?.limit) || 5));
   const qaCaseLimit = Math.min(10, Math.max(1, Number(skill.strategy?.retrieval?.qaCases?.limit) || 3));
-  const translationReferences = rankTranslationMemories(source, isolated.memories, { limit: memoryLimit, queryEmbedding });
+  const translationReferences = rankTranslationMemories(source, isolated.memories, { limit: memoryLimit, queryEmbedding, contentTags: classification.contentTags || [] });
   const qaGuidance = rankQaCases(source, isolated.qaCases, { limit: qaCaseLimit, queryEmbedding });
   const contextPack = buildContextPack({
     source, locale: scope.locale, classification, matches, domain: scope.domain,

@@ -58,6 +58,18 @@ export const LOCALES = Object.freeze({
 });
 
 export const CONTENT_TYPES = Object.freeze({
+  verse: {
+    label: "诗词 / 韵文",
+    register: "优先重现节奏、对仗、意象与语气；允许为目标语言韵律调整语序和措辞，但不得改变核心意象与信息。"
+  },
+  narrative: {
+    label: "故事 / 叙事",
+    register: "保持叙事视角、时间顺序、氛围和信息密度；长句可按目标语言阅读习惯拆分，但不得改写情节。"
+  },
+  codex: {
+    label: "图鉴 / 设定集",
+    register: "兼顾世界观文气与资料准确性；人物、怪物、地点和设定名必须与正式术语一致。"
+  },
   marketing: {
     label: "宣发文案",
     register: "传播感强、自然、有号召力；允许适度本地化创译，但不得改变事实和承诺强度。"
@@ -74,9 +86,17 @@ export const CONTENT_TYPES = Object.freeze({
     label: "游戏内道具描述",
     register: "兼顾功能准确性与世界观语感；属性、数值、占位符必须完全保留。"
   },
+  store: {
+    label: "商店 / 商品说明",
+    register: "版本、包含内容、购买条件与授权关系必须准确；表达清楚直接，不混入角色语气或宣传夸饰。"
+  },
   ui: {
     label: "UI / 系统提示",
     register: "简短、直接、可操作；优先遵循目标语言 UI 惯例并控制字符长度。"
+  },
+  tutorial: {
+    label: "教程 / 操作指引",
+    register: "按执行顺序说明操作、前置条件和结果；使用目标语言产品惯例，避免文学化或含糊表达。"
   },
   rules: {
     label: "活动规则",
@@ -91,9 +111,30 @@ export const CONTENT_TYPES = Object.freeze({
     register: "轻快、自然、适合平台传播；保留标签、链接和 CTA。"
   },
   general: {
-    label: "通用文本",
-    register: "忠实、自然、清晰；在无明确语体时避免过度润色。"
+    label: "待分类文本",
+    register: "仅用于尚未确认用途的文本；不得把它当作跨语体通配池，确认用途后应迁移到具体类型。"
   }
+});
+
+/**
+ * 细标签不承担生产技能的硬隔离，主类型才承担。它们用于同一主类型内的
+ * 检索加权、风格证据聚类和来源解释，避免为了每个小场景复制一整套技能。
+ */
+export const CONTENT_TAGS = Object.freeze({
+  verse: Object.freeze({ poem: "诗歌", couplet: "对仗", chant: "偈语 / 口诀", rhyme: "押韵文案" }),
+  narrative: Object.freeze({ story_narration: "故事叙述", quest_narrative: "任务叙事", worldbuilding: "世界观叙事" }),
+  codex: Object.freeze({ character_codex: "人物图鉴", creature_codex: "怪物图鉴", location_codex: "地点图鉴", lore_entry: "设定条目" }),
+  dialogue: Object.freeze({ combat_bark: "战斗喊话", cinematic_dialogue: "剧情台词", npc_dialogue: "NPC 对话", monologue: "独白" }),
+  ui: Object.freeze({ button_label: "按钮", menu_label: "菜单", status_message: "状态提示", error_message: "错误提示" }),
+  tutorial: Object.freeze({ onboarding: "新手引导", operation_guide: "操作指引", gameplay_tip: "玩法提示" }),
+  rules: Object.freeze({ event_rules: "活动规则", eligibility: "资格条件", legal: "条款声明" }),
+  item_name: Object.freeze({ equipment_name: "装备名", skill_name: "技能名", character_name: "角色名", location_name: "地点名" }),
+  item_description: Object.freeze({ equipment_description: "装备描述", skill_description: "技能描述", effect_description: "效果说明" }),
+  store: Object.freeze({ edition_description: "版本说明", purchase_flow: "购买流程", dlc_description: "DLC / 追加内容" }),
+  announcement: Object.freeze({ maintenance_notice: "维护公告", update_notice: "更新公告", service_notice: "服务通知" }),
+  marketing: Object.freeze({ headline: "宣传标题", slogan: "口号", campaign_copy: "活动宣发", trailer_copy: "预告片文案" }),
+  social: Object.freeze({ social_post: "社媒正文", community_cta: "社区号召" }),
+  general: Object.freeze({ unclassified: "待人工确认" })
 });
 
 export function assertLocale(locale) {

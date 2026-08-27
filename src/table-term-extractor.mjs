@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { extname } from "node:path";
 import { CONTENT_TYPES, LOCALES, assertLocale } from "./config.mjs";
-import { classifyContent, inferDomainFromText } from "./classifier.mjs";
+import { classifyContent, inferContentTags, inferDomainFromText } from "./classifier.mjs";
 
 const HEADER_SCAN_LIMIT = 12;
 const MAX_ROWS = 10_000;
@@ -243,19 +243,32 @@ function inferDomain(candidate, contentType) {
 export function classifyImportCandidate(candidate) {
   const next = { ...candidate };
   if (next.assetType === "memory") {
-    const classification = next.sheetMode === "dialogue"
-      ? { contentType: "dialogue", confidence: Math.max(0.9, Number(next.sheetModeConfidence) || 0.9), source: next.sheetModeSource || "sheet-mode" }
-      : classifyContent(next.source, "auto");
+    const detected = classifyContent(next.source, "auto", { sourceFile: next.sourceFile || next.filename || next.sheet || "" });
+    const classification = next.sheetMode === "dialogue" && !["verse", "codex", "narrative"].includes(detected.contentType)
+      ? {
+        contentType: "dialogue",
+        contentTags: inferContentTags(next.source, "dialogue", { sourceFile: next.sourceFile || next.filename || next.sheet || "" }),
+        confidence: Math.max(0.9, Number(next.sheetModeConfidence) || 0.9),
+        source: next.sheetModeSource || "sheet-mode"
+      }
+      : detected;
     next.contentType = classification.contentType;
+    next.contentTags = classification.contentTags || [];
     next.contentTypeConfidence = classification.confidence;
     next.contentTypeSource = classification.source;
     next.domain = inferDomain(next, next.contentType);
     next.enforcement = "preferred";
     next.reasons = [...(next.reasons || []), `自动归类：${CONTENT_TYPES[next.contentType]?.label || next.contentType} / ${next.domain}`];
   } else {
-    next.contentType = "general";
+    const detected = classifyContent(next.parentSource || next.source, "auto", { sourceFile: next.sourceFile || next.filename || next.sheet || "" });
+    next.contentType = Object.hasOwn(CONTENT_TYPES, next.contentType) && next.contentType !== "general"
+      ? next.contentType
+      : detected.contentType;
+    next.contentTags = next.contentTags?.length
+      ? next.contentTags
+      : inferContentTags(next.parentSource || next.source, next.contentType, { sourceFile: next.sourceFile || next.filename || next.sheet || "" });
     next.contentTypeSource = next.contentTypeSource || "rules";
-    next.domain = inferDomain(next, "general");
+    next.domain = inferDomain(next, next.contentType);
     next.enforcement = Number(next.score) >= 0.82 ? "required" : "preferred";
     next.reasons = [...(next.reasons || []), `自动归类：术语 / ${next.domain} / ${next.enforcement === "required" ? "强制采用" : "优先参考"}`];
   }
@@ -504,7 +517,7 @@ export function applyModelDecisions(candidates, decisions = []) {
     const modelAssetType = candidate.assetType;
     const modelContentType = modelAssetType === "memory" && candidate.sheetMode === "dialogue"
       ? "dialogue"
-      : (modelAssetType === "memory" && Object.hasOwn(CONTENT_TYPES, String(model.contentType || "")) ? String(model.contentType) : (modelAssetType === "memory" ? candidate.contentType : "general"));
+      : (modelAssetType === "memory" && Object.hasOwn(CONTENT_TYPES, String(model.contentType || "")) ? String(model.contentType) : candidate.contentType);
     const modelDomain = DOMAINS.has(String(model.domain || "")) ? String(model.domain) : candidate.domain;
     const modelEnforcement = modelAssetType === "term" && ENFORCEMENTS.has(String(model.enforcement || "")) ? String(model.enforcement) : (modelAssetType === "term" ? candidate.enforcement : "preferred");
     const next = {
@@ -513,6 +526,9 @@ export function applyModelDecisions(candidates, decisions = []) {
       rowKind: modelAssetType,
       modelRowKind,
       contentType: modelContentType || "general",
+      contentTags: modelAssetType === "memory"
+        ? inferContentTags(candidate.source, modelContentType || "general", { sourceFile: candidate.sourceFile || candidate.filename || candidate.sheet || "" })
+        : (candidate.contentTags || []),
       contentTypeSource: Object.hasOwn(model, "contentType") ? "ai" : candidate.contentTypeSource,
       domain: modelDomain || "general",
       enforcement: modelEnforcement,
@@ -581,7 +597,8 @@ export function expandNestedTermCandidates(candidates = []) {
         sourceSpan: nested.sourceSpan,
         targetSpan: nested.targetSpan,
         enforcement: nested.enforcement,
-        contentType: "general",
+        contentType: parent.contentType || "general",
+        contentTags: parent.contentTags || [],
         contentTypeSource: "ai-nested-term",
         domain: parent.domain || "general",
         occurrences: 1,

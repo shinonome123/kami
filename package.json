@@ -10,6 +10,7 @@
     "directus:up": "docker compose --env-file directus/.env -f directus/docker-compose.yml up -d",
     "directus:down": "docker compose --env-file directus/.env -f directus/docker-compose.yml down",
     "directus:provision": "node --env-file=directus/.env scripts/provision-directus.mjs",
+    "taxonomy:migrate": "node --env-file=directus/.env scripts/migrate-content-taxonomy.mjs",
     "directus:snapshot": "docker compose --env-file directus/.env -f directus/docker-compose.yml exec -T directus node /directus/cli.js schema snapshot --yes /directus/schema/snapshot.yaml"
   },
   "engines": {

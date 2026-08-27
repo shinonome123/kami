@@ -32,7 +32,7 @@ test("语义向量命中词面差异大的同义译例", () => {
   assert.ok(ranked[0].similarity >= 0.28);
 });
 
-test("无查询向量或维度不一致时回退纯词面排序", () => {
+test("无查询向量或维度不一致时回退纯词面排序，但不会拿人工批准填充无关结果", () => {
   const memories = [
     { id: "exact", source: "服务器维护结束。", target: "メンテナンスが終了しました。", qualityStatus: "human_approved", qaScore: 100, embedding: { vector: [1, 0], dimensions: 2, model: "other" } },
     { id: "far", source: "欢迎来到新世界。", target: "新しい世界へようこそ。", qualityStatus: "human_approved", qaScore: 100, embedding: null }
@@ -42,11 +42,20 @@ test("无查询向量或维度不一致时回退纯词面排序", () => {
   assert.equal(withoutQuery[0].semantic, null);
 
   const dimensionMismatch = rankTranslationMemories("服务器维护结束。", memories, { limit: 5, queryEmbedding: { vector: [1, 0, 0, 0], dimensions: 4, model: "mock" } });
-  assert.equal(dimensionMismatch.length, 2);
+  assert.equal(dimensionMismatch.length, 1);
   assert.equal(dimensionMismatch[0].id, "exact");
   assert.equal(dimensionMismatch[0].semantic, null);
-  assert.equal(dimensionMismatch[1].id, "far");
-  assert.equal(dimensionMismatch[1].contextualFallback, true);
+});
+
+test("人工批准只决定权威性，不能把无关译例抬过相关度门槛", () => {
+  const ranked = rankTranslationMemories("威凛凛，气堂堂，花身电目逞凶狂。", [
+    { id: "a", source: "游戏本体完全收录，还没有游戏的玩家千万别错过。", target: "ゲーム本編を完全収録しており、まだゲームを所有していないプレイヤーに最適です。", qualityStatus: "human_approved", qaScore: 100 },
+    { id: "b", source: "我心结已解，你的路，才刚开始。", target: "私の思いは晴れた。おまえの道は、これより始まる", qualityStatus: "human_approved", qaScore: 100 },
+    { id: "c", source: "这怪怎还会流血，脏，脏得很！", target: "血を固められるのか。ああ、汚え！", qualityStatus: "human_approved", qaScore: 100 },
+    { id: "d", source: "既在此间挡路，便莫怪老猪发狠！", target: "行く手を阻んだのだ、恨みっこになしだぞ", qualityStatus: "human_approved", qaScore: 100 },
+    { id: "e", source: "不错，跟着老猪还是学了些本事", target: "うむ、俺から多少は学んだようだな", qualityStatus: "human_approved", qaScore: 100 }
+  ], { contentTags: ["rhyme"] });
+  assert.deepEqual(ranked, []);
 });
 
 test("qa_cases 语义向量同样参与混合打分", () => {

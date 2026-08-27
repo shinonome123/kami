@@ -193,19 +193,29 @@ test("跨语言后台任务允许没有目标语言，术语导入不因非空�
   }
 });
 
-test("激活译者画像不会被 Directus 的 403 挡住，也不写风格评测", { skip: !enabled }, async () => {
+test("激活与拒绝译者画像都不会被 Directus 的缺失项 403 挡住", { skip: !enabled }, async () => {
   await initializeStore();
   // Directus 对"条目不存在"和"无权访问"一律返回 403，从不返回 404。
-  // 激活先查 style_profiles 拿到 403，本该回退查 user_profiles，
-  // 旧代码只认 404 于是把 403 当真错误抛给用户，画像永远激活不了。
-  const draft = await saveUserProfile({ locale: "th-TH", name: "回归测试画像", instruction: "回归测试", examples: [], evidenceCount: 3, status: "draft" });
+  // 激活和拒绝都会先查 style_profiles，本该在 403 后回退查 user_profiles。
+  const activationDraft = await saveUserProfile({ locale: "th-TH", name: "激活回归测试画像", instruction: "激活回归测试", examples: [], evidenceCount: 3, status: "draft" });
+  const rejectionDraft = await saveUserProfile({ locale: "th-TH", name: "拒绝回归测试画像", instruction: "拒绝回归测试", examples: [], evidenceCount: 3, status: "draft" });
   try {
-    const located = await findStyleProfile(draft.id);
+    const rejectionLocated = await findStyleProfile(rejectionDraft.id);
+    assert.equal(rejectionLocated?.kind, "user_profile");
+    const rejected = await rejectStyleProfile(rejectionDraft.id);
+    assert.equal(rejected.status, "inactive");
+    assert.equal(rejected.kind, "user_profile");
+
+    const located = await findStyleProfile(activationDraft.id);
     assert.equal(located?.kind, "user_profile", "两个后端都要能分辨画像与风格规范");
-    const activated = await activateStyleProfile(draft.id);
+    const activated = await activateStyleProfile(activationDraft.id);
     assert.equal(activated.status, "active");
     assert.equal(activated.kind, "user_profile");
   } finally {
-    await rejectStyleProfile(draft.id).catch(() => {});
+    const base = String(process.env.DIRECTUS_URL || "http://127.0.0.1:8055").replace(/\/$/, "");
+    const headers = { Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}` };
+    for (const id of [activationDraft.id, rejectionDraft.id]) {
+      await fetch(`${base}/items/user_profiles/${id}`, { method: "DELETE", headers });
+    }
   }
 });

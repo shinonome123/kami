@@ -49,6 +49,28 @@ test("人工指定语体优先于自动规则", () => {
   assert.equal(result.source, "manual");
 });
 
+test("主分类与细标签能识别诗词、图鉴、商店和教程", () => {
+  const verse = classifyContent("威凛凛，气堂堂，花身电目逞凶狂。", "auto");
+  assert.equal(verse.contentType, "verse");
+  assert.ok(verse.contentTags.includes("rhyme"));
+
+  const codex = classifyContent("相传此妖久居山中。", "auto", { sourceFile: "Portraits 影神图 Chapter 4.xlsx" });
+  assert.equal(codex.contentType, "codex");
+  assert.ok(codex.contentTags.includes("lore_entry"));
+
+  assert.equal(classifyContent("本版本包含完整游戏本体与追加内容。", "auto").contentType, "store");
+  assert.equal(classifyContent("长按按钮即可发动技能。", "auto").contentType, "tutorial");
+});
+
+test("跨主分类术语可以参考，但不会成为强制术语", () => {
+  const matches = matchTerms("购买高级通行证即可领取奖励", jaAssets, { contentType: "store", domain: "game" });
+  assert.equal(matches[0].scopeMismatch, true);
+  const pack = buildContextPack({ source: "购买高级通行证即可领取奖励", locale: "ja-JP", classification: classifyContent("购买高级通行证即可领取奖励", "store"), matches, domain: "game" });
+  assert.equal(pack.requiredTerms.length, 0);
+  assert.equal(pack.preferredTerms.length, 1);
+  assert.match(pack.preferredTerms[0].note, /跨场景参考/);
+});
+
 test("同一中文源词在不同语言资产库中只返回当前目标语言", () => {
   const jaMatches = matchTerms("全新高级通行证现已登场", jaAssets, { contentType: "marketing", domain: "game" });
   const koMatches = matchTerms("全新高级通行证现已登场", koAssets, { contentType: "marketing", domain: "game" });
@@ -219,8 +241,8 @@ test("更具体的描述优先：道具描述不会被道具名规则抢走", ()
   assert.equal(contentTypeFromDescriptor("道具名称").contentType, "item_name");
 });
 
-test("英文缩写按整词匹配，不会被单词内部命中", () => {
-  assert.equal(contentTypeFromDescriptor("guide 文案"), null, "guide 里的 ui 不算 UI 文案");
+test("英文用途词与缩写按完整含义匹配，不会被单词内部误命中", () => {
+  assert.equal(contentTypeFromDescriptor("guide 文案").contentType, "tutorial", "guide 现在属于教程分类，而不是误命中 UI");
   assert.equal(contentTypeFromDescriptor("PVP 说明"), null, "PVP 里的 pv 不算预告片");
   assert.equal(contentTypeFromDescriptor("UI 按钮").contentType, "ui");
   assert.equal(contentTypeFromDescriptor("宣传 PV 标题").contentType, "marketing");

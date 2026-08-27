@@ -35,6 +35,14 @@ function batchExamples(evidence = []) {
   }).slice(0, 30).map((item) => ({ source: item.source, target: item.target, sourceRow: item.rowNumber || item.sourceRow || null }));
 }
 
+function evidenceTags(evidence = [], limit = 8) {
+  const counts = new Map();
+  for (const item of evidence) {
+    for (const tag of Array.isArray(item.contentTags) ? item.contentTags : []) counts.set(tag, (counts.get(tag) || 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([tag]) => tag);
+}
+
 function fallbackBatchLearning(examples, contentType) {
   const sourceAverage = examples.reduce((sum, item) => sum + [...item.source].length, 0) / examples.length;
   const targetAverage = examples.reduce((sum, item) => sum + [...item.target].length, 0) / examples.length;
@@ -67,6 +75,7 @@ export async function distillBatchStyleLearning({ batchId, filename, locale, con
     filename,
     locale,
     contentType,
+    contentTags: evidenceTags(evidence),
     domain,
     evidenceCount: evidence.length,
     summary: learning.summary,
@@ -112,6 +121,7 @@ export async function distillStyleProfileIfReady({
   });
   const profile = await saveStyleProfile({
     locale, contentType, domain,
+    contentTags: evidenceTags(evidence),
     name: distilled.name,
     instruction: renderInstruction(applied.rules, previousProfile?.instruction),
     rules: applied.rules,

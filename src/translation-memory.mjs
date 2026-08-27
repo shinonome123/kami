@@ -1,11 +1,6 @@
 import { normalizeSource, similarity } from "./text.mjs";
 
-const QUALITY_WEIGHT = Object.freeze({
-  human_approved: 0.18,
-  machine_verified: 0.02,
-  provisional: 0,
-  rejected: -1
-});
+const QUALITY_RANK = Object.freeze({ human_approved: 2, machine_verified: 1, provisional: 0, rejected: -1 });
 
 function tokenOverlap(left, right) {
   const a = new Set([...normalizeSource(left)]);
@@ -33,31 +28,40 @@ function lexicalScore(normalized, memory) {
   return { edit, overlap, exact };
 }
 
-export function rankTranslationMemories(source, memories = [], { limit = 5, queryEmbedding = null } = {}) {
+function tagOverlap(left = [], right = []) {
+  const query = new Set(Array.isArray(left) ? left : []);
+  const stored = new Set(Array.isArray(right) ? right : []);
+  if (!query.size || !stored.size) return 0;
+  let common = 0;
+  for (const tag of query) if (stored.has(tag)) common += 1;
+  return common / Math.max(query.size, stored.size);
+}
+
+export function rankTranslationMemories(source, memories = [], { limit = 5, queryEmbedding = null, contentTags = [] } = {}) {
   const normalized = normalizeSource(source);
   const ranked = memories
     .filter((memory) => memory.source && memory.target && ["human_approved", "machine_verified"].includes(memory.qualityStatus))
     .map((memory) => {
       const { edit, overlap, exact } = lexicalScore(normalized, memory);
-      const quality = QUALITY_WEIGHT[memory.qualityStatus] ?? 0;
-      const lexical = Math.min(1, exact * 0.45 + edit * 0.38 + overlap * 0.17 + quality);
+      // 可信度决定一条译例能不能充当规范，相关度决定它是否属于当前句。
+      // 两者不能相加：旧实现把 human_approved 的 0.18 在 lexical 和 blended
+      // 中各加一次，导致完全无关的人工译例天然高于 0.28 检索门槛。
+      const lexical = Math.min(1, exact * 0.45 + edit * 0.38 + overlap * 0.17);
       const cosine = cosineScore(memory, queryEmbedding);
       const localVector = String(queryEmbedding?.model || "").startsWith("local-");
       const blended = cosine === null
         ? lexical
-        : Math.min(1, (localVector ? 0.72 : 0.42) * lexical + (localVector ? 0.28 : 0.58) * cosine + quality);
-      const score = Math.max(lexical, blended);
-      return { ...memory, similarity: Number(score.toFixed(3)), semantic: cosine === null ? null : Number(cosine.toFixed(3)) };
+        : Math.min(1, (localVector ? 0.72 : 0.42) * lexical + (localVector ? 0.28 : 0.58) * cosine);
+      const tags = tagOverlap(contentTags, memory.contentTags);
+      const score = Math.min(1, Math.max(lexical, blended) + tags * 0.06);
+      return { ...memory, similarity: Number(score.toFixed(3)), semantic: cosine === null ? null : Number(cosine.toFixed(3)), tagMatch: Number(tags.toFixed(3)) };
     })
-    .sort((a, b) => b.similarity - a.similarity || (b.qaScore || 0) - (a.qaScore || 0));
-  const strong = ranked.filter((memory) => memory.similarity >= 0.28).slice(0, limit);
-  if (strong.length >= limit) return strong;
-  const selectedIds = new Set(strong.map((memory) => memory.id));
-  const styleFallback = ranked
-    .filter((memory) => !selectedIds.has(memory.id) && (memory.similarity >= 0.12 || memory.qualityStatus === "human_approved"))
-    .map((memory) => ({ ...memory, contextualFallback: true }))
-    .slice(0, limit - strong.length);
-  return [...strong, ...styleFallback];
+    .filter((memory) => memory.similarity >= 0.28)
+    .sort((a, b) => b.similarity - a.similarity
+      || (QUALITY_RANK[b.qualityStatus] ?? 0) - (QUALITY_RANK[a.qualityStatus] ?? 0)
+      || (b.qaScore || 0) - (a.qaScore || 0));
+  // 找不到可靠译例时宁可返回空数组，也不为了凑满 UI 数量注入无关内容。
+  return ranked.slice(0, limit);
 }
 
 export function rankQaCases(source, cases = [], { limit = 3, queryEmbedding = null } = {}) {

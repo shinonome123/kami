@@ -83,7 +83,7 @@ test("AI 清洗可以逐条修正资产类型、语体、领域与约束级别",
 test("本地回退也会给每条候选生成安全的零设置分类", () => {
   const term = classifyImportCandidate({ assetType: "term", source: "高级通行证", target: "プレミアムパス", score: 0.94, reasons: [] });
   const announcement = classifyImportCandidate({ assetType: "memory", source: "维护将于明日上午十点开始，请提前退出游戏。", target: "メンテナンスは明日午前10時に開始します。", score: 0.8, reasons: [] });
-  assert.deepEqual({ type: term.assetType, contentType: term.contentType, domain: term.domain, enforcement: term.enforcement }, { type: "term", contentType: "general", domain: "game", enforcement: "required" });
+  assert.deepEqual({ type: term.assetType, contentType: term.contentType, domain: term.domain, enforcement: term.enforcement }, { type: "term", contentType: "item_name", domain: "game", enforcement: "required" });
   assert.equal(announcement.contentType, "announcement");
   assert.equal(announcement.domain, "game");
   assert.equal(announcement.enforcement, "preferred");

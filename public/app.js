@@ -1,5 +1,6 @@
 import { renderTranslationMarkup } from "./term-highlighter.js";
 import { normalizePastedText, shouldRoutePasteToBatch } from "./paste-routing.js";
+import { learningEvaluationResult } from "./learning-utils.js";
 
 const state = {
   bootstrap: null,
@@ -134,7 +135,7 @@ function pageCopy(view) {
     feedback: ["FEEDBACK CENTER", "反馈中心", "同事在分享验证页提出的要求：逐条批准入风格或忽略。"],
     tasks: ["TASK CENTER", "任务中心", "查看、恢复、审校并导出所有历史翻译任务。"],
     import: ["TERM INGESTION", "术语导入", "只需拖入中外文表格，系统会自动分类并生成待确认结果。"],
-    assets: ["TERM ASSETS", "术语库", "查看四个物理隔离的目标语言术语集合。"],
+    assets: ["TERM ASSETS", "术语库", "查看五个物理隔离的目标语言术语集合。"],
     styles: ["STYLE GUIDANCE", "风格指导", "查看并控制已沉淀的翻译风格规则。"]
   }[view];
 }
@@ -297,7 +298,11 @@ function renderQa(result) {
   const errors = result.issues.filter((issue) => issue.severity === "error");
   $("#issueCount").textContent = result.aiQa?.fallbackReason ? "AIQA 未完成" : Number.isFinite(result.qaScore) ? `AIQA ${result.qaScore} 分 · ${result.aiQa?.iterations || 0} 次修订` : errors.length ? `${errors.length} 个阻断项` : result.issues.length ? `${result.issues.length} 条建议` : "硬校验通过";
   const reflection = result.reflection ? `<div class="reflection-box"><strong>模型反思</strong>\n${escapeHtml(result.reflection)}</div>` : "";
-  const retrieval = result.aiQa?.references?.length ? `<div class="reflection-box"><strong>相似译例检索</strong>\n${result.aiQa.references.map((item) => `${Math.round(item.similarity * 100)}% · ${item.source} → ${item.target}`).map(escapeHtml).join("\n")}</div>` : "";
+  const retrieval = result.aiQa?.references?.length ? `<div class="reflection-box"><strong>相似译例检索</strong>\n${result.aiQa.references.map((item) => {
+    const tags = contentTagLabels(item.contentType || "general", item.contentTags);
+    const origin = item.sourceFile ? `${item.sourceFile}${item.sourceRow ? ` 第 ${item.sourceRow} 行` : ""}` : (item.provenance || "历史资产");
+    return `${Math.round(item.similarity * 100)}% · ${contentTypeLabel(item.contentType || "general")}${tags.length ? ` / ${tags.join(" / ")}` : ""} · ${origin}\n${item.source} → ${item.target}`;
+  }).map(escapeHtml).join("\n\n")}</div>` : "";
   const qaCases = result.aiQa?.qaCases?.length ? `<div class="reflection-box"><strong>历史 AIQA 反例</strong>\n${result.aiQa.qaCases.map((item) => `${Math.round(item.similarity * 100)}% · ${item.rejectedTranslation} → ${item.correctedTranslation}`).map(escapeHtml).join("\n")}</div>` : "";
   const issues = result.issues.map((issue, index) => `<div class="qa-item ${issue.severity}"><div>${escapeHtml(issue.message)}</div><div class="qa-decision-actions"><button class="button ghost small single-qa-action" data-action="revise" data-issue-index="${index}">让 AI 按建议修订</button>${issue.severity !== "error" || issue.mqmSeverity === "minor" ? `<button class="button ghost small single-qa-action" data-action="approve" data-issue-index="${index}">批准当前译文</button>` : ""}</div></div>`).join("");
   const humanDecisions = result.aiQa?.humanDecisions?.length ? `<div class="reflection-box"><strong>人工 QA 决定</strong>\n${result.aiQa.humanDecisions.map((item) => `${item.decision === "approved_as_is" ? "已批准当前译文" : "已要求 AI 修订"} · ${item.issue?.message || "QA 意见"}`).map(escapeHtml).join("\n")}</div>` : "";
@@ -551,6 +556,8 @@ function renderAutoQaReport(payload) {
   if (classification?.contentType) {
     const label = state.bootstrap?.contentTypes?.[classification.contentType]?.label || classification.contentType;
     evidenceLines.push(`识别语体：${label}（${CLASSIFY_SOURCE_LABELS[classification.source] || classification.source || "识别"}）`);
+    const tags = contentTagLabels(classification.contentType, classification.contentTags);
+    if (tags.length) evidenceLines.push(`场景标签：${tags.join(" / ")}`);
   }
   if (domainResolution?.domain) {
     const label = DOMAIN_LABELS[domainResolution.domain] || domainResolution.domain;
@@ -695,7 +702,8 @@ function resolutionSummary(classification, domainResolution) {
   const parts = [];
   if (classification?.contentType) {
     const label = state.bootstrap?.contentTypes?.[classification.contentType]?.label || classification.contentType;
-    parts.push(`语体 <strong>${escapeHtml(label)}</strong>（${escapeHtml(CLASSIFY_SOURCE_LABELS[classification.source] || classification.source || "识别")}）`);
+    const tags = contentTagLabels(classification.contentType, classification.contentTags);
+    parts.push(`语体 <strong>${escapeHtml(label)}</strong>${tags.length ? ` · ${escapeHtml(tags.join(" / "))}` : ""}（${escapeHtml(CLASSIFY_SOURCE_LABELS[classification.source] || classification.source || "识别")}）`);
   }
   if (domainResolution?.domain) {
     const label = DOMAIN_LABELS[domainResolution.domain] || domainResolution.domain;
@@ -986,7 +994,14 @@ function renderBatchDetails(segment) {
   ].join(" · ");
   const termsHtml = matches.length ? matches.map((match) => `<div class="batch-detail-item"><strong>${escapeHtml(match.term?.source)} → ${escapeHtml(match.term?.target)}</strong><small>${match.mode === "exact" ? "正式/别名命中" : `疑似命中：${escapeHtml(match.matchPhrase || "")}`} · ${Math.round((match.score || 0) * 100)}%</small></div>`).join("") : '<div class="batch-detail-empty">本段没有命中术语</div>';
   const issuesHtml = issues.length ? issues.map((issue, index) => batchIssueHtml(issue, index, segment.id)).join("") : `<div class="batch-detail-empty">${aiQa.fallbackReason ? "硬规则通过；AIQA 尚待重试" : "硬规则与 AIQA 均未发现问题"}</div>`;
-  const referencesHtml = references.length ? references.map((item) => `<div class="batch-memory-item"><div><strong>${Math.round((item.similarity || 0) * 100)}% · ${escapeHtml(item.qualityStatus === "human_approved" ? "人工批准" : "机器验证")}</strong><p>${escapeHtml(item.source)}</p><p class="target">${escapeHtml(item.target)}</p></div></div>`).join("") : '<div class="batch-detail-empty">没有召回可用的相似译例</div>';
+  const referencesHtml = references.length ? references.map((item) => {
+    const type = contentTypeLabel(item.contentType || "general");
+    const tags = contentTagLabels(item.contentType || "general", item.contentTags);
+    const origin = item.sourceFile
+      ? `${item.sourceFile}${item.sourceRow ? ` · 第 ${item.sourceRow} 行` : ""}`
+      : ({ "human-accept": "工作台人工采纳", "table-import": "术语表导入", "aiqa-passed": "AIQA 通过", "aiqa-corrected": "AIQA 修订" }[item.provenance] || item.provenance || "历史资产");
+    return `<div class="batch-memory-item"><div><strong>${Math.round((item.similarity || 0) * 100)}% · ${escapeHtml(item.qualityStatus === "human_approved" ? "人工批准" : "机器验证")}</strong><small>${escapeHtml([type, ...tags, origin].filter(Boolean).join(" · "))}</small><p>${escapeHtml(item.source)}</p><p class="target">${escapeHtml(item.target)}</p></div></div>`;
+  }).join("") : '<div class="batch-detail-empty">没有达到相关度门槛的同类译例</div>';
   const qaCasesHtml = qaCases.length ? `<section><h5>历史 AIQA 反例</h5>${qaCases.map((item) => `<div class="batch-memory-item"><div><p>${escapeHtml(item.rejectedTranslation || "")}</p><p class="target">修订：${escapeHtml(item.correctedTranslation || "")}</p></div></div>`).join("")}</section>` : "";
   const decisionsHtml = termDecisions.length ? `<section><h5>AI 术语裁决</h5>${termDecisions.map((item) => `<div class="batch-detail-item"><strong>${item.decision === "apply" ? "已采用" : "不强制替换"} · ${escapeHtml(item.matchedSource)} → ${escapeHtml(item.officialTarget)}</strong><small>${escapeHtml(item.reason)}</small></div>`).join("")}</section>` : "";
   const humanDecisionsHtml = humanDecisions.length ? `<section><h5>人工 QA 决定</h5>${humanDecisions.map((item) => `<div class="batch-detail-item"><strong>${item.decision === "approved_as_is" ? "已批准当前译文" : "已要求 AI 修订"}</strong><small>${escapeHtml(item.issue?.message || item.reason || "QA 意见")}</small></div>`).join("")}</section>` : "";
@@ -1940,6 +1955,11 @@ function contentTypeLabel(value) {
   return state.bootstrap?.contentTypes?.[value]?.label || value;
 }
 
+function contentTagLabels(contentType, tags = []) {
+  const dictionary = state.bootstrap?.contentTags?.[contentType] || {};
+  return (Array.isArray(tags) ? tags : []).map((tag) => dictionary[tag] || tag).filter(Boolean);
+}
+
 /**
  * 草稿卡片上的评测状态。译者画像不在配对评测覆盖范围内，单独标注，
  * 免得看起来像"漏评"。
@@ -2141,7 +2161,7 @@ function renderAssets() {
   const query = $("#assetSearch").value.trim().toLowerCase();
   const terms = data.terms.filter((term) => [term.source, term.target, ...(term.aliases || [])].some((value) => value.toLowerCase().includes(query)));
   $("#assetList").innerHTML = terms.length ? terms.map((term) => `
-    <div class="asset-row"><div class="asset-row-main"><strong>${escapeHtml(term.source)}</strong><span class="arrow">→</span><strong>${escapeHtml(term.target)}</strong><div class="asset-meta"><span>${term.enforcement === "required" ? "强制" : "优先"}</span>${(term.contentTypes || []).map((type) => `<span>${escapeHtml(state.bootstrap.contentTypes[type]?.label || type)}</span>`).join("")}${term.provenance ? `<span>${escapeHtml(term.provenance)}</span>` : ""}</div></div><button class="delete-term" data-id="${term.id}" title="删除术语" aria-label="删除术语">×</button></div>
+    <div class="asset-row"><div class="asset-row-main"><strong>${escapeHtml(term.source)}</strong><span class="arrow">→</span><strong>${escapeHtml(term.target)}</strong><div class="asset-meta"><span>${term.enforcement === "required" ? "强制" : "优先"}</span>${(term.contentTypes || []).map((type) => `<span>${escapeHtml(state.bootstrap.contentTypes[type]?.label || type)}</span>`).join("")}${(term.contentTags || []).map((tag) => `<span>${escapeHtml(Object.values(state.bootstrap.contentTags || {}).find((group) => group[tag])?.[tag] || tag)}</span>`).join("")}${term.provenance ? `<span>${escapeHtml(term.provenance)}</span>` : ""}</div></div><button class="delete-term" data-id="${term.id}" title="删除术语" aria-label="删除术语">×</button></div>
   `).join("") : '<div class="empty-list asset-empty">当前筛选没有术语</div>';
   $$(".delete-term").forEach((button) => button.addEventListener("click", async () => {
     if (!confirm("确认从当前语言库删除这条术语？其他语言库不会受影响。")) return;
@@ -2505,14 +2525,6 @@ function learningVersion(skill = {}) {
 function learningEvaluationFor(skill, evaluations) {
   const id = learningId(skill);
   return skill.evaluation || evaluations.find((item) => String(item.skillId || item.skill_id || item.candidateId || item.candidate_id || item.challengerSkillId || item.challenger_skill_id || item.challengerId || item.challenger_id || "") === id) || null;
-}
-
-function learningEvaluationResult(evaluation = {}) {
-  return {
-    ...evaluation,
-    ...(evaluation.report && typeof evaluation.report === "object" ? evaluation.report : {}),
-    ...(evaluation.result && typeof evaluation.result === "object" ? evaluation.result : {})
-  };
 }
 
 function learningRules(skill = {}) {

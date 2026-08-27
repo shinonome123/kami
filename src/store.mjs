@@ -133,7 +133,7 @@ async function getJsonMemories(locale, options = {}) {
   assertLocale(locale);
   const items = await readJson(join(ROOT, "memories", `${locale}.json`), []);
   return items.filter((item) =>
-    (!options.contentType || options.contentType === "general" || item.contentType === options.contentType || item.contentType === "general")
+    (!options.contentType || (options.exactContentType ? item.contentType === options.contentType : options.contentType === "general" || item.contentType === options.contentType || item.contentType === "general"))
     && (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general")
   );
 }
@@ -373,6 +373,7 @@ async function saveJsonAsset(locale, input) {
     forbidden: [...new Set((input.forbidden || []).map((item) => String(item).trim()).filter(Boolean))],
     domains: [...new Set((input.domains || ["general"]).filter(Boolean))],
     contentTypes: [...new Set((input.contentTypes || ["general"]).filter(Boolean))],
+    contentTags: [...new Set((input.contentTags || []).filter(Boolean))],
     enforcement: input.enforcement || "required",
     note: String(input.note || "").trim(),
     status: input.status || "approved",
