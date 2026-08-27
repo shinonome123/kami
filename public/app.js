@@ -13,6 +13,7 @@ const state = {
   learningData: null,
   learningLoading: false,
   learningSelectedSkillId: "",
+  conflictReport: null,
   tasks: [],
   shareFeedbackScope: null,
   feedbackPending: [],
@@ -26,6 +27,7 @@ const state = {
   importPreview: null,
   importCompleted: false,
   importCandidateTab: "terms",
+  importVisibleCount: { terms: 150, styles: 150 },
   importBatchLearning: [],
   busy: false,
   activeSuggestion: null,
@@ -1327,6 +1329,7 @@ function renderTasks() {
     else if (action === "copy-share") copyShareLink(id);
     else if (action === "delete-share") deleteShareTaskRow(id, button);
     else if (action === "download-export") downloadBackgroundExport(id, button);
+    else if (action === "open-import-review") openImportReview(id, button);
     else if (action === "delete-background") deleteBackgroundTaskRow(id, button);
   }));
 }
@@ -1337,20 +1340,53 @@ function renderBackgroundTaskRow(task) {
   const locale = state.bootstrap.locales[task.locale];
   const progress = task.progress || {};
   const percent = Number.isFinite(Number(progress.percent)) ? Math.max(0, Math.min(100, Number(progress.percent))) : (task.status === "completed" ? 100 : 0);
-  const statusLabel = task.status === "in_progress" ? "进行中" : task.status === "needs_attention" ? "失败" : "已完成";
-  const statusClass = task.status === "in_progress" ? "warning" : task.status === "needs_attention" ? "error" : "success";
+  const statusLabel = task.status === "in_progress" ? "进行中" : task.status === "review" ? "等待审核" : task.status === "needs_attention" ? "失败" : "已完成";
+  const statusClass = task.status === "in_progress" || task.status === "review" ? "warning" : task.status === "needs_attention" ? "error" : "success";
   const message = progress.message || "";
   const download = task.taskType === "batch_export" && task.status === "completed" && task.payload?.downloadUrl;
   const summary = task.payload?.summary;
+  const canResumeImport = task.taskType === "term_import" && task.status === "review" && task.payload?.batchId;
   const payloadText = summary
     ? `术语 ${summary.terms ?? 0} · 译例 ${summary.memories ?? 0} · 风格草稿 ${summary.styleProfiles ?? 0} · 跳过 ${summary.skipped ?? 0}`
     : task.payload?.error ? `错误：${task.payload.error}` : "";
   return `<article class="task-row" data-task-id="${escapeHtml(task.id)}">
     <div class="task-main"><div class="task-title"><strong>${escapeHtml(task.title)}</strong><span class="task-status ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span><span class="task-type-chip">${escapeHtml(BACKGROUND_TASK_LABELS[task.taskType] || "后台")}</span></div><small>${locale ? `${escapeHtml(locale.label)} · ` : ""}${escapeHtml(message || payloadText || contentTypeLabel(task.contentType))} · ${formatTaskTime(task.updatedAt)}</small></div>
     <div class="task-progress"><div><i style="width:${percent}%"></i></div><span>${task.totalSegments ? `${task.completedSegments} / ${task.totalSegments}` : `${percent}%`}</span></div>
-    <div class="task-qa"><strong>${payloadText || "—"}</strong><small>${task.status === "in_progress" ? "后台执行中" : formatTaskTime(task.updatedAt)}</small></div>
-    <div class="task-actions">${download ? `<button class="button secondary small" data-action="download-export">下载 Excel</button>` : ""}<button class="button ghost small" data-action="delete-background">删除</button></div>
+    <div class="task-qa"><strong>${payloadText || (canResumeImport ? `${task.payload.candidateCount || 0} 条候选` : "—")}</strong><small>${task.status === "in_progress" ? "后台执行中" : canResumeImport ? "识别完成，等待人工确认" : formatTaskTime(task.updatedAt)}</small></div>
+    <div class="task-actions">${canResumeImport ? `<button class="button secondary small" data-action="open-import-review">继续审核</button>` : ""}${download ? `<button class="button secondary small" data-action="download-export">下载 Excel</button>` : ""}<button class="button ghost small" data-action="delete-background">删除</button></div>
   </article>`;
+}
+
+async function openImportReview(id, button) {
+  const task = (state.tasks || []).find((item) => item.id === id);
+  const batchId = task?.payload?.batchId;
+  if (!batchId) return toast("这条旧任务没有关联审核批次，无法恢复");
+  const original = button?.textContent || "继续审核";
+  if (button) { button.disabled = true; button.textContent = "恢复中…"; }
+  try {
+    const result = await api(`/api/term-import/review/${encodeURIComponent(batchId)}`);
+    result.candidates.forEach((candidate) => { candidate.selected = candidate.decision === "ready" && !candidate.existing; });
+    state.importFile = null;
+    state.importPreview = { ...result, backgroundTaskId: id };
+    state.importCompleted = result.status === "completed";
+    state.importCandidateTab = "terms";
+    state.importVisibleCount = { terms: 150, styles: 150 };
+    state.importBatchLearning = [];
+    $("#termFile").value = "";
+    $("#filePrompt").textContent = result.filename || task.title;
+    $("#fileMeta").textContent = `${result.candidates.length} 条候选 · 已从审核队列恢复`;
+    $("#dropZone").classList.add("has-file");
+    updateImportProgress({ phase: "pending-commit", message: "识别完成，等待确认入库", percent: 100, completed: 1, total: 1 });
+    $("#mappingNote").textContent = `已恢复昨晚保存的审核批次，共 ${result.candidates.length} 条候选；尚未写入正式术语库。页面按每批 150 条显示，避免大批量数据再次卡住。`;
+    $("#importBatchLearningPanel").hidden = true;
+    $("#importBatchLearningList").innerHTML = '<div class="empty-list">提交译例后显示本批风格学习结果</div>';
+    switchView("import");
+    renderImportCandidates();
+    toast(`已恢复 ${result.candidates.length} 条候选，请继续审核`);
+  } catch (error) {
+    if (button) { button.disabled = false; button.textContent = original; }
+    toast(error.message);
+  }
 }
 
 function downloadBackgroundExport(id, button) {
@@ -2123,6 +2159,7 @@ async function setImportFile(file) {
   state.importPreview = null;
   state.importCompleted = false;
   state.importCandidateTab = "terms";
+  state.importVisibleCount = { terms: 150, styles: 150 };
   state.importBatchLearning = [];
   $("#filePrompt").textContent = file.name;
   $("#fileMeta").textContent = `${(file.size / 1024).toFixed(1)} KB · AI 正在识别表格结构`;
@@ -2146,6 +2183,7 @@ function resetImport() {
   state.importPreview = null;
   state.importCompleted = false;
   state.importCandidateTab = "terms";
+  state.importVisibleCount = { terms: 150, styles: 150 };
   state.importBatchLearning = [];
   $("#termFile").value = "";
   $("#filePrompt").textContent = "拖入或点击选择 .xlsx / .csv";
@@ -2245,7 +2283,9 @@ function updateImportSummary() {
 
 function renderImportCandidateRows(entries, kind) {
   if (!entries.length) return `<tr><td colspan="6" class="table-empty">${kind === "terms" ? "没有识别到独立或句内术语候选" : "没有识别到可用的完整双语译例"}</td></tr>`;
-  return entries.map(({ candidate, index }) => {
+  const visibleCount = Math.max(150, Number(state.importVisibleCount?.[kind]) || 150);
+  const visibleEntries = entries.slice(0, visibleCount);
+  const rows = visibleEntries.map(({ candidate, index }) => {
     const [label, className] = decisionLabel(candidate);
     const disabled = candidate.existing || candidate.decision === "excluded" || state.importCompleted;
     const locale = state.bootstrap.locales[candidate.locale] || { shortLabel: candidate.locale, label: candidate.locale };
@@ -2270,6 +2310,8 @@ function renderImportCandidateRows(entries, kind) {
       <td class="reason-cell">${escapeHtml((candidate.reasons || []).join("；") || "短语长度与语言特征通过")}</td>
     </tr>`;
   }).join("");
+  if (visibleEntries.length >= entries.length) return rows;
+  return `${rows}<tr><td colspan="6" class="table-empty"><button class="button secondary small" data-import-load-more="${kind}">再显示 ${Math.min(150, entries.length - visibleEntries.length)} 条</button><small class="row-ref">已显示 ${visibleEntries.length} / ${entries.length}</small></td></tr>`;
 }
 
 function renderImportCandidates() {
@@ -2280,6 +2322,11 @@ function renderImportCandidates() {
   $$(".candidate-check").forEach((checkbox) => checkbox.addEventListener("change", () => { state.importPreview.candidates[Number(checkbox.dataset.index)].selected = checkbox.checked; updateImportSummary(); }));
   $$(".candidate-source").forEach((input) => input.addEventListener("change", () => { state.importPreview.candidates[Number(input.dataset.index)].source = input.value.trim(); }));
   $$(".candidate-target").forEach((input) => input.addEventListener("change", () => { state.importPreview.candidates[Number(input.dataset.index)].target = input.value.trim(); }));
+  $$('[data-import-load-more]').forEach((button) => button.addEventListener("click", () => {
+    const kind = button.dataset.importLoadMore;
+    state.importVisibleCount[kind] = (Number(state.importVisibleCount[kind]) || 150) + 150;
+    renderImportCandidates();
+  }));
   if (!indexedImportCandidates(state.importCandidateTab).length && (terms.length || styles.length)) setImportCandidateTab(terms.length ? "terms" : "styles");
   else setImportCandidateTab(state.importCandidateTab);
   updateImportSummary();
@@ -2687,6 +2734,97 @@ function renderLearningEvidence(evidence, candidates) {
   }).join("") : '<div class="empty-list learning-empty"><div><strong>当前范围还没有学习证据</strong><span>完成翻译、AIQA 修订或人工采纳后，证据会连同轨迹编号出现在这里。</span></div></div>';
 }
 
+const CONFLICT_ACTION_LABELS = {
+  "retire-style-rule": { badge: "建议退休弱势规则", tone: "actionable" },
+  review: { badge: "需人工判断", tone: "manual" }
+};
+
+function renderLearningConflicts(report) {
+  const conflicts = Array.isArray(report?.conflicts) ? report.conflicts : [];
+  const count = $("#learningConflictCount");
+  const list = $("#learningConflictList");
+  // 「还没扫过」和「扫过了没冲突」是两回事，混起来会让人以为已经检查过。
+  if (!report?.scannedAt) {
+    count.textContent = "尚未扫描";
+    list.innerHTML = `<div class="empty-list learning-empty"><div><strong>${escapeHtml(report?.reason || "尚未扫描")}</strong><span>扫描会比对风格规范、技能附加规则与译者画像三方，只有模型确认无法同时遵守的才算冲突。</span></div></div>`;
+    return;
+  }
+  count.textContent = conflicts.length
+    ? `${conflicts.length} 处冲突 · 比对 ${report.scannedRules || 0} 条规则`
+    : `无冲突 · 比对 ${report.scannedRules || 0} 条规则`;
+  if (!conflicts.length) {
+    const detail = report.reason || `已比对 ${report.scannedRules || 0} 条规则、${report.candidates || 0} 对同方面组合。`;
+    list.innerHTML = `<div class="empty-list learning-empty"><div><strong>${escapeHtml(report.reason ? "本次没有得出冲突结论" : "三方规则没有互相矛盾")}</strong><span>${escapeHtml(detail)}</span></div></div>`;
+    return;
+  }
+  list.innerHTML = conflicts.map((conflict, index) => {
+    const meta = CONFLICT_ACTION_LABELS[conflict.action] || CONFLICT_ACTION_LABELS.review;
+    const side = (rule, winning) => `<div class="learning-conflict-side ${winning ? "winning" : ""}"><span>${escapeHtml(rule.originLabel || "")}${winning ? " · 证据更强" : ""}</span><p>${escapeHtml(rule.rule || "")}</p><small>${rule.evidenceCount ? `${rule.evidenceCount} 条证据` : "无证据计数"}</small></div>`;
+    const winnerRule = conflict.winner?.rule || "";
+    const isWinner = (rule) => Boolean(winnerRule) && rule.rule === winnerRule;
+    const canRetire = conflict.action === "retire-style-rule" && conflict.ruleId;
+    return `<article class="learning-conflict-item ${meta.tone}">
+      <div class="learning-conflict-head"><span class="learning-conflict-badge ${meta.tone}">${escapeHtml(meta.badge)}</span><small>${escapeHtml((conflict.aspects || []).join("、") || "同一方面")}</small></div>
+      ${conflict.situation ? `<p class="learning-conflict-situation">${escapeHtml(conflict.situation)}</p>` : ""}
+      <div class="learning-conflict-sides">${side(conflict.left, isWinner(conflict.left))}${side(conflict.right, isWinner(conflict.right))}</div>
+      <p class="learning-conflict-reason">${escapeHtml(conflict.reason || "")}</p>
+      ${conflict.recommendation ? `<p class="learning-conflict-reason subtle">模型建议：${escapeHtml(conflict.recommendation)}</p>` : ""}
+      ${canRetire ? `<div class="learning-conflict-foot"><button class="button ghost small" type="button" data-conflict-retire="${escapeHtml(conflict.ruleId)}" data-conflict-index="${index}">退休这条风格规则</button><small>只改风格规范，技能与画像不受影响</small></div>` : ""}
+    </article>`;
+  }).join("");
+  $$("[data-conflict-retire]").forEach((button) => button.addEventListener("click", () => retireConflictRule(button)));
+}
+
+async function loadConflictReport() {
+  const scope = learningActionBody();
+  const params = new URLSearchParams({ locale: scope.locale, contentType: scope.contentType, domain: scope.domain, project: scope.project });
+  try {
+    state.conflictReport = await api(`/api/learning/conflict-scan?${params}`);
+  } catch {
+    // 冲突报告是诊断信息，读不到不该把整个学习中心拖成错误态。
+    state.conflictReport = null;
+  }
+  renderLearningConflicts(state.conflictReport);
+}
+
+async function runConflictScan(button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "扫描中……";
+  try {
+    state.conflictReport = await api("/api/learning/conflict-scan", { method: "POST", body: JSON.stringify(learningActionBody()) });
+    renderLearningConflicts(state.conflictReport);
+    const found = state.conflictReport.conflicts?.length || 0;
+    toast(found ? `发现 ${found} 处规则冲突` : state.conflictReport.reason || "三方规则没有互相矛盾");
+  } catch (error) {
+    toast(`扫描失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function retireConflictRule(button) {
+  const conflict = (state.conflictReport?.conflicts || [])[Number(button.dataset.conflictIndex)];
+  if (!confirm("确认退休这条风格规则？它会立刻退出翻译提示词，记录保留在规范里可供复核。")) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "处理中……";
+  try {
+    const result = await api("/api/learning/conflict-scan/apply", {
+      method: "POST",
+      body: JSON.stringify({ ...learningActionBody(), ruleId: button.dataset.conflictRetire, reason: conflict?.reason || "" })
+    });
+    state.conflictReport = result.report;
+    renderLearningConflicts(state.conflictReport);
+    toast(`已退休该规则，当前生效 ${result.activeRules} 条`);
+  } catch (error) {
+    toast(`退休失败：${error.message}`);
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
 function renderLearning() {
   if (!state.learningData) return;
   const { payload, champion, candidates, evaluations, evidence } = learningPayload();
@@ -2702,6 +2840,7 @@ function renderLearning() {
   renderLearningCandidates(candidates, evaluations, champion, trajectoryCount);
   const selected = candidates.find((item) => learningId(item) === state.learningSelectedSkillId) || candidates[0];
   renderLearningEvaluation(selected, selected ? learningEvaluationFor(selected, evaluations) : null, champion);
+  renderLearningConflicts(state.conflictReport);
   renderLearningEvidence(evidence, candidates);
   bindLearningCardEvents();
   refreshActions();
@@ -2727,7 +2866,9 @@ async function loadLearning(locale = state.learningLocale) {
     const params = new URLSearchParams({ locale, contentType: scope.contentType, domain: scope.domain, project: scope.project });
     state.learningData = await api(`/api/learning?${params}`);
     state.learningLoading = false;
+    state.conflictReport = null;
     renderLearning();
+    loadConflictReport();
   } catch (error) {
     state.learningData = null;
     state.learningLoading = false;
@@ -2743,6 +2884,7 @@ async function loadLearning(locale = state.learningLocale) {
     $("#learningCandidateList").innerHTML = '<div class="empty-list learning-empty">学习数据读取失败</div>';
     $("#learningEvaluationMatrix").innerHTML = '<div class="empty-list learning-empty">学习数据读取失败</div>';
     $("#learningEvidenceList").innerHTML = '<div class="empty-list learning-empty">学习数据读取失败</div>';
+    $("#learningConflictCount").textContent = "未加载";
     refreshActions();
   }
 }
@@ -2854,6 +2996,7 @@ async function cleanTable() {
     result.candidates.forEach((candidate) => { candidate.selected = candidate.decision === "ready" && !candidate.existing; });
     state.importPreview = result;
     state.importCompleted = false;
+    state.importVisibleCount = { terms: 150, styles: 150 };
     const mappings = result.sheets.map((sheet) => `${sheet.sheet}：中文列 ${sheet.sourceColumn}，目标列 ${Object.entries(sheet.targetColumns).map(([locale, column]) => `${state.bootstrap.locales[locale].shortLabel} ${column}`).join(" / ")}`).join("；");
     const structureText = result.structureAnalysis?.used
       ? "AI 已识别列结构（支持无表头）"
@@ -3014,6 +3157,7 @@ function bindEvents() {
   $("#retryLearning").addEventListener("click", () => loadLearning(state.learningLocale));
   $("#learningContentType").addEventListener("change", () => loadLearning(state.learningLocale));
   $("#learningDomain").addEventListener("change", () => loadLearning(state.learningLocale));
+  $("#learningConflictScan").addEventListener("click", (event) => runConflictScan(event.currentTarget));
   $("#termFile").addEventListener("change", (event) => setImportFile(event.target.files[0]));
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); $("#dropZone").classList.add("dragging"); });
   $("#dropZone").addEventListener("dragleave", () => $("#dropZone").classList.remove("dragging"));

@@ -660,6 +660,76 @@ export async function saveDirectusImportPreview(input) {
   };
 }
 
+export async function getDirectusImportPreview(batchId) {
+  let batch;
+  try {
+    batch = await request(`/items/term_import_batches/${encodeURIComponent(String(batchId))}?fields=id,filename,file_type,requested_locale,row_count,candidate_count,status,ai_used,summary,date_created`);
+  } catch (error) {
+    if (isMissingItem(error)) return null;
+    throw error;
+  }
+
+  const params = new URLSearchParams({
+    limit: "-1",
+    sort: "row_number,target_locale",
+    fields: [
+      "id", "source", "target", "target_locale", "asset_type", "content_type", "domain", "enforcement",
+      "classification_confidence", "classification_source", "candidate_key", "candidate_role", "parent_candidate_key",
+      "parent_row_number", "parent_candidate_keys", "parent_evidence", "candidate_origin", "term_category",
+      "extraction_confidence", "source_span", "target_span", "frequency", "score", "source_file", "row_number",
+      "decision", "reason", "status"
+    ].join(","),
+    filter: JSON.stringify({ batch_id: { _eq: batch.id } })
+  });
+  const records = await request(`/items/term_candidates?${params}`, { timeoutMs: 30_000 });
+  const summary = batch.summary && typeof batch.summary === "object" ? batch.summary : {};
+  const { fileMode = "mixed", ai: savedAi = null, sheets = [], ...statistics } = summary;
+  const candidates = records.map((item) => ({
+    candidateId: item.id,
+    source: item.source || "",
+    target: item.target || "",
+    locale: item.target_locale || "",
+    assetType: item.asset_type || "term",
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    enforcement: item.enforcement || "preferred",
+    contentTypeConfidence: Number(item.classification_confidence) || Number(item.score) || 0,
+    contentTypeSource: item.classification_source || "rules",
+    candidateKey: item.candidate_key || "",
+    candidateRole: item.candidate_role || "full_pair",
+    parentCandidateKey: item.parent_candidate_key || "",
+    parentRowNumber: Number(item.parent_row_number) || null,
+    parentCandidateKeys: arrayValue(item.parent_candidate_keys),
+    parentEvidence: arrayValue(item.parent_evidence),
+    candidateOrigin: item.candidate_origin || "table-pair",
+    termCategory: item.term_category || "",
+    extractionConfidence: item.extraction_confidence == null ? null : Number(item.extraction_confidence),
+    sourceSpan: item.source_span || null,
+    targetSpan: item.target_span || null,
+    occurrences: Number(item.frequency) || 1,
+    score: Number(item.score) || 0,
+    rowNumber: Number(item.row_number) || null,
+    decision: item.decision || "review",
+    reasons: String(item.reason || "").split("；").map((reason) => reason.trim()).filter(Boolean),
+    nested: item.candidate_origin === "nested-term" || Boolean(item.parent_candidate_key),
+    status: item.status || "pending"
+  }));
+
+  return {
+    batchId: batch.id,
+    filename: batch.filename || "术语导入表格",
+    fileType: batch.file_type || "xlsx",
+    requestedLocale: batch.requested_locale || "",
+    fileMode,
+    sheets: Array.isArray(sheets) ? sheets : [],
+    statistics: { ...statistics, rowsScanned: Number(statistics.rowsScanned) || Number(batch.row_count) || 0 },
+    ai: savedAi || { requested: Boolean(batch.ai_used), used: Boolean(batch.ai_used), reviewed: 0, total: candidates.length },
+    candidates,
+    status: batch.status || "reviewing",
+    createdAt: batch.date_created || null
+  };
+}
+
 export async function completeDirectusImport(batchId, decisions, summary) {
   const updates = decisions.filter((item) => item.candidateId).map((item) => ({
     id: item.candidateId,
@@ -1068,6 +1138,21 @@ export async function findDirectusStyleProfile(id) {
     if (item) return shape(item, "user_profile");
   } catch { /* 两张表都没有就是不存在 */ }
   return null;
+}
+
+/**
+ * Patch the rules of an existing style profile in place.
+ *
+ * Distillation always writes a NEW version row; retiring one conflicting rule
+ * must not, or every approved conflict resolution would spawn a version that
+ * then needs its own evaluation and activation before the contradiction
+ * actually leaves the prompt.
+ */
+export async function updateDirectusStyleProfileRules(id, { rules, instruction }) {
+  const saved = await request(`/items/style_profiles/${encodeURIComponent(id)}`, {
+    method: "PATCH", body: { rules, instructions: instruction }
+  });
+  return saved ? { id: saved.id, rules: arrayValue(saved.rules), instruction: saved.instructions } : null;
 }
 
 export async function saveDirectusStyleProfileEvaluation(id, evaluation) {

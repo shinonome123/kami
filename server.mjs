@@ -9,11 +9,11 @@ import { classifyContent, descriptorFromContext, resolveDomain } from "./src/cla
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, embed, evaluateAutoQaWithModel, evaluateGrammarWithModel, evaluateTranslationWithModel, getProviderConfig, glossTranslationWithModel, isEmbeddingConfigured, probeModelAvailability, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { adjudicateRuleConflictsWithModel, adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, embed, evaluateAutoQaWithModel, evaluateGrammarWithModel, evaluateTranslationWithModel, getProviderConfig, glossTranslationWithModel, isEmbeddingConfigured, probeModelAvailability, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, createStructuralAlignmentScorer, dedupeIssues, normalizeQaInputText, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getImportPreview, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask, updateStyleProfileRules } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { narrowByDomain, rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./src/translation-memory.mjs";
@@ -25,6 +25,8 @@ import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
 import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
 import { detectBatchVerse } from "./src/batch-verse.mjs";
 import { createAutoProposer } from "./src/auto-proposal.mjs";
+import { createConflictScanner } from "./src/conflict-scan.mjs";
+import { renderInstruction, retireRule } from "./src/style-rules.mjs";
 import { SETTING_SPECS, TITLE_BRACKET_CHOICES, settingGroups } from "./src/settings.mjs";
 import { environmentOverrides, getSettings, resetSettings, saveSettings } from "./src/settings-store.mjs";
 import { classifyChange, isNegativeEvidence, positiveEvidenceOnly } from "./src/style-delta.mjs";
@@ -710,6 +712,8 @@ async function commitTermImport(body, onProgress = null) {
       });
       if (distilled) {
         styleProfiles.push(distilled);
+        // 规则集刚变过，这时候才值得扫冲突；人工采纳本身不改规则，扫了是白烧模型调用。
+        triggerConflictScan({ locale, contentType, domain, project: body.project || "default" });
         if (learning?.id) {
           const promoted = await saveStyleLearningRun({ ...learning, id: learning.id, status: "promoted", promotedProfileId: distilled.id });
           const index = batchLearning.findIndex((item) => item.id === learning.id);
@@ -761,6 +765,49 @@ async function apiHandler(req, res, url) {
     const deleted = await deleteAsset(locale, id);
     return json(res, deleted ? 200 : 404, { deleted });
   }
+  if (req.method === "POST" && url.pathname === "/api/learning/conflict-scan") {
+    const body = await readJsonBody(req);
+    const scope = learningScope({
+      locale: assertLocale(body.locale),
+      contentType: body.contentType || "general",
+      domain: body.domain || "game",
+      project: body.project || "default"
+    });
+    return json(res, 200, await conflictScanner.scan(scope));
+  }
+  if (req.method === "POST" && url.pathname === "/api/learning/conflict-scan/apply") {
+    // 扫描负责衡量，改写要人点。风格规则是唯一可以在这里就地退休的：
+    // 技能规则须经配对评测晋升，译者画像走草稿流程，两者都不从这里绕过去。
+    const body = await readJsonBody(req);
+    const scope = learningScope({
+      locale: assertLocale(body.locale),
+      contentType: body.contentType || "general",
+      domain: body.domain || "game",
+      project: body.project || "default"
+    });
+    const ruleId = String(body.ruleId || "").trim();
+    if (!ruleId) return json(res, 400, { error: "缺少要退休的规则 id" });
+    const profile = await getStyleProfile(scope.locale, scope.contentType, scope.domain);
+    if (!profile?.id) return json(res, 404, { error: "该作用域没有生效中的风格规范" });
+    const rules = retireRule(profile.rules, ruleId, { reason: String(body.reason || "").slice(0, 300) });
+    if (!rules) return json(res, 409, { error: "该规则不存在或已经退休" });
+    const updated = await updateStyleProfileRules(profile.id, {
+      rules,
+      instruction: renderInstruction(rules, profile.instruction)
+    });
+    // 退休之后原来的冲突已经不成立，立刻重扫一遍，免得报告继续显示旧结论。
+    const report = await conflictScanner.scan(scope);
+    return json(res, 200, { retired: ruleId, profileId: profile.id, activeRules: rules.filter((rule) => rule.status === "active").length, instruction: updated?.instruction || "", report });
+  }
+  if (req.method === "GET" && url.pathname === "/api/learning/conflict-scan") {
+    const scope = learningScope({
+      locale: assertLocale(url.searchParams.get("locale")),
+      contentType: url.searchParams.get("contentType") || "general",
+      domain: url.searchParams.get("domain") || "game",
+      project: url.searchParams.get("project") || "default"
+    });
+    return json(res, 200, conflictReports.get(learningScopeKeyOf(scope)) || { scope, conflicts: [], reason: "尚未扫描" });
+  }
   if (req.method === "GET" && url.pathname === "/api/settings") {
     return json(res, 200, {
       settings: getSettings(),
@@ -774,6 +821,7 @@ async function apiHandler(req, res, url) {
     const body = await readJsonBody(req);
     // 净化明细一并返回：被夹紧或整组回落时必须让人看见，不能悄悄改掉用户输入。
     const { settings, notes } = body?.reset === true ? resetSettings() : saveSettings(body?.settings ?? body);
+    rescheduleConflictScan();
     return json(res, 200, { settings, notes, environmentOverrides: environmentOverrides() });
   }
   if (req.method === "POST" && url.pathname === "/api/classify") {
@@ -812,19 +860,24 @@ async function apiHandler(req, res, url) {
       title: String(body.filename || "术语导入表格").slice(0, 120),
       locale: body.locale || ""
     });
+    let progressWrites = Promise.resolve();
     const progress = (update) => {
       reportImportProgress(progressId, { status: "running", ...update });
-      updateBackgroundTaskProgress(task.id, { progress: update }).catch(() => {});
+      progressWrites = progressWrites.then(() => updateBackgroundTaskProgress(task.id, { progress: update })).catch(() => {});
     };
     try {
       const result = await previewTermImport(body, progress);
       reportImportProgress(progressId, { status: "completed", phase: "completed", message: "识别与清洗完成", percent: 100 });
+      await progressWrites;
       await updateBackgroundTaskProgress(task.id, {
-        progress: { phase: "pending-commit", message: "识别完成，等待确认入库", percent: 100, completed: 1, total: 1 }
+        status: "review",
+        progress: { phase: "pending-commit", message: "识别完成，等待确认入库", percent: 100, completed: 1, total: 1 },
+        payload: { batchId: result.batchId, candidateCount: result.candidates.length }
       });
       return json(res, 200, { ...result, backgroundTaskId: task.id });
     } catch (error) {
       reportImportProgress(progressId, { status: "failed", phase: "failed", message: error.message, error: error.message });
+      await progressWrites;
       await updateBackgroundTaskProgress(task.id, {
         status: "failed",
         progress: { phase: "failed", message: error.message, percent: 100, completed: 0, total: 0 },
@@ -834,6 +887,19 @@ async function apiHandler(req, res, url) {
     } finally {
       scheduleImportProgressCleanup(progressId);
     }
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/term-import/review/")) {
+    const batchId = decodeURIComponent(url.pathname.slice("/api/term-import/review/".length));
+    const preview = await getImportPreview(batchId);
+    if (!preview) {
+      const error = new Error("未找到这批术语审核数据");
+      error.statusCode = 404;
+      throw error;
+    }
+    const assetsByLocale = {};
+    const locales = [...new Set((preview.candidates || []).map((candidate) => candidate.locale).filter(Boolean))];
+    await Promise.all(locales.map(async (locale) => { assetsByLocale[locale] = (await getAssets(locale)).terms; }));
+    return json(res, 200, { ...preview, candidates: markExistingTermCandidates(preview.candidates || [], assetsByLocale) });
   }
   if (req.method === "GET" && url.pathname.startsWith("/api/term-import/progress/")) {
     const id = decodeURIComponent(url.pathname.slice("/api/term-import/progress/".length));
@@ -849,10 +915,11 @@ async function apiHandler(req, res, url) {
     };
     const result = await commitTermImport(body, onProgress);
     if (backgroundTaskId) {
+      const backgroundTask = await getBackgroundTask(backgroundTaskId);
       await updateBackgroundTaskProgress(backgroundTaskId, {
         status: "completed",
         progress: { phase: "completed", message: "导入完成", percent: 100, completed: 1, total: 1 },
-        payload: { summary: result.summary }
+        payload: { ...(backgroundTask?.payload || {}), summary: result.summary }
       });
     }
     return json(res, 201, { ...result, backgroundTaskId });
@@ -957,7 +1024,9 @@ async function apiHandler(req, res, url) {
           events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "human_accepted", at: humanDecision.decidedAt, editDistance: humanDecision.editDistance }]
         });
     }
-    if (trajectory) triggerAutoProposal({ locale, contentType, domain, project });
+    if (trajectory) {
+      triggerAutoProposal({ locale, contentType, domain, project });
+    }
     return json(res, 201, { memory, demoted, evidence, qaCaseApproved, trajectory });
   }
   if (req.method === "GET" && url.pathname === "/api/style-profiles") {
@@ -1353,7 +1422,7 @@ async function apiHandler(req, res, url) {
       locale: task.locale || "",
       contentType: "general",
       domain: "general",
-      status: task.status === "in_progress" ? "in_progress" : task.status === "failed" ? "needs_attention" : "completed",
+      status: task.status === "in_progress" ? "in_progress" : task.status === "review" ? "review" : task.status === "failed" ? "needs_attention" : "completed",
       overallScore: null,
       totalSegments: Number(task.progress?.total) || 0,
       completedSegments: Number(task.progress?.completed) || 0,
@@ -2087,7 +2156,7 @@ async function apiHandler(req, res, url) {
       try {
         // distillStyleProfileIfReady 内部已经落盘草稿；saveStyleProfile 不是 upsert，
         // 再存一次会生成第二个内容相同、版本号 +1 的草稿。
-        await distillStyleProfileIfReady({
+        const { distilled } = await distillStyleProfileIfReady({
           locale: share.locale,
           contentType: share.contentType,
           domain: share.domain,
@@ -2098,6 +2167,7 @@ async function apiHandler(req, res, url) {
           negativeLimit: getSettings().learning.distillNegativeSamples,
           staleRounds: getSettings().learning.ruleStaleRounds
         });
+        if (distilled) triggerConflictScan({ locale: share.locale, contentType: share.contentType, domain: share.domain, project: "default" });
       } catch {
         // 未达阈值或蒸馏失败不阻断采纳
       }
@@ -2432,6 +2502,76 @@ const autoProposer = createAutoProposer({
   }
 });
 
+// 规则冲突扫描：风格规则、技能附加规则与译者画像都会往同一份提示词里写文字，
+// 三者互不知情。蒸馏沉淀之后与定时各扫一遍，结论进任务中心等人工处置——
+// 退休风格规则和改技能规则各自都有闸门，这里不能绕过去自己改。
+const conflictReports = new Map();
+
+const conflictScanner = createConflictScanner({
+  deps: {
+    loadScopeRules: async (scope) => {
+      const [styleProfile, translationSkill, userProfile] = await Promise.all([
+        getStyleProfile(scope.locale, scope.contentType, scope.domain),
+        ensureChampionTranslationSkill(scope),
+        getUserProfile(scope.locale)
+      ]);
+      return { styleProfile, translationSkill, userProfile };
+    },
+    adjudicate: (input) => adjudicateRuleConflictsWithModel(input),
+    recordReport: async (report) => {
+      conflictReports.set(learningScopeKeyOf(report.scope), report);
+    }
+  }
+});
+
+function learningScopeKeyOf(scope) {
+  return [scope.locale, scope.contentType, scope.domain, scope.project || "default"].join("\u0000");
+}
+
+function triggerConflictScan(scope) {
+  conflictScanner.scan(scope)
+    .then((report) => {
+      if (report.conflicts?.length) {
+        console.log(`[Kami] 规则冲突扫描：${scope.locale}/${scope.contentType}/${scope.domain} 发现 ${report.conflicts.length} 处冲突，待人工处置`);
+      }
+    })
+    .catch((error) => console.error("规则冲突扫描失败", error));
+}
+
+/**
+ * 定时扫描。代码库此前没有任何调度器，这是第一个，所以刻意保持最小：
+ * 只扫"已经有活跃风格规范"的作用域（没有规范就没有可冲突的规则），
+ * 逐个串行走扫描器自身的队列，不与翻译争抢模型。默认关闭（间隔 0）。
+ */
+let conflictScanTimer = null;
+
+/**
+ * 声明在这里、调用也在这里：`let` 不像函数声明那样提升，早期版本在模块顶部
+ * 就调用 rescheduleConflictScan()，启动时直接 TDZ 报错退出。
+ */
+function rescheduleConflictScan() {
+  if (conflictScanTimer) clearInterval(conflictScanTimer);
+  conflictScanTimer = null;
+  const minutes = getSettings().learning.conflictScanIntervalMinutes;
+  if (!minutes) return;
+  conflictScanTimer = setInterval(async () => {
+    try {
+      for (const locale of Object.keys(LOCALES)) {
+        const { styleProfiles } = await listStyleProfiles(locale, "active");
+        for (const profile of styleProfiles) {
+          await conflictScanner.scan(learningScope({
+            locale, contentType: profile.contentType, domain: profile.domain || "general", project: "default"
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("规则冲突定时扫描失败", error);
+    }
+  }, minutes * 60_000);
+  conflictScanTimer.unref?.();
+  console.log(`[Kami] 规则冲突定时扫描已启用：每 ${minutes} 分钟`);
+}
+
 function triggerAutoProposal(scope) {
   autoProposer.maybePropose(scope)
     .then((result) => {
@@ -2466,6 +2606,7 @@ const server = http.createServer(async (req, res) => {
 const HOST = process.env.KAMI_HOST || "127.0.0.1";
 server.listen(PORT, HOST, () => {
   console.log(`Kami Localization Workbench: http://127.0.0.1:${PORT}`);
+  rescheduleConflictScan();
   if (HOST !== "127.0.0.1" && HOST !== "localhost") {
     for (const url of lanShareUrls("")) console.log(`局域网访问（分享给同事可用）：${url.replace(/\/share\/$/, "")}`);
   }

@@ -48,8 +48,10 @@ import {
   saveDirectusAsset,
   saveDirectusCorpus,
   saveDirectusImportPreview,
+  getDirectusImportPreview,
   saveDirectusStyleEvidence,
   saveDirectusStyleProfileEvaluation,
+  updateDirectusStyleProfileRules,
   findDirectusStyleProfile,
   saveDirectusStyleLearningRun,
   getDirectusStyleLearningRuns,
@@ -312,6 +314,15 @@ async function activateJsonStyleProfile(id) {
   located.target.status = "active";
   await writeJsonAtomic(located.path, located.profiles);
   return located.target;
+}
+
+async function updateJsonStyleProfileRules(id, { rules, instruction }) {
+  const located = await locateJsonStyleProfile(id);
+  if (!located) return null;
+  located.target.rules = rules;
+  located.target.instruction = instruction;
+  await writeJsonAtomic(located.path, located.profiles);
+  return { id, rules, instruction };
 }
 
 async function saveJsonStyleProfileEvaluation(id, evaluation) {
@@ -689,6 +700,10 @@ async function saveJsonImportPreview(input) {
   return { batchId, candidates };
 }
 
+async function getJsonImportPreview(batchId) {
+  return readJson(join(ROOT, "imports", `${String(batchId)}.json`), null);
+}
+
 async function completeJsonImport(batchId, decisions, summary) {
   const path = join(ROOT, "imports", `${batchId}.json`);
   const batch = await readJson(path, null);
@@ -1064,6 +1079,10 @@ export async function saveImportPreview(input) {
   return usesDirectus() ? saveDirectusImportPreview(input) : saveJsonImportPreview(input);
 }
 
+export async function getImportPreview(batchId) {
+  return usesDirectus() ? getDirectusImportPreview(batchId) : getJsonImportPreview(batchId);
+}
+
 export async function completeImport(batchId, decisions, summary) {
   return usesDirectus() ? completeDirectusImport(batchId, decisions, summary) : completeJsonImport(batchId, decisions, summary);
 }
@@ -1226,6 +1245,11 @@ export async function findStyleProfile(id) {
 }
 
 /** Attach (or clear, with null) the paired-benchmark conclusion for a style draft. */
+/** 就地改写某份风格规范的规则集（不新建版本），供人工处置规则冲突使用。 */
+export async function updateStyleProfileRules(id, patch) {
+  return usesDirectus() ? updateDirectusStyleProfileRules(id, patch) : updateJsonStyleProfileRules(id, patch);
+}
+
 export async function saveStyleProfileEvaluation(id, evaluation) {
   return usesDirectus() ? saveDirectusStyleProfileEvaluation(id, evaluation) : saveJsonStyleProfileEvaluation(id, evaluation);
 }

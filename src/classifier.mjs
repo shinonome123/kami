@@ -67,7 +67,7 @@ export function resolveDomain(text, hint = "auto", { contentType = "general", fa
  * 视频标题 before 社媒).
  */
 const DESCRIPTOR_RULES = [
-  ["ui", /导航|導航|按钮|按鈕|菜单|選單|选单|界面|系统提示|系統提示|标签页|標籤頁|入口|弹窗|彈窗|toast|tooltip|placeholder|ui/iu],
+  ["ui", /导航|導航|按钮|按鈕|菜单|選單|选单|界面|系统提示|系統提示|标签页|標籤頁|入口|弹窗|彈窗|toast|tooltip|placeholder|\bui\b/iu],
   ["item_description", /(道具|物品|装备|裝備|技能|称号|稱號|卡牌|皮肤|皮膚)[^，,。\s]{0,3}(描述|说明|說明)/u],
   ["item_name", /(道具|物品|装备|裝備|技能|称号|稱號|卡牌|皮肤|皮膚)[^，,。\s]{0,3}(名|名称|名稱)/u],
   ["announcement", /公告|通知|维护|維護|停机|停機|更新说明|更新說明/u],
@@ -76,7 +76,7 @@ const DESCRIPTOR_RULES = [
   // FAQ 既有事实承诺又常带轻松口吻：归 general（忠实、自然、不过度润色）比
   // 归 announcement（正式）或 dialogue（角色口吻）都更安全。
   ["general", /faq|常见问题|常見問題|问答|問答|q\s*&\s*a/iu],
-  ["marketing", /标题|標題|宣发|宣發|宣传|宣傳|广告|廣告|slogan|口号|口號|banner|预告|預告|pv|cta|首页|首頁|落地页|落地頁/iu],
+  ["marketing", /标题|標題|宣发|宣發|宣传|宣傳|广告|廣告|slogan|口号|口號|banner|预告|預告|\bpv\b|cta|首页|首頁|落地页|落地頁/iu],
   ["social", /社媒|社交|推文|帖子|微博|朋友圈|twitter|instagram|tiktok|facebook/iu]
 ];
 

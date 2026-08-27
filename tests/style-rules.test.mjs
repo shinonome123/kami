@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_STALE_ROUNDS, applyRulePatch, normalizeRules, renderInstruction, ruleId, summarizeRules } from "../src/style-rules.mjs";
+import { DEFAULT_STALE_ROUNDS, applyRulePatch, normalizeRules, renderInstruction, retireRule, ruleId, summarizeRules } from "../src/style-rules.mjs";
 
 const at = (day) => `2026-08-${String(day).padStart(2, "0")}T00:00:00.000Z`;
 
@@ -116,6 +116,34 @@ test("脏数据不会让规则集炸掉", () => {
   assert.deepEqual(normalizeRules([null, {}, { rule: "" }]), []);
   const state = applyRulePatch(undefined, undefined, { round: 1, now: at(1) });
   assert.deepEqual(state.rules, []);
+});
+
+test("冲突审查可以在蒸馏周期之外单独退休一条规则", () => {
+  const state = seed();
+  const id = state.active[0].id;
+  const rules = retireRule(state.rules, id, { reason: "与技能附加规则冲突且证据更弱", now: at(9) });
+  const retired = rules.find((rule) => rule.id === id);
+  assert.equal(retired.status, "retired");
+  assert.match(retired.retiredReason, /技能附加规则/);
+  assert.equal(rules.length, 2, "退休不是删除");
+  assert.equal(rules.find((rule) => rule.id !== id).status, "active", "另一条不受影响");
+  // 提示词必须立刻不再包含它——等四轮蒸馏老化的话，矛盾会一直留在提示词里。
+  assert.doesNotMatch(renderInstruction(rules), new RegExp(retired.rule));
+});
+
+test("重复退休与不存在的 id 返回 null，调用方能区分「已经退休」和「刚退休」", () => {
+  const state = seed();
+  const id = state.active[0].id;
+  const once = retireRule(state.rules, id, { reason: "x", now: at(9) });
+  assert.ok(once);
+  assert.equal(retireRule(once, id, { reason: "x", now: at(9) }), null);
+  assert.equal(retireRule(state.rules, "r-不存在", { now: at(9) }), null);
+});
+
+test("退休时不写原因也留下可复核的默认说明", () => {
+  const state = seed();
+  const rules = retireRule(state.rules, state.active[0].id, { now: at(9) });
+  assert.match(rules[0].retiredReason, /人工/);
 });
 
 test("统计给出活跃/退休数量与最有支撑的规则", () => {

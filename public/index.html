@@ -315,6 +315,17 @@
             <div class="learning-evaluation-matrix" id="learningEvaluationMatrix"><div class="empty-list learning-empty">运行候选评测后展示对比指标</div></div>
           </article>
 
+          <article class="panel learning-conflict-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">RULE CONFLICTS</span><h2>规则冲突审查</h2><p class="panel-caption">风格规范、技能附加规则与译者画像会往同一份提示词里写文字。这里比对三者是否互相矛盾，衡量证据强弱后给出处置建议。</p></div>
+              <div class="learning-conflict-actions">
+                <span class="asset-count subtle" id="learningConflictCount">尚未扫描</span>
+                <button class="button ghost small" type="button" id="learningConflictScan">立即扫描</button>
+              </div>
+            </div>
+            <div class="learning-conflict-list" id="learningConflictList"><div class="empty-list learning-empty">点击「立即扫描」检查当前范围的规则冲突</div></div>
+          </article>
+
           <article class="panel learning-evidence-panel">
             <div class="panel-head learning-section-head">
               <div><span class="card-kicker">TRACEABLE EVIDENCE</span><h2>来源证据与变更原因</h2><p class="panel-caption">每次进化都应能追溯到具体任务、QA 反例或人工反馈，而不是由模型凭空改写。</p></div>

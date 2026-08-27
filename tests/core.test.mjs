@@ -224,6 +224,12 @@ test("英文缩写按整词匹配，不会被单词内部命中", () => {
   assert.equal(contentTypeFromDescriptor("PVP 说明"), null, "PVP 里的 pv 不算预告片");
   assert.equal(contentTypeFromDescriptor("UI 按钮").contentType, "ui");
   assert.equal(contentTypeFromDescriptor("宣传 PV 标题").contentType, "marketing");
+  // 只有缩写本身、没有别的关键词的列名：这两条曾因词边界被写坏而永远匹配不上，
+  // 上面几例却因为「按钮」「标题」命中了同一条正则的其它分支，把故障盖了过去。
+  assert.equal(contentTypeFromDescriptor("UI").contentType, "ui");
+  assert.equal(contentTypeFromDescriptor("PV").contentType, "marketing");
+  assert.equal(contentTypeFromDescriptor("游戏UI").contentType, "ui", "中文紧邻英文缩写时同样算整词");
+  assert.equal(contentTypeFromDescriptor("活动PV脚本").contentType, "marketing");
 });
 
 test("人工指定语体仍然压过表格声明", () => {

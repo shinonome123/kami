@@ -1173,6 +1173,66 @@ const LOCALE_NAMES = Object.freeze({
   "th-TH": "泰语"
 });
 
+/**
+ * Adjudicate deterministically-shortlisted rule pairs.
+ *
+ * The shortlist is deliberately liberal (same aspect = candidate), so most
+ * pairs handed here are NOT conflicts — two rules can both talk about 句尾
+ * while covering different situations. The prompt therefore pushes hard toward
+ * "not a conflict" and demands the incompatible situation be named, otherwise
+ * the model will happily manufacture contradictions to look useful.
+ */
+export async function adjudicateRuleConflictsWithModel({ locale, contentType, domain, candidates = [] }) {
+  const language = LOCALE_NAMES[locale] || locale;
+  if (!candidates.length) return [];
+  const content = await chat([
+    {
+      role: "system",
+      content: `你是${language}本地化风格规范的一致性审查员。给你若干"规则对"，判断每一对是否**真的互相矛盾**。
+`
+        + `矛盾的定义很窄：存在一个具体场景，同时遵守两条规则是不可能的。必须能指出那个场景。
+`
+        + `以下都**不是**矛盾，一律判 conflict=false：
+`
+        + `· 两条规则适用于不同场景（一条讲旁白、一条讲角色对白；一条讲标题、一条讲正文）
+`
+        + `· 一条是另一条的细化或例外（"统一敬体"与"战斗吼叫用常体"是总则与例外，不是矛盾）
+`
+        + `· 两条谈同一方面但要求的东西不同且可同时满足
+`
+        + `· 措辞相似但约束对象不同
+`
+        + `只有确实无法同时遵守时才 conflict=true，并在 situation 里写清那个具体场景。宁可漏判也不要凑数。
+`
+        + `输出严格 JSON：{"verdicts":[{"index":0,"conflict":true,"situation":"具体到哪种句子会两难","recommendation":"建议保留哪一条、另一条应如何改写或退休"}]}`
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        locale, contentType, domain,
+        pairs: candidates.map((candidate, index) => ({
+          index,
+          aspects: candidate.aspects,
+          a: { origin: candidate.left.originLabel, rule: candidate.left.rule, evidenceCount: candidate.left.evidenceCount },
+          b: { origin: candidate.right.originLabel, rule: candidate.right.rule, evidenceCount: candidate.right.evidenceCount }
+        }))
+      })
+    }
+  ], runtimeConfig, { temperature: 0, timeoutMs: 90_000, maxTokens: 2_500, requestLabel: "规则冲突审查", responseFormat: { type: "json_object" } });
+  const match = content.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("规则冲突审查模型未返回 JSON");
+  const payload = JSON.parse(match[0]);
+  if (!Array.isArray(payload.verdicts)) throw new Error("规则冲突审查模型未返回 verdicts 数组");
+  return payload.verdicts
+    .filter((verdict) => Number.isInteger(Number(verdict?.index)) && candidates[Number(verdict.index)])
+    .map((verdict) => ({
+      index: Number(verdict.index),
+      conflict: verdict.conflict === true,
+      situation: String(verdict.situation || "").slice(0, 400),
+      recommendation: String(verdict.recommendation || "").slice(0, 400)
+    }));
+}
+
 export async function classifyWithModel(text, { descriptor = "", location = "" } = {}) {
   const content = await chat([
     {

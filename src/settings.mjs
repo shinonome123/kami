@@ -54,6 +54,8 @@ export const SETTING_SPECS = Object.freeze({
   "learning.distillNegativeSamples": { min: 0, max: 60, step: 5, default: 15, label: "蒸馏取样：反例条数", hint: "同事否决但尚未改写的译文上限" },
   "learning.ruleStaleRounds": { min: 2, max: 20, step: 1, default: 4, label: "规则退休轮数", hint: "连续多少轮蒸馏没被证据确认才退休。设小了退回滚动重写，设大了过时规则赖着不走" },
 
+  "learning.conflictScanIntervalMinutes": { min: 0, max: 1440, step: 15, default: 0, label: "规则冲突定时扫描（分钟）", hint: "0 表示只在蒸馏沉淀后扫描，不定时。每次扫描最多送 12 对规则给模型" },
+
   "share.glossLimit": { min: 5, max: 200, step: 5, default: 30, label: "分享页语素拆解上限", hint: "每个分享链接后台生成的逐句拆解段数" }
 });
 
