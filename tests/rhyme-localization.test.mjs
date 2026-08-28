@@ -18,6 +18,11 @@ const server = http.createServer((req, res) => {
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     requests.push(body);
     const joined = (body.messages || []).map((item) => item.content).join("\n");
+    if (joined.includes("SEED_UNSUPPORTED") && body.seed !== undefined) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "unsupported parameter: seed" } }));
+      return;
+    }
     const content = joined.includes("韵文本地化师")
       ? "とことこ歩いて、ぶらぶら遊んで、銭のためなら馬にも牛にも。"
       : "行け行け行け、さすらえさすらえさすらえ、銭のためなら牛馬にもなろう。";
@@ -52,4 +57,28 @@ test("普通文本 reflect=false 时只调用一次并使用默认温度", async
   assert.equal(result.reflection, "");
   assert.equal(requests.length, before + 1);
   assert.equal(requests[before].temperature, 0.6, "普通文本使用创译温度 0.6");
+});
+
+test("评测可覆盖生产温度并向兼容上游传递固定 seed", async () => {
+  const before = requests.length;
+  await translateWithReflection(plainPack, { reflect: false, temperature: 0, seed: 20260828 });
+  assert.equal(requests.length, before + 1);
+  assert.equal(requests[before].temperature, 0);
+  assert.equal(requests[before].seed, 20260828);
+});
+
+test("上游不支持 seed 时明确降级并回报可复现性警告", async () => {
+  const warnings = [];
+  const before = requests.length;
+  await translateWithReflection({ ...plainPack, source: "SEED_UNSUPPORTED" }, {
+    reflect: false,
+    temperature: 0,
+    seed: 42,
+    onSeedUnsupported: (warning) => warnings.push(warning)
+  });
+  assert.equal(requests.length, before + 2);
+  assert.equal(requests[before].seed, 42);
+  assert.equal(requests[before + 1].seed, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /不支持固定 seed/);
 });

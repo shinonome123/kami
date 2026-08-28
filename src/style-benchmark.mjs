@@ -84,11 +84,12 @@ export function styleVariant({ id, scope, skill, profile, qaProfile }) {
  * `runPairedSkillBenchmarks` passes so the existing pairing, alternating run
  * order and all-or-nothing pair admission are reused unchanged.
  */
-export async function benchmarkStyleVariant(variant, trajectory) {
+export async function benchmarkStyleVariant(variant, trajectory, options = {}) {
   if (!variant?.skill) throw new TypeError("风格评测变体缺少当前 champion 技能");
   const sample = await benchmarkTranslationSkill(variant.skill, trajectory, {
     styleProfileOverride: variant.styleProfile,
-    qaStyleProfile: variant.qaStyleProfile
+    qaStyleProfile: variant.qaStyleProfile,
+    ...options
   });
   return { ...sample, variantId: variant.id };
 }

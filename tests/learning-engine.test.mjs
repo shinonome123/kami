@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_MAXIMUM_EDIT_DISTANCE_REGRESSION,
   DEFAULT_MIN_EVALUATION_SAMPLES,
   assertExactLearningScope,
   calculateSkillEvaluationMetrics,
@@ -285,6 +286,74 @@ test("同范围同评测集、质量不退步且存在实质收益时允许晋�
   assert.match(result.reportZh, /建议晋升 Challenger/);
   assert.match(result.reportZh, /强制术语正确率/);
   assert.match(result.reportZh, /人工编辑距离/);
+});
+
+test("人工编辑距离在 0.5 个百分点容差内轻微回退时不阻断晋升", () => {
+  const championSamples = Array.from({ length: 20 }, (_, index) => sample(index, {
+    qaScore: 92.65,
+    humanEditDistance: 0.7276074819180859,
+    humanAccepted: index === 0,
+    cost: 0.002873886,
+    latencyMs: 20339
+  }));
+  const challengerSamples = Array.from({ length: 20 }, (_, index) => sample(index, {
+    qaScore: 93.55,
+    humanEditDistance: 0.7298753451595491,
+    humanAccepted: index === 0,
+    cost: 0.0032703075,
+    latencyMs: 22235
+  }));
+  const result = evaluateSkillPromotion({
+    scope,
+    champion: { id: "v1", scope, samples: championSamples },
+    challenger: { id: "v2", scope, samples: challengerSamples }
+  });
+  const editGate = result.gates.find((item) => item.id === "human_edit");
+
+  assert.equal(DEFAULT_MAXIMUM_EDIT_DISTANCE_REGRESSION, 0.005);
+  assert.equal(result.status, "promote");
+  assert.equal(result.promotable, true);
+  assert.equal(editGate.passed, true);
+  assert.match(editGate.detail, /变化 \+0\.2 个百分点，上限 \+0\.5 个百分点/);
+});
+
+test("人工编辑距离回退超过容差仍然阻止晋升，且可按作用域收紧为零容忍", () => {
+  const championSamples = Array.from({ length: 5 }, (_, index) => sample(index, {
+    qaScore: 92,
+    humanEditDistance: 0.72
+  }));
+  const beyondToleranceSamples = Array.from({ length: 5 }, (_, index) => sample(index, {
+    qaScore: 94,
+    humanEditDistance: 0.726
+  }));
+  const mildlyWorseSamples = Array.from({ length: 5 }, (_, index) => sample(index, {
+    qaScore: 94,
+    humanEditDistance: 0.722
+  }));
+  const common = {
+    scope,
+    minSamples: 5,
+    champion: { scope, samples: championSamples }
+  };
+  const defaultResult = evaluateSkillPromotion({
+    ...common,
+    challenger: { scope, samples: beyondToleranceSamples }
+  });
+  const tolerantResult = evaluateSkillPromotion({
+    ...common,
+    challenger: { scope, samples: mildlyWorseSamples }
+  });
+  const strictResult = evaluateSkillPromotion({
+    ...common,
+    challenger: { scope, samples: mildlyWorseSamples },
+    guardrails: { maximumEditDistanceRegression: 0 }
+  });
+
+  assert.equal(defaultResult.promotable, false);
+  assert.equal(defaultResult.gates.find((item) => item.id === "human_edit").passed, false);
+  assert.equal(tolerantResult.promotable, true);
+  assert.equal(strictResult.promotable, false);
+  assert.equal(strictResult.appliedGuardrails.maximumEditDistanceRegression, 0);
 });
 
 test("强制术语回退是一票否决，即使 QA、人工、成本和延迟都变好", () => {

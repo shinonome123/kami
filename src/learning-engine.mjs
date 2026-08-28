@@ -8,6 +8,9 @@
 
 export const LEARNING_ENGINE_SCHEMA_VERSION = 1;
 export const DEFAULT_MIN_EVALUATION_SAMPLES = 20;
+// Small paired-sample fluctuations should not veto an otherwise better
+// challenger. Values are normalized 0..1, so 0.005 = 0.5 percentage points.
+export const DEFAULT_MAXIMUM_EDIT_DISTANCE_REGRESSION = 0.005;
 
 const SCOPE_FIELDS = ["locale", "contentType", "domain", "project"];
 const UNSAFE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
@@ -448,6 +451,12 @@ function percent(value) {
   return value === null ? "暂无" : `${(value * 100).toFixed(1)}%`;
 }
 
+function percentagePointDelta(value) {
+  if (value === null) return "暂无";
+  const points = value * 100;
+  return `${points > 0 ? "+" : ""}${points.toFixed(1)} 个百分点`;
+}
+
 function fixed(value, digits = 2) {
   return value === null ? "暂无" : Number(value).toFixed(digits);
 }
@@ -493,8 +502,9 @@ export function buildChinesePromotionReport(result) {
 
 /**
  * Compare a champion and challenger on the same benchmark and decide promotion.
- * Hard terminology/error regressions are absolute vetoes. Quality cannot
- * regress; cost and latency use explicit guardrails.
+ * Hard terminology/error regressions are absolute vetoes. Quality uses
+ * explicit non-inferiority guardrails so tiny paired-sample fluctuations do
+ * not overrule a material gain; cost and latency use their own tolerances.
  */
 export function evaluateSkillPromotion({
   scope,
@@ -513,6 +523,14 @@ export function evaluateSkillPromotion({
   const challengerMetrics = calculateSkillEvaluationMetrics(challenger.samples, { scope: normalizedScope, minSamples });
   const requiredCoverage = clamp(finiteNumber(minimumCoverage) ?? 0.8, 0, 1);
   const requireCost = guardrails.requireCost !== false;
+  const maximumEditDistanceRegression = Math.max(0,
+    finiteNumber(guardrails.maximumEditDistanceRegression) ?? DEFAULT_MAXIMUM_EDIT_DISTANCE_REGRESSION);
+  const maximumCostRegression = Math.max(0, finiteNumber(guardrails.maximumCostRegression) ?? 0.2);
+  const maximumLatencyRegression = Math.max(0, finiteNumber(guardrails.maximumLatencyRegression) ?? 0.25);
+  const minimumQaGain = Math.max(0, finiteNumber(guardrails.minimumQaGain) ?? 0.5);
+  const minimumEditDistanceGain = Math.max(0, finiteNumber(guardrails.minimumEditDistanceGain) ?? 0.005);
+  const minimumAcceptanceGain = Math.max(0, finiteNumber(guardrails.minimumAcceptanceGain) ?? 0.01);
+  const minimumEfficiencyGain = Math.max(0, finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1);
   const insufficientReasons = [];
   if (championMetrics.status === "insufficient") insufficientReasons.push(`Champion ${championMetrics.insufficientReason}`);
   if (challengerMetrics.status === "insufficient") insufficientReasons.push(`Challenger ${challengerMetrics.insufficientReason}`);
@@ -551,6 +569,16 @@ export function evaluateSkillPromotion({
     challengerMetrics,
     deltas,
     gates: [],
+    appliedGuardrails: {
+      requireCost,
+      maximumEditDistanceRegression,
+      maximumCostRegression,
+      maximumLatencyRegression,
+      minimumQaGain,
+      minimumEditDistanceGain,
+      minimumAcceptanceGain,
+      minimumEfficiencyGain
+    },
     insufficientReasons,
     status: "insufficient",
     promotable: false,
@@ -576,15 +604,13 @@ export function evaluateSkillPromotion({
   result.gates.push(gate("qa_score", "QA 分不得下降", "quality",
     challengerMetrics.qaScore >= championMetrics.qaScore,
     `${fixed(championMetrics.qaScore, 1)} → ${fixed(challengerMetrics.qaScore, 1)}`));
-  result.gates.push(gate("human_edit", "人工编辑距离不得上升", "quality",
-    challengerMetrics.humanEditDistance <= championMetrics.humanEditDistance,
-    `${percent(championMetrics.humanEditDistance)} → ${percent(challengerMetrics.humanEditDistance)}`));
+  result.gates.push(gate("human_edit", "人工编辑距离回退在允许范围内", "quality",
+    deltas.humanEditDistance !== null && deltas.humanEditDistance <= maximumEditDistanceRegression,
+    `${percent(championMetrics.humanEditDistance)} → ${percent(challengerMetrics.humanEditDistance)}；变化 ${percentagePointDelta(deltas.humanEditDistance)}，上限 +${(maximumEditDistanceRegression * 100).toFixed(1)} 个百分点`));
   result.gates.push(gate("human_acceptance", "人工接受率不得下降", "quality",
     challengerMetrics.humanAcceptanceRate >= championMetrics.humanAcceptanceRate,
     `${percent(championMetrics.humanAcceptanceRate)} → ${percent(challengerMetrics.humanAcceptanceRate)}`));
 
-  const maximumCostRegression = Math.max(0, finiteNumber(guardrails.maximumCostRegression) ?? 0.2);
-  const maximumLatencyRegression = Math.max(0, finiteNumber(guardrails.maximumLatencyRegression) ?? 0.25);
   const costRegression = ratioRegression(championMetrics.cost.average, challengerMetrics.cost.average);
   const latencyRegression = ratioRegression(championMetrics.latencyMs.average, challengerMetrics.latencyMs.average);
   if (requireCost) {
@@ -599,11 +625,11 @@ export function evaluateSkillPromotion({
   const materialGains = {
     mandatoryTerms: deltas.mandatoryTermAccuracy !== null && deltas.mandatoryTermAccuracy > 0,
     hardErrors: deltas.hardErrorCount !== null && deltas.hardErrorCount < 0,
-    qaScore: deltas.qaScore !== null && deltas.qaScore >= (finiteNumber(guardrails.minimumQaGain) ?? 0.5),
-    humanEditDistance: deltas.humanEditDistance !== null && deltas.humanEditDistance <= -(finiteNumber(guardrails.minimumEditDistanceGain) ?? 0.005),
-    humanAcceptance: deltas.humanAcceptanceRate !== null && deltas.humanAcceptanceRate >= (finiteNumber(guardrails.minimumAcceptanceGain) ?? 0.01),
-    cost: costRegression !== null && costRegression <= -(finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1),
-    latency: latencyRegression !== null && latencyRegression <= -(finiteNumber(guardrails.minimumEfficiencyGain) ?? 0.1)
+    qaScore: deltas.qaScore !== null && deltas.qaScore >= minimumQaGain,
+    humanEditDistance: deltas.humanEditDistance !== null && deltas.humanEditDistance <= -minimumEditDistanceGain,
+    humanAcceptance: deltas.humanAcceptanceRate !== null && deltas.humanAcceptanceRate >= minimumAcceptanceGain,
+    cost: costRegression !== null && costRegression <= -minimumEfficiencyGain,
+    latency: latencyRegression !== null && latencyRegression <= -minimumEfficiencyGain
   };
   // Some evaluations must not let a metric justify promotion even though that
   // metric still guards against regression. Style-profile评测 is the case that

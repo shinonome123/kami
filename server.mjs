@@ -21,7 +21,7 @@ import { embedSource } from "./src/embedding.mjs";
 import { exportBatchDocument, prepareBatchDocument } from "./src/batch-document.mjs";
 import { runTaskPool } from "./src/task-pool.mjs";
 import { DEFAULT_TRANSLATION_STRATEGY, createDefaultTranslationSkill, effectiveStrategyValue, evaluateSkillPromotion, normalizedEditDistance, selectSkillHoldout, summarizeTrajectoryAttribution, validateCandidatePromotionState } from "./src/learning-engine.mjs";
-import { benchmarkTranslationSkill } from "./src/skill-benchmark.mjs";
+import { benchmarkTranslationSkill, createBenchmarkSnapshot } from "./src/skill-benchmark.mjs";
 import { createEvaluationJobRunner } from "./src/evaluation-jobs.mjs";
 import { detectBatchVerse } from "./src/batch-verse.mjs";
 import { createAutoProposer } from "./src/auto-proposal.mjs";
@@ -266,12 +266,19 @@ function trajectoryToEvaluationSample(trajectory, { variant = "champion" } = {})
 }
 
 function learningEvaluationUiReport(result) {
+  const requireCost = result.appliedGuardrails?.requireCost
+    ?? result.gates?.some((item) => item.id === "cost")
+    ?? false;
+  const costBasis = requireCost
+    ? "模型调用成本已计量，并参与本次成本回退门禁。"
+    : "本次未启用成本门禁（requireCost=false）；成本即使可见也不影响晋升结论。";
   return {
     promotable: result.promotable,
     status: result.status,
     conclusion: result.reportZh,
     gates: result.gates,
-    evaluationBasis: "同一人工批准留出集上的 Champion / Challenger 隔离重跑；重跑前剔除与留出原文同源的翻译记忆、QA 案例和风格/画像正反例，防止标准答案泄漏进评测上下文；人工采纳率为相对人工终稿的自动近似指标，不冒充新增人工投票；模型调用成本尚未计量，成本门禁暂不参与（requireCost=false）。",
+    guardrails: result.appliedGuardrails || {},
+    evaluationBasis: `同一人工批准留出集上的 Champion / Challenger 隔离重跑；重跑前剔除与留出原文同源的翻译记忆、QA 案例和风格/画像正反例，防止标准答案泄漏进评测上下文；人工采纳率为相对人工终稿的自动近似指标，不冒充新增人工投票；${costBasis}`,
     metrics: [
       { key: "termAccuracy", label: "强制术语正确率", unit: "%", higherIsBetter: true, champion: result.championMetrics.mandatoryTermAccuracy, candidate: result.challengerMetrics.mandatoryTermAccuracy, delta: result.deltas.mandatoryTermAccuracy },
       { key: "hardErrors", label: "硬错误数", unit: "", higherIsBetter: false, champion: result.championMetrics.hardErrorCount, candidate: result.challengerMetrics.hardErrorCount, delta: result.deltas.hardErrorCount },
@@ -1136,7 +1143,8 @@ async function apiHandler(req, res, url) {
       champion: { id: activeProfile?.id || NO_STYLE_PROFILE_ID },
       challenger: { id: draft.id },
       trajectories: holdout,
-      requireCost: Number.isFinite(provider.inputPricePerMTok) && Number.isFinite(provider.outputPricePerMTok)
+      requireCost: costPricingConfigured(provider),
+      forceRegenerate: body.forceRegenerate === true
     }));
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/style-profiles/") && url.pathname.endsWith("/activate")) {
@@ -1269,6 +1277,7 @@ async function apiHandler(req, res, url) {
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/evaluate")) {
     const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/evaluate".length));
+    const body = await readJsonBody(req).catch(() => ({}));
     const challenger = await getTranslationSkill(id);
     if (!challenger || !["challenger", "draft"].includes(challenger.status)) {
       const error = new Error("未找到可评测的候选技能");
@@ -1324,7 +1333,8 @@ async function apiHandler(req, res, url) {
       challenger,
       trajectories: evaluationPool,
       // 定价配置完整时启用真实成本门禁；否则保持跳过，避免空数据锁死晋升。
-      requireCost: costPricingConfigured()
+      requireCost: costPricingConfigured(),
+      forceRegenerate: body.forceRegenerate === true
     });
     return json(res, 202, { jobId: job.jobId, job });
   }
@@ -2422,6 +2432,7 @@ try {
 // 技能评测后台任务队列：同一时刻只跑一个评测，逐对持久化检查点，重启后可续跑。
 const evaluationJobs = createEvaluationJobRunner({
   benchmark: benchmarkTranslationSkill,
+  createSnapshot: ({ scope, trajectories }) => createBenchmarkSnapshot(scope, trajectories, { promptVersion: TRANSLATION_PROMPT_VERSION }),
   jobsDirectory: join(DATA_ROOT, "learning", "jobs"),
   concurrency: 5,
   deps: {
@@ -2456,6 +2467,7 @@ async function resolveStyleVariant(id, scope) {
 // 风格草稿评测：唯一变量是风格规范本身，技能、留出集与检索隔离两边完全一致。
 const styleEvaluationJobs = createEvaluationJobRunner({
   benchmark: benchmarkStyleVariant,
+  createSnapshot: ({ scope, trajectories }) => createBenchmarkSnapshot(scope, trajectories, { promptVersion: TRANSLATION_PROMPT_VERSION }),
   jobsDirectory: join(DATA_ROOT, "learning", "jobs"),
   concurrency: 5,
   kind: "style-evaluation",

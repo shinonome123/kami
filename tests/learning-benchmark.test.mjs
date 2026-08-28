@@ -75,3 +75,30 @@ test("任一侧 AIQA 失败时整对样本作废并保留准确 caseId", async (
   assert.deepEqual(result.challengerSamples.map((item) => item.caseId), ["healthy", "healthy-2"]);
   assert.deepEqual(result.failures, [{ caseId: "qa-failed", error: "AIQA provider unavailable" }]);
 });
+
+test("表达型语体按轮次配对采样，同一 case/轮次两侧共用固定 seed", async () => {
+  const trajectories = [{ id: "case-0" }, { id: "case-1" }];
+  const calls = [];
+  const result = await runPairedSkillBenchmarks({
+    trajectories,
+    champion: { id: "champion" },
+    challenger: { id: "challenger" },
+    scope: { locale: "ja-JP", contentType: "dialogue", domain: "game", project: "default" },
+    evaluationProfile: { repetitions: 2, policyVersion: "test", mode: "expressive-repeated" },
+    concurrency: 1,
+    benchmark: async (skill, trajectory, context) => {
+      calls.push({ caseId: trajectory.id, variant: context.variant, repetition: context.repetition, seed: context.seed });
+      return { caseId: `${trajectory.id}#r${context.repetition + 1}`, repetition: context.repetition, skillId: skill.id };
+    }
+  });
+  assert.equal(result.repetitions, 2);
+  assert.equal(result.championSamples.length, 4);
+  assert.equal(result.challengerSamples.length, 4);
+  for (const trajectory of trajectories) {
+    for (const repetition of [0, 1]) {
+      const pair = calls.filter((item) => item.caseId === trajectory.id && item.repetition === repetition);
+      assert.equal(pair.length, 2);
+      assert.equal(pair[0].seed, pair[1].seed, "Champion / Challenger 必须共享同一个随机流起点");
+    }
+  }
+});

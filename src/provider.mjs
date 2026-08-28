@@ -203,7 +203,9 @@ async function chat(messages, config = runtimeConfig, options = {}) {
   const timeoutMs = normalizedOptions.timeoutMs ?? 60_000;
   const requestLabel = normalizedOptions.requestLabel || "模型";
   let maxTokens = normalizedOptions.maxTokens;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let seed = Number.isInteger(normalizedOptions.seed) ? normalizedOptions.seed : undefined;
+  let seedFallbackUsed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const { response, text } = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -214,12 +216,23 @@ async function chat(messages, config = runtimeConfig, options = {}) {
         model: config.model,
         messages,
         temperature,
+        ...(seed === undefined ? {} : { seed }),
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
         ...(normalizedOptions.responseFormat ? { response_format: normalizedOptions.responseFormat } : {}),
         ...(normalizedOptions.reasoningEffort ? { reasoning_effort: normalizedOptions.reasoningEffort } : {})
       })
     }, { timeoutMs, label: requestLabel, retries: 1 });
     if (!response.ok) {
+      // Several OpenAI-compatible gateways do not expose `seed`. Keep the
+      // evaluation usable, but surface the downgrade to the caller instead of
+      // silently claiming deterministic sampling.
+      if (seed !== undefined && !seedFallbackUsed && response.status === 400
+        && /seed/i.test(text || "") && /unknown|unsupported|extra_forbidden|not permitted|not allowed/i.test(text || "")) {
+        seed = undefined;
+        seedFallbackUsed = true;
+        normalizedOptions.onSeedUnsupported?.(`${requestLabel} 上游不支持固定 seed`);
+        continue;
+      }
       throw new Error(`模型请求失败 (${response.status})：${(text || "").slice(0, 500)}`);
     }
     const payload = JSON.parse(text || "{}");
@@ -241,7 +254,7 @@ async function chat(messages, config = runtimeConfig, options = {}) {
     }
     // 推理预算耗尽导致输出被截断为空：加大预算重试一次，避免把“思考超长”误判为“无问题”
     const truncated = payload.choices?.[0]?.finish_reason === "length";
-    if (!content && truncated && attempt === 0) {
+    if (!content && truncated && attempt < 2) {
       maxTokens = maxTokens ? Math.min(8000, Math.ceil(maxTokens * 2)) : 4000;
       continue;
     }
@@ -581,7 +594,7 @@ export async function proposeTranslationSkillWithModel({ locale, contentType, do
   };
 }
 
-export async function evaluateTranslationWithModel({ contextPack, translation, references = [], machineDrafts = [], qaCases = [], onUsage = null }) {
+export async function evaluateTranslationWithModel({ contextPack, translation, references = [], machineDrafts = [], qaCases = [], onUsage = null, temperature = 0.1, seed = undefined, onSeedUnsupported = null }) {
   const messages = [
     {
       role: "system",
@@ -589,7 +602,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, approvedReferences: references.slice(0, 5), machineDrafts: machineDrafts.slice(0, 3), qaCases: qaCases.slice(0, 3) }) }
   ];
-  let content = await chat(messages, runtimeConfig, { temperature: 0.1, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "AIQA", responseFormat: { type: "json_object" }, onUsage });
+  let content = await chat(messages, runtimeConfig, { temperature, seed, onSeedUnsupported, timeoutMs: 75_000, maxTokens: 1800, requestLabel: "AIQA", responseFormat: { type: "json_object" }, onUsage });
   let payload;
   let lastFormatError = "";
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -603,7 +616,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
         ...messages,
         { role: "assistant", content: content.slice(0, 4000) },
         { role: "user", content: "上一个回答不是可解析的严格 JSON。请只重新输出一个紧凑 JSON 对象，根字段必须是 issues 数组，不要 Markdown、解释或代码围栏。" }
-      ], runtimeConfig, { temperature: 0, timeoutMs: 45_000, maxTokens: 1800, requestLabel: "AIQA 格式重试", responseFormat: { type: "json_object" }, onUsage });
+      ], runtimeConfig, { temperature: 0, seed, onSeedUnsupported, timeoutMs: 45_000, maxTokens: 1800, requestLabel: "AIQA 格式重试", responseFormat: { type: "json_object" }, onUsage });
     }
   }
   if (!payload) {
@@ -613,7 +626,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
         content: "你是本地化 QA。不要输出 JSON。若没有问题只输出 PASS；若有问题，每个问题单独一行，严格使用：ISSUE|critical/major/minor|英文类别代码|原文片段|译文片段|简体中文问题原因|简体中文修订建议。问题原因和修订建议禁止使用目标语言。不得输出其他内容。"
       },
       { role: "user", content: JSON.stringify({ contextPack, translation, references: references.slice(0, 3), qaCases: qaCases.slice(0, 2) }) }
-    ], runtimeConfig, { temperature: 0, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "AIQA 行式降级", onUsage });
+    ], runtimeConfig, { temperature: 0, seed, onSeedUnsupported, timeoutMs: 60_000, maxTokens: 1600, requestLabel: "AIQA 行式降级", onUsage });
     try {
       payload = { issues: parseAiQaLineResponse(lineContent) };
     } catch (error) {
@@ -1246,11 +1259,12 @@ export async function classifyWithModel(text, { descriptor = "", location = "" }
   return { ...JSON.parse(match[0]), source: "model" };
 }
 
-export async function translateWithReflection(contextPack, { reflect = true, onUsage = null } = {}) {
+export async function translateWithReflection(contextPack, { reflect = true, onUsage = null, temperature = undefined, seed = undefined, onSeedUnsupported = null } = {}) {
   const rhymeLike = contextPack?.rhymeLike === true;
   const batchVerse = contextPack?.batchVerse?.active === true;
   // 温度：普通文本 0.6 给地道表达留空间，韵文/批排比 0.85 给节奏与韵脚再创作。
-  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: rhymeLike || batchVerse ? 0.85 : 0.6, onUsage });
+  const translationTemperature = Number.isFinite(Number(temperature)) ? Number(temperature) : (rhymeLike || batchVerse ? 0.85 : 0.6);
+  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: translationTemperature, seed, onSeedUnsupported, onUsage });
   if (!reflect && !rhymeLike) return { initial, translation: initial, reflection: "" };
   if (rhymeLike) {
     // 韵文本地化专用通道：初译只作参考，要求模型以目标语言玩家视角再创作，
@@ -1258,7 +1272,7 @@ export async function translateWithReflection(contextPack, { reflect = true, onU
     const localized = await chat([
       { role: "system", content: "你是游戏文案韵文本地化师。把简体中文顺口溜/韵文改写为目标语言地道的押韵短句：保留原意与情绪（自嘲、洒脱、吆喝等），重现节奏、叠词与韵脚，允许换用拟态词、惯用句和谚语；严禁机械逐字直译，严禁把闲散语气译成命令口吻。只输出一行最终译文，不解释。\n\n改写示范（达到这个质量才算合格）：\n原文：走走走，游游游，甘为铜钱做马牛。\n译文：とことこ歩いて、ぶらぶら遊んで、銭のためなら馬にも牛にも。" },
       { role: "user", content: `原文：${contextPack.source}\n参考技巧：中文三字重复可译为日语叠词/拟态词（とことこ、ぶらぶら等），尾韵可用同一语尾（〜て、〜で、〜う）呼应。不要参考任何现成译文，直接从原文创作。` }
-    ], runtimeConfig, { temperature: 0.85, timeoutMs: 75_000, requestLabel: "韵文本地化", onUsage });
+    ], runtimeConfig, { temperature: translationTemperature, seed, onSeedUnsupported, timeoutMs: 75_000, requestLabel: "韵文本地化", onUsage });
     return { initial, translation: localized, reflection: "rhyme-localized" };
   }
   const reflection = await chat([

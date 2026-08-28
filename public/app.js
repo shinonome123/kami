@@ -2506,6 +2506,7 @@ function learningStatusMeta(item = {}) {
   if (["failed", "blocked"].includes(status)) return ["未通过", "failed"];
   if (["reject", "insufficient"].includes(status)) return [status === "insufficient" ? "证据不足" : "评测未通过", "failed"];
   if (status === "needs_review") return ["证据不足", "insufficient"];
+  if (status === "unstable") return ["结果不稳定", "insufficient"];
   if (status === "stale") return ["评测基线已过期", "stale"];
   if (status === "promote") return ["评测通过", "ready"];
   return ["待评测", "candidate"];
@@ -2619,15 +2620,19 @@ function renderLearningCandidates(candidates, evaluations, champion, validTrajec
     const rules = learningRules(skill);
     const evidenceCount = Number(skill.evidenceCount ?? skill.evidence_count ?? skill.trajectoryCount ?? skill.trajectory_count) || learningArray(skill.evidence || skill.evidenceIds || skill.evidence_ids).length;
     const canActivate = Boolean(evaluation && baselineCurrent && evaluationPassed(evaluation, skill));
-    const insufficient = evaluation && ["insufficient", "needs_review"].includes(String(evaluationResult.status || evaluation.decision || "").toLowerCase());
+    const reviewStatus = String(evaluationResult.status || evaluation.decision || "").toLowerCase();
+    const insufficient = evaluation && ["insufficient", "needs_review"].includes(reviewStatus);
+    const unstable = evaluation && reviewStatus === "unstable";
     const footerText = !baselineCurrent
       ? "该候选基于旧冠军生成，不能再晋升；请拒绝它，并从当前冠军重新生成候选。"
       : !evaluation
         ? "尚未与当前冠军进行隔离评测。"
         : canActivate
           ? "已在当前冠军基线上通过完整门槛，可由人工批准启用。"
+          : unstable
+            ? (evaluationResult.conclusion || "重复评测结论互相矛盾，系统已暂停形成优劣结论。")
           : insufficient
-            ? "未参与本候选学习的人工终稿不足 20 条，当前没有形成优劣结论。"
+            ? (evaluationResult.conclusion || "评测证据不足或执行未完成，当前没有形成优劣结论。")
             : "评测门槛未通过，不能进入生产。";
     return `<article class="learning-skill-card candidate ${selected ? "selected" : ""}" data-learning-select="${escapeHtml(id)}" tabindex="0">
       <div class="learning-skill-head"><div><span class="learning-skill-version">${escapeHtml(learningVersion(skill))}</span><h3>${escapeHtml(learningSkillTitle(skill))}</h3><small>${evidenceCount} 条来源证据${skill.createdAt || skill.created_at ? ` · ${escapeHtml(formatLearningDate(skill.createdAt || skill.created_at))}` : ""}</small></div><span class="learning-status ${statusClass}">${statusLabel}</span></div>
@@ -2705,12 +2710,13 @@ function renderLearningEvaluation(candidate, evaluation, champion) {
   const passed = evaluationPassed(evaluation, candidate);
   const evaluationStatus = String(result.status || evaluation.decision || "").toLowerCase();
   const insufficient = ["insufficient", "needs_review"].includes(evaluationStatus);
+  const unstable = evaluationStatus === "unstable";
   const currentChampionId = learningId(champion);
   const evaluatedChampionId = String(evaluation.championSkillId || evaluation.champion_skill_id || result.championId || result.champion_id || "");
   const stale = Boolean(currentChampionId && evaluatedChampionId && currentChampionId !== evaluatedChampionId);
-  const comparisonLabel = stale ? "旧冠军基线评测" : insufficient ? "证据不足 · 暂不形成优劣结论" : "已完成 Champion / Challenger 对比";
-  const gateClass = stale ? "stale" : insufficient ? "insufficient" : passed ? "passed" : "failed";
-  const gateLabel = stale ? "基线已过期" : insufficient ? "留出样本不足" : passed ? "通过晋升门槛" : "未通过晋升门槛";
+  const comparisonLabel = stale ? "旧冠军基线评测" : unstable ? "结果不稳定 · 暂不形成优劣结论" : insufficient ? "证据不足 · 暂不形成优劣结论" : "已完成 Champion / Challenger 对比";
+  const gateClass = stale ? "stale" : unstable || insufficient ? "insufficient" : passed ? "passed" : "failed";
+  const gateLabel = stale ? "基线已过期" : unstable ? "多轮结论互相矛盾" : insufficient ? "评测未完整完成" : passed ? "通过晋升门槛" : "未通过晋升门槛";
   const evaluationBasis = result.evaluationBasis || "编辑距离与近似通过率均由候选译文相对人工批准终稿自动计算，不代表新增人工投票或主观打分。";
   const conclusion = result.reportZh || (typeof evaluation.report === "string" ? evaluation.report : "") || result.conclusion || result.summary || result.reason || (passed ? "候选通过全部晋升门槛。" : "候选尚未通过全部晋升门槛。将在批准前保持隔离。 ");
   matrix.innerHTML = `<div class="learning-evaluation-title"><div><span>${escapeHtml(comparisonLabel)}</span><strong>${escapeHtml(learningSkillTitle(candidate))} ${escapeHtml(learningVersion(candidate))}</strong></div><span class="learning-gate ${gateClass}">${gateLabel}</span></div>

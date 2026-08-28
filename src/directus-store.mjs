@@ -1219,12 +1219,13 @@ export async function activateDirectusStyleProfile(id) {
     }
     throw error;
   }
-  const params = new URLSearchParams({ limit: "-1", fields: "id,status" });
+  const params = new URLSearchParams({ limit: "-1", fields: "id,status,domain" });
   params.set("filter[target_locale][_eq]", target.target_locale);
   params.set("filter[content_type][_eq]", target.content_type);
+  params.set("filter[domain][_eq]", target.domain || "general");
   params.set("filter[status][_eq]", "active");
   const activeOthers = await request(`/items/style_profiles?${params}`);
-  const updates = activeOthers.filter((item) => item.domain === target.domain && item.id !== id).map((item) => ({ id: item.id, status: "inactive" }));
+  const updates = activeOthers.filter((item) => item.id !== id).map((item) => ({ id: item.id, status: "inactive" }));
   if (updates.length) await request("/items/style_profiles", { method: "PATCH", body: updates });
   const saved = await request(`/items/style_profiles/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: "active" } });
   return { id: saved.id, kind: "style_profile", status: "active" };

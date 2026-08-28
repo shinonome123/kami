@@ -118,6 +118,12 @@ test("后台评测任务完成全流程：双变体重跑、成本采集、保�
 
   const persistedFiles = (await readdir(jobsDirectory)).filter((file) => file.endsWith(".json"));
   assert.equal(persistedFiles.length, 1, "任务检查点应持久化到磁盘");
+
+  const reusedJob = await runner.create({ scope, champion, challenger, trajectories, requireCost: true });
+  const reusedFinal = await waitForTerminal(runner, reusedJob.jobId);
+  assert.equal(reusedFinal.status, "completed");
+  assert.equal(reusedFinal.reproducibility.reusedFromJobId, createdJob.jobId, "输入未变化时应复用已保存译文，只重算门禁");
+  assert.equal(reusedFinal.result.report.reproducibility.reusedFromJobId, createdJob.jobId);
 });
 
 test("重启恢复把运行中任务标记为 interrupted，续跑前校验候选与冠军配对", async () => {
@@ -156,4 +162,52 @@ test("重启恢复把运行中任务标记为 interrupted，续跑前校验候�
   const finalJob = await waitForTerminal(runner, "fake-1");
   assert.equal(finalJob.status, "failed");
   assert.match(finalJob.error, /候选技能不存在|Champion/);
+});
+
+test("表达型 Skill 的重复采样结论相反时标记 unstable 并禁止晋升", async () => {
+  const scope = { locale: "ja-JP", contentType: "dialogue", domain: "game", project: "default" };
+  const champion = { id: "stable-champion", ...scope, scope, status: "champion" };
+  const challenger = { id: "unstable-challenger", ...scope, scope, status: "challenger", parentId: champion.id };
+  const trajectories = Array.from({ length: 20 }, (_, index) => ({
+    id: `unstable-case-${index}`,
+    source: `台词${index}`,
+    finalTranslation: `台詞${index}`,
+    humanDecision: { accepted: true, finalTranslation: `台詞${index}` }
+  }));
+  const jobsDirectory = join(dataDir, "learning", "jobs-unstable");
+  let saved;
+  const runner = jobsModule.createEvaluationJobRunner({
+    jobsDirectory,
+    concurrency: 4,
+    benchmark: async (skill, trajectory, { repetition }) => ({
+      caseId: `${trajectory.id}#r${repetition + 1}`,
+      sourceCaseId: trajectory.id,
+      repetition,
+      scope,
+      requiredTermHits: 0,
+      requiredTermTotal: 0,
+      hardErrorCount: 0,
+      qaScore: skill.id === challenger.id ? (repetition === 0 ? 95 : 85) : 90,
+      humanEditDistance: skill.id === challenger.id ? (repetition === 0 ? 0.1 : 0.2) : 0.15,
+      humanAccepted: true,
+      latencyMs: 10
+    }),
+    deps: {
+      getSkill: async (id) => id === champion.id ? champion : id === challenger.id ? challenger : null,
+      getCurrentChampion: async () => champion,
+      validatePromotionState: () => ({ valid: true, reasons: [] }),
+      saveEvaluation: async (payload) => { saved = payload; return { id: "unstable-evaluation" }; },
+      updateSkillMetrics: async () => undefined,
+      buildUiReport: (result) => ({ promotable: result.promotable, status: result.status, conclusion: result.reportZh, gates: result.gates })
+    }
+  });
+  await runner.initialize();
+  const created = await runner.create({ scope, champion, challenger, trajectories, requireCost: false });
+  const finalJob = await waitForTerminal(runner, created.jobId);
+  assert.equal(finalJob.status, "completed");
+  assert.equal(finalJob.result.report.status, "unstable");
+  assert.equal(finalJob.result.report.promotable, false);
+  assert.equal(finalJob.result.report.reproducibility.stable, false);
+  assert.deepEqual(finalJob.result.report.reproducibility.repeatConclusions.map((item) => item.status), ["promote", "reject"]);
+  assert.equal(saved.decision, "needs_review");
 });

@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { evaluateSkillPromotion } from "./learning-engine.mjs";
 import { runPairedSkillBenchmarks } from "./learning-benchmark.mjs";
+import { benchmarkSnapshotFingerprint, evaluationProfileForContentType } from "./evaluation-policy.mjs";
 
 const QUEUED = "queued";
 const RUNNING = "running";
@@ -24,6 +25,38 @@ const COMPLETED = "completed";
 const FAILED = "failed";
 const TERMINAL_STATUSES = new Set([COMPLETED, FAILED]);
 const RESUMABLE_STATUSES = new Set([QUEUED, INTERRUPTED, FAILED]);
+
+function cloneJson(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function benchmarkVariantFingerprintInput(value) {
+  if (!value || typeof value !== "object") return value;
+  const ignored = new Set([
+    "metrics", "evaluation", "metadata", "createdAt", "updatedAt", "activatedAt",
+    "created_at", "updated_at", "date_created", "date_updated", "status"
+  ]);
+  if (Array.isArray(value)) return value.map(benchmarkVariantFingerprintInput);
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !ignored.has(key))
+    .map(([key, item]) => [key, benchmarkVariantFingerprintInput(item)]));
+}
+
+function sampleArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return value ? [value] : [];
+}
+
+function flattenVariantSamples(job, variant) {
+  return job.requestedCaseIds.flatMap((caseId) => sampleArray(job.caseSamples?.[caseId]?.[variant]));
+}
+
+function conclusionClass(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "promote") return "promote";
+  if (normalized === "reject") return "reject";
+  return "inconclusive";
+}
 
 function persistableTrajectory(trajectory) {
   return {
@@ -55,7 +88,14 @@ function publicJob(job) {
     updatedAt: job.updatedAt,
     finishedAt: job.finishedAt || "",
     error: job.error || "",
-    result: job.result || null
+    result: job.result || null,
+    reproducibility: {
+      policyVersion: job.evaluationProfile?.policyVersion || "legacy",
+      mode: job.evaluationProfile?.mode || "legacy",
+      repetitions: Number(job.evaluationProfile?.repetitions) || 1,
+      snapshotFingerprint: String(job.snapshotFingerprint || ""),
+      reusedFromJobId: String(job.reusedFromJobId || "")
+    }
   };
 }
 
@@ -67,7 +107,7 @@ function publicJob(job) {
  * @param guardrails  Extra promotion guardrails merged into every conclusion,
  *   e.g. restricting which metrics may justify a style-profile promotion.
  */
-export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, concurrency = 5, kind = "skill-evaluation", guardrails = {}, now = () => new Date().toISOString() } = {}) {
+export function createEvaluationJobRunner({ benchmark, createSnapshot = null, jobsDirectory, deps, concurrency = 5, kind = "skill-evaluation", guardrails = {}, now = () => new Date().toISOString() } = {}) {
   if (typeof benchmark !== "function") throw new TypeError("benchmark 必须是函数");
   for (const name of ["getSkill", "getCurrentChampion", "validatePromotionState", "saveEvaluation", "updateSkillMetrics", "buildUiReport"]) {
     if (typeof deps?.[name] !== "function") throw new TypeError(`evaluation job deps 缺少 ${name}`);
@@ -140,17 +180,71 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
   async function execute(job) {
     job.status = RUNNING;
     job.error = "";
+    job.evaluationProfile ||= evaluationProfileForContentType(job.scope?.contentType);
     job.updatedAt = now();
     await persist(job);
 
     // Fail fast when the pairing is already stale, before spending model calls.
-    const [champion, candidate] = await Promise.all([deps.getSkill(job.championId, job.scope), deps.getSkill(job.challengerId, job.scope)]);
+    const [liveChampion, liveCandidate] = await Promise.all([deps.getSkill(job.championId, job.scope), deps.getSkill(job.challengerId, job.scope)]);
     const currentChampion = await deps.getCurrentChampion(job.scope);
-    const initialValidation = deps.validatePromotionState({ candidate, currentChampion });
+    const initialValidation = deps.validatePromotionState({ candidate: liveCandidate, currentChampion });
     if (!initialValidation.valid) {
       await markFailed(job, initialValidation.reasons.join("；"));
       return;
     }
+
+    // Old checkpoints may be resumed only when they have not generated any
+    // samples yet. Mixing old live-retrieval samples with a new frozen snapshot
+    // would produce an unauditable comparison.
+    if (!job.benchmarkSnapshot && typeof createSnapshot === "function") {
+      if (Object.keys(job.caseSamples || {}).length) {
+        await markFailed(job, "旧版评测检查点缺少输入快照，已有样本不能与新版可复现评测混用，请重新发起评测");
+        return;
+      }
+      const allTrajectories = job.requestedCaseIds.map((caseId) => job.caseTrajectories[caseId]).filter(Boolean);
+      job.benchmarkSnapshot = await createSnapshot({
+        scope: job.scope,
+        trajectories: allTrajectories,
+        champion: liveChampion,
+        challenger: liveCandidate
+      });
+      job.snapshotFingerprint = benchmarkSnapshotFingerprint({
+        benchmark: job.benchmarkSnapshot?.fingerprint || job.benchmarkSnapshot,
+        champion: benchmarkVariantFingerprintInput(job.championVariant || liveChampion),
+        challenger: benchmarkVariantFingerprintInput(job.challengerVariant || liveCandidate),
+        trajectories: job.caseTrajectories,
+        evaluationProfile: job.evaluationProfile
+      });
+      await persist(job);
+    }
+
+    if (!job.snapshotFingerprint) {
+      job.snapshotFingerprint = benchmarkSnapshotFingerprint({
+        benchmark: job.benchmarkSnapshot?.fingerprint || job.benchmarkSnapshot,
+        champion: benchmarkVariantFingerprintInput(job.championVariant || liveChampion),
+        challenger: benchmarkVariantFingerprintInput(job.challengerVariant || liveCandidate),
+        trajectories: job.caseTrajectories,
+        evaluationProfile: job.evaluationProfile
+      });
+    }
+    if (job.forceRegenerate !== true && Object.keys(job.caseSamples || {}).length === 0) {
+      const reusable = [...jobs.values()].reverse().find((other) => other.jobId !== job.jobId
+        && other.status === COMPLETED
+        && other.championId === job.championId
+        && other.challengerId === job.challengerId
+        && other.snapshotFingerprint === job.snapshotFingerprint
+        && Object.keys(other.caseSamples || {}).length === job.requestedCaseIds.length
+        && Object.keys(other.caseFailures || {}).length === 0);
+      if (reusable) {
+        job.caseSamples = cloneJson(reusable.caseSamples);
+        job.reusedFromJobId = reusable.jobId;
+        job.updatedAt = now();
+        await persist(job);
+      }
+    }
+
+    const champion = job.championVariant || liveChampion;
+    const candidate = job.challengerVariant || liveCandidate;
 
     const trajectories = job.requestedCaseIds
       .filter((caseId) => !job.caseSamples[caseId] && !job.caseFailures[caseId])
@@ -164,9 +258,15 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
         challenger: candidate,
         benchmark,
         concurrency,
+        snapshot: job.benchmarkSnapshot || null,
+        evaluationProfile: job.evaluationProfile,
+        scope: job.scope,
         onProgress: (progress) => {
           if (progress.status === "fulfilled") {
-            job.caseSamples[progress.caseId] = { champion: progress.championSample, challenger: progress.challengerSample };
+            job.caseSamples[progress.caseId] = {
+              champion: progress.championSamples?.length ? progress.championSamples : sampleArray(progress.championSample),
+              challenger: progress.challengerSamples?.length ? progress.challengerSamples : sampleArray(progress.challengerSample)
+            };
           } else if (progress.caseId) {
             job.caseFailures[progress.caseId] = progress.error || "评测失败";
           }
@@ -177,27 +277,49 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
       await job._persistChain;
     }
 
-    const championSamples = job.requestedCaseIds.filter((caseId) => job.caseSamples[caseId]).map((caseId) => job.caseSamples[caseId].champion);
-    const challengerSamples = job.requestedCaseIds.filter((caseId) => job.caseSamples[caseId]).map((caseId) => job.caseSamples[caseId].challenger);
+    const championSamples = flattenVariantSamples(job, "champion");
+    const challengerSamples = flattenVariantSamples(job, "challenger");
     const failures = job.requestedCaseIds.filter((caseId) => job.caseFailures[caseId]).map((caseId) => ({
       caseId,
       error: job.caseFailures[caseId]
     }));
 
+    const repetitions = Math.max(1, Math.trunc(Number(job.evaluationProfile?.repetitions) || 1));
+    const evaluationGuardrails = { ...guardrails, requireCost: job.requireCost === true };
     const result = evaluateSkillPromotion({
       scope: job.scope,
       champion: { id: job.championId, scope: job.scope, samples: championSamples },
       challenger: { id: job.challengerId, scope: job.scope, samples: challengerSamples },
       // Every paired case must complete for a real conclusion; a single failed
       // pair makes the whole run insufficient instead of pretending a zero.
-      minSamples: job.requestedCaseIds.length,
+      minSamples: job.requestedCaseIds.length * repetitions,
       minimumCoverage: 0.8,
-      guardrails: { ...guardrails, requireCost: job.requireCost === true }
+      guardrails: evaluationGuardrails
+    });
+    const repeatConclusions = Array.from({ length: repetitions }, (_, repetition) => {
+      const championRepeat = championSamples.filter((sample) => Number(sample.repetition || 0) === repetition);
+      const challengerRepeat = challengerSamples.filter((sample) => Number(sample.repetition || 0) === repetition);
+      const repeatResult = evaluateSkillPromotion({
+        scope: job.scope,
+        champion: { id: job.championId, scope: job.scope, samples: championRepeat },
+        challenger: { id: job.challengerId, scope: job.scope, samples: challengerRepeat },
+        minSamples: job.requestedCaseIds.length,
+        minimumCoverage: 0.8,
+        guardrails: evaluationGuardrails
+      });
+      return {
+        repetition: repetition + 1,
+        status: repeatResult.status,
+        qaDelta: repeatResult.deltas.qaScore,
+        editDistanceDelta: repeatResult.deltas.humanEditDistance
+      };
     });
     const report = deps.buildUiReport(result);
     report.benchmark = {
       requestedPairs: job.requestedCaseIds.length,
-      completedPairs: championSamples.length,
+      completedPairs: Object.keys(job.caseSamples).length,
+      completedDraws: championSamples.length,
+      repetitions,
       failedPairs: failures.length,
       failures: failures.slice(0, 10),
       isolation: [...championSamples, ...challengerSamples].reduce((summary, sample) => {
@@ -211,6 +333,54 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
         };
       }, { excludedMemories: 0, excludedQaCases: 0, excludedStyleExamples: 0, excludedUserProfileExamples: 0, totalExcluded: 0 })
     };
+    const seedWarnings = [...new Set([...championSamples, ...challengerSamples]
+      .flatMap((sample) => sample?.reproducibility?.warnings || []).filter(Boolean))];
+    const withinRunClasses = new Set(repeatConclusions.map((item) => conclusionClass(item.status)).filter((value) => value !== "inconclusive"));
+    const comparablePriorRuns = [...jobs.values()].filter((other) => other.jobId !== job.jobId
+      && other.status === COMPLETED
+      && other.championId === job.championId
+      && other.challengerId === job.challengerId
+      && other.snapshotFingerprint
+      && other.snapshotFingerprint === job.snapshotFingerprint
+      && other.result?.report?.reproducibility?.policyVersion === job.evaluationProfile?.policyVersion);
+    const currentClass = conclusionClass(result.status);
+    const priorClasses = new Set(comparablePriorRuns.map((other) => conclusionClass(other.result?.report?.status)).filter((value) => value !== "inconclusive"));
+    const contradictoryPriorRun = currentClass !== "inconclusive" && priorClasses.size > 0 && !priorClasses.has(currentClass);
+    const unstable = withinRunClasses.size > 1 || contradictoryPriorRun;
+    report.reproducibility = {
+      policyVersion: job.evaluationProfile?.policyVersion || "legacy",
+      mode: job.evaluationProfile?.mode || "legacy",
+      repetitions,
+      sourceCaseCount: job.requestedCaseIds.length,
+      completedDraws: championSamples.length,
+      translationTemperature: job.evaluationProfile?.translationTemperature,
+      qaTemperature: job.evaluationProfile?.qaTemperature,
+      seedRequested: job.evaluationProfile?.seedRequested === true,
+      seedSupported: seedWarnings.length === 0,
+      warnings: seedWarnings,
+      snapshotFingerprint: String(job.snapshotFingerprint || ""),
+      assetSnapshotFingerprint: String(job.benchmarkSnapshot?.fingerprint || ""),
+      model: String(job.benchmarkSnapshot?.provider?.model || ""),
+      promptVersion: String(job.benchmarkSnapshot?.promptVersion || ""),
+      repeatConclusions,
+      comparablePriorRuns: comparablePriorRuns.length,
+      reusedFromJobId: String(job.reusedFromJobId || ""),
+      stable: !unstable
+    };
+    const reproducibilityBasis = repetitions > 1
+      ? `本次按 ${repetitions} 轮配对采样比较均值，并检查各轮结论是否一致`
+      : "本次使用低温度与固定 seed 的确定性回归模式";
+    const reuseBasis = job.reusedFromJobId
+      ? `；输入未变化，本次复用任务 ${job.reusedFromJobId.slice(0, 8)} 已保存的真实输出，只按当前门禁重新判定`
+      : "";
+    report.evaluationBasis = `${report.evaluationBasis || ""}${report.evaluationBasis ? "；" : ""}${reproducibilityBasis}；术语、记忆、QA、风格、画像、模型和提示词版本已冻结为快照 ${String(job.snapshotFingerprint || "").slice(0, 12)}${reuseBasis}。`;
+    if (unstable && !failures.length) {
+      result.promotable = false;
+      result.status = "unstable";
+      report.promotable = false;
+      report.status = "unstable";
+      report.conclusion = `结果不稳定，暂不形成晋升结论：${withinRunClasses.size > 1 ? "同一次评测的多轮配对采样得出了相反结论" : "相同冻结输入的近期评测结论互相矛盾"}。系统已禁止把这次随机波动当作 Champion / Challenger 的真实优劣。`;
+    }
     if (failures.length) {
       report.promotable = false;
       report.status = "insufficient";
@@ -234,9 +404,9 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
       championMetrics: result.championMetrics,
       challengerMetrics: result.challengerMetrics,
       metricDeltas: result.deltas,
-      decision: result.status === "promote" ? "promote" : result.status === "reject" ? "reject" : "needs_review",
+      decision: report.promotable === true ? "promote" : report.status === "reject" ? "reject" : "needs_review",
       report,
-      evaluator: "kami-learning-engine-v1"
+      evaluator: "kami-learning-engine-v2"
     });
     await deps.updateSkillMetrics(refreshedCandidate.id, result.challengerMetrics);
 
@@ -252,18 +422,33 @@ export function createEvaluationJobRunner({ benchmark, jobsDirectory, deps, conc
     async initialize() {
       await restoreFromDisk();
     },
-    async create({ scope, champion, challenger, trajectories, requireCost = false }) {
+    async create({ scope, champion, challenger, trajectories, requireCost = false, forceRegenerate = false }) {
+      const evaluationProfile = evaluationProfileForContentType(scope?.contentType);
+      const [resolvedChampion, resolvedChallenger] = await Promise.all([
+        deps.getSkill(String(champion.id || ""), scope),
+        deps.getSkill(String(challenger.id || ""), scope)
+      ]);
+      const frozenChampion = cloneJson(resolvedChampion || champion);
+      const frozenChallenger = cloneJson(resolvedChallenger || challenger);
+      const caseTrajectories = Object.fromEntries(trajectories.map((item) => [String(item.id || ""), persistableTrajectory(item)]));
       const job = {
         jobId: randomUUID(),
         kind,
         scope,
         championId: String(champion.id || ""),
         challengerId: String(challenger.id || ""),
+        championVariant: frozenChampion,
+        challengerVariant: frozenChallenger,
         requireCost: requireCost === true,
         requestedCaseIds: trajectories.map((item) => String(item.id || "")).filter(Boolean),
-        caseTrajectories: Object.fromEntries(trajectories.map((item) => [String(item.id || ""), persistableTrajectory(item)])),
+        caseTrajectories,
         caseSamples: {},
         caseFailures: {},
+        evaluationProfile,
+        benchmarkSnapshot: null,
+        snapshotFingerprint: "",
+        reusedFromJobId: "",
+        forceRegenerate: forceRegenerate === true,
         status: QUEUED,
         result: null,
         error: "",
