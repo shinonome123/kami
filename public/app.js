@@ -2299,7 +2299,7 @@ function resetImport() {
   state.importBatchLearning = [];
   $("#termFile").value = "";
   $("#filePrompt").textContent = "拖入或点击选择 .xlsx / .csv";
-  $("#fileMeta").textContent = "拖入后自动识别；不要求表头，支持日、韩、繁中、法、泰列";
+  $("#fileMeta").textContent = "拖入后自动识别；不要求表头，支持日、韩、繁中、泰列";
   $("#dropZone").classList.remove("has-file");
   $("#mappingNote").textContent = "拖入表格后会自动识别结构并生成审核队列。";
   $("#importSummary").innerHTML = "<span>尚未清洗</span>";
@@ -3720,7 +3720,7 @@ async function initialize() {
     $("#providerLabel").textContent = `${state.bootstrap.provider.model} · ${new URL(state.bootstrap.provider.baseUrl).hostname}`;
     if (state.bootstrap.backend?.adminUrl) {
       $("#openAdmin").href = state.bootstrap.backend.adminUrl;
-      $("#openAdmin").title = `${state.bootstrap.backend.label} · 五语术语后台`;
+      $("#openAdmin").title = `${state.bootstrap.backend.label} · 四语术语后台`;
     } else $("#openAdmin").hidden = true;
     populateSelects();
     renderLocaleStrip($("#workbenchLocales"), state.workbenchLocale, updateWorkbenchLocale);

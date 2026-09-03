@@ -1009,12 +1009,12 @@ async function ensureServiceAccount() {
 }
 
 await waitForDirectus();
-await ensureFolder("localization_assets", "五语术语资产", "translate", 1);
+await ensureFolder("localization_assets", "四语术语资产", "translate", 1);
 await ensureFolder("localization_pipeline", "语料与规则", "account_tree", 2);
 await ensureFolder("localization_learning", "翻译学习与评测", "psychology", 3);
 for (const definition of definitions) await ensureCollection(definition);
 await reconcileTranslationSkillKeys();
-await api("/settings", { method: "PATCH", body: { project_name: "Kami 本地化语言工作台", project_descriptor: "中译日、韩、繁中（台湾）、法、泰的强隔离语言资产后台", project_color: "#123e31" } });
+await api("/settings", { method: "PATCH", body: { project_name: "Kami 本地化语言工作台", project_descriptor: "中译日、韩、繁中（台湾）、泰的强隔离语言资产后台", project_color: "#123e31" } });
 await ensureServiceAccount();
 await migrateSeedAssets();
 console.log(`Directus provisioned at ${baseUrl}`);
