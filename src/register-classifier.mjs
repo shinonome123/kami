@@ -42,11 +42,6 @@ const LEXICONS = Object.freeze({
     casual: ["超扯", "很盤", "有夠", "欸", "啦", "超讚", "笑死"],
     generic: ["各式各樣", "非常好", "很方便", "多元的", "豐富的"]
   },
-  "fr-FR": {
-    promotional: ["dès maintenant", "à ne pas manquer", "incontournable", "exceptionnel", "offre limitée", "prix imbattable", "absolument", "le meilleur"],
-    casual: ["mdr", "ptdr", "trop cool", "grave", "hyper"],
-    generic: ["très bien", "divers", "pratique", "agréable", "de nombreux"]
-  },
   "th-TH": {
     promotional: ["ทันที", "ห้ามพลาด", "ดีที่สุด", "สุดคุ้ม", "ลดราคาพิเศษ", "จำกัดเวลา", "ต้องมี"],
     casual: ["555", "โคตร", "อ่ะ", "แหละ", "สุดๆ"],

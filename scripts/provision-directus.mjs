@@ -11,7 +11,6 @@ const localeCollections = {
   "ja-JP": { key: "terms_ja_jp", label: "日语术语库", icon: "translate" },
   "ko-KR": { key: "terms_ko_kr", label: "韩语术语库", icon: "translate" },
   "zh-Hant-TW": { key: "terms_zh_hant_tw", label: "繁体中文（台湾）术语库", icon: "translate" },
-  "fr-FR": { key: "terms_fr_fr", label: "法语术语库", icon: "translate" },
   "th-TH": { key: "terms_th_th", label: "泰语术语库", icon: "translate" }
 };
 
@@ -19,7 +18,6 @@ const memoryCollections = {
   "ja-JP": { key: "translation_memory_ja_jp", label: "日语翻译记忆" },
   "ko-KR": { key: "translation_memory_ko_kr", label: "韩语翻译记忆" },
   "zh-Hant-TW": { key: "translation_memory_zh_hant_tw", label: "繁体中文（台湾）翻译记忆" },
-  "fr-FR": { key: "translation_memory_fr_fr", label: "法语翻译记忆" },
   "th-TH": { key: "translation_memory_th_th", label: "泰语翻译记忆" }
 };
 
@@ -28,9 +26,6 @@ const choices = (values) => values.map(([text, value]) => ({ text, value }));
 const typeMigrations = new Set([
   "term_candidates.source",
   "term_candidates.target",
-  // 清理由于 Core 表数上限曾短暂采用的法语共表方案。
-  "terms_fr_fr.source",
-  "terms_fr_fr.target"
 ]);
 
 function uuidField() {
@@ -871,19 +866,6 @@ async function ensureCollection(definition) {
   console.log(`checked ${definition.collection}`);
 }
 
-async function cleanupAbandonedFrenchSharedFields() {
-  const fields = await api("/fields/terms_fr_fr");
-  if (!fields.some((field) => field.field === "record_kind")) return;
-  const memoryRows = await api("/items/terms_fr_fr?limit=1&filter[record_kind][_eq]=memory&fields=id");
-  if (memoryRows.length) throw new Error("terms_fr_fr 里仍有共表时期的法语记忆，停止删除旧字段；请先迁移这些记录");
-  const obsoleteFields = ["record_kind", "domain", "content_type", "channel", "style_profile_id", "quality_status", "qa_score", "source_file", "batch_id", "source_row", "embedding"];
-  const existingFields = new Set(fields.map((field) => field.field));
-  for (const field of obsoleteFields) {
-    if (existingFields.has(field)) await api(`/fields/terms_fr_fr/${field}`, { method: "DELETE" });
-  }
-  console.log("cleaned abandoned French shared-table fields");
-}
-
 async function migrateSeedAssets() {
   for (const [locale, { key }] of Object.entries(localeCollections)) {
     const sourcePath = resolve(`data/assets/${locale}.json`);
@@ -1031,7 +1013,6 @@ await ensureFolder("localization_assets", "五语术语资产", "translate", 1);
 await ensureFolder("localization_pipeline", "语料与规则", "account_tree", 2);
 await ensureFolder("localization_learning", "翻译学习与评测", "psychology", 3);
 for (const definition of definitions) await ensureCollection(definition);
-await cleanupAbandonedFrenchSharedFields();
 await reconcileTranslationSkillKeys();
 await api("/settings", { method: "PATCH", body: { project_name: "Kami 本地化语言工作台", project_descriptor: "中译日、韩、繁中（台湾）、法、泰的强隔离语言资产后台", project_color: "#123e31" } });
 await ensureServiceAccount();

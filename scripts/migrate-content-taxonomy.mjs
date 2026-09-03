@@ -12,7 +12,6 @@ const localeCollections = {
   "ja-JP": { terms: "terms_ja_jp", memories: "translation_memory_ja_jp" },
   "ko-KR": { terms: "terms_ko_kr", memories: "translation_memory_ko_kr" },
   "zh-Hant-TW": { terms: "terms_zh_hant_tw", memories: "translation_memory_zh_hant_tw" },
-  "fr-FR": { terms: "terms_fr_fr", memories: "translation_memory_fr_fr" },
   "th-TH": { terms: "terms_th_th", memories: "translation_memory_th_th" }
 };
 

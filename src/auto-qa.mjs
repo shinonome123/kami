@@ -280,9 +280,6 @@ const LATIN_ALLOWLIST = new Set([
   "ai", "ar", "vr", "ddl", "api", "json", "csv", "pdf", "docx", "ios", "os", "tv"
 ]);
 
-// 拉丁字母本身就是这些目标语言的正常书写系统，不能把普通译文词汇当成新增专名。
-const LATIN_SCRIPT_LOCALES = new Set(["fr-FR"]);
-
 const QUOTE_PAIRS = [
   ["「", "」", "日式引号"],
   ["『", "』", "双日式引号"],
@@ -340,16 +337,14 @@ export function runBasicQa({ source, translation, matches = [], locale = "", tit
     }
   }
 
-  // 非拉丁字母目标语言里，译文突然出现的新拉丁词才有专名核对价值。
-  if (!LATIN_SCRIPT_LOCALES.has(locale)) {
-    for (const word of new Set((tgt.match(LATIN_WORD) || []))) {
-      if (LATIN_ALLOWLIST.has(word.toLowerCase())) continue;
-      if (!properNoun(word) && word.length <= 4) continue;
-      const normalized = normalizeSource(word);
-      if (srcNorm.includes(normalized)) continue;
-      if (termTargets.some((term) => term.includes(normalized))) continue;
-      issues.push({ severity: "warning", type: "basic_added_latin", category: "basic", message: `译文出现了原文没有的拉丁词「${word}」，请确认为专名保留还是多余增译` });
-    }
+  // 目标语言都不以拉丁字母书写，因此译文里凭空出现的拉丁词才有专名核对价值。
+  for (const word of new Set((tgt.match(LATIN_WORD) || []))) {
+    if (LATIN_ALLOWLIST.has(word.toLowerCase())) continue;
+    if (!properNoun(word) && word.length <= 4) continue;
+    const normalized = normalizeSource(word);
+    if (srcNorm.includes(normalized)) continue;
+    if (termTargets.some((term) => term.includes(normalized))) continue;
+    issues.push({ severity: "warning", type: "basic_added_latin", category: "basic", message: `译文出现了原文没有的拉丁词「${word}」，请确认为专名保留还是多余增译` });
   }
 
   // 连续重复字符（拟声拟态词可能误报，故为警告）

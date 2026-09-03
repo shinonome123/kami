@@ -66,7 +66,6 @@ const TITLE_BRACKET_DEFAULTS = Object.freeze({
   "ja-JP": "『』",
   "ko-KR": "《》",
   "zh-Hant-TW": "《》",
-  "fr-FR": "«»",
   "th-TH": ""
 });
 

@@ -35,18 +35,6 @@ export const LOCALES = Object.freeze({
       { source: "先走一步了", literal: "先走一步了", idiomatic: "先告辭啦！", note: "客套話用臺灣固定說法" }
     ]
   },
-  "fr-FR": {
-    flagAsset: "/assets/flag-fr.svg",
-    label: "Français",
-    shortLabel: "法",
-    language: "French",
-    defaultInstruction: "Rédiger un français naturel et idiomatique ; respecter les accords, les accents et le registre (vouvoiement par défaut sauf ton communautaire assumé).",
-    localizationExamples: [
-      { source: "肝就完了！", literal: "Le foie est fini !", idiomatic: "Il suffit de farmer à fond !", note: "游戏口语：用法语玩家的说法重写，不保留中文脏器比喻" },
-      { source: "这波稳了", literal: "Cette vague est stable.", idiomatic: "C'est dans la poche.", note: "对白/社媒：用法语固定表达" },
-      { source: "先走一步了", literal: "Je pars un pas en avant.", idiomatic: "Je file, à plus !", note: "客套话用法语惯用告别语" }
-    ]
-  },
   "th-TH": {
     flagAsset: "/assets/flag-th.svg",
     label: "ไทย",

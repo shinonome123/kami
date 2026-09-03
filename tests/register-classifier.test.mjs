@@ -69,11 +69,10 @@ test("过短文本不做判定", () => {
   assert.deepEqual(result.issues, []);
 });
 
-test("五种目标语言都有各自的语域词表", () => {
+test("四种目标语言都有各自的语域词表", () => {
   const cases = [
     ["ko-KR", "지금 바로 확인하세요! 역대급 특가! 놓치지 마세요! 무조건 이득입니다!"],
     ["zh-Hant-TW", "立即搶購！史上最強超值優惠！千萬別錯過！絕對必買！"],
-    ["fr-FR", "Dès maintenant ! Offre limitée exceptionnelle ! À ne pas manquer ! Le meilleur prix !"],
     ["th-TH", "ทันที! ลดราคาพิเศษสุดคุ้ม! ห้ามพลาด! ดีที่สุด!"]
   ];
   for (const [locale, text] of cases) {

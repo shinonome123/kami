@@ -43,16 +43,6 @@ test("基本检查：译文新增拉丁专名与常见缩写白名单", () => {
   assert.ok(!allowed.some((issue) => issue.type === "basic_added_latin"));
 });
 
-test("基本检查：法语正常词汇不被当成新增拉丁专名", () => {
-  const issues = runBasicQa({
-    source: "全新高级通行证现已登场！",
-    translation: "Le tout nouveau Pass Premium est disponible dès maintenant !",
-    locale: "fr-FR",
-    matches: [{ term: { source: "高级通行证", target: "Pass Premium", aliases: [] } }]
-  });
-  assert.ok(!issues.some((issue) => issue.type === "basic_added_latin"));
-});
-
 test("基本检查：连续重复字符、配对标点与语气弱化", () => {
   const repeated = runBasicQa({ source: "新的挑战", translation: "新しぃぃぃ挑戦" });
   assert.ok(repeated.some((issue) => issue.type === "basic_repeated_char"));

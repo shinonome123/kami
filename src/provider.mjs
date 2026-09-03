@@ -1192,7 +1192,6 @@ const LOCALE_NAMES = Object.freeze({
   "ja-JP": "日语",
   "ko-KR": "韩语",
   "zh-Hant-TW": "台湾繁体中文",
-  "fr-FR": "法语",
   "th-TH": "泰语"
 });
 
