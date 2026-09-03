@@ -137,7 +137,7 @@ collections:
       status: active
       translations:
         - language: zh-CN
-          translation: 五语术语资产
+          translation: 四语术语资产
       unarchive_value: null
       versioning: false
   - collection: localization_learning
