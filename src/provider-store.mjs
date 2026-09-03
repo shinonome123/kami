@@ -36,6 +36,9 @@ export function saveProviderConfig(config, directory = DEFAULT_PROVIDER_DIRECTOR
   const target = paths(directory);
   const baseUrl = String(config.baseUrl || "").replace(/\/$/, "");
   const model = String(config.model || "");
+  const fastModel = String(config.fastModel || "");
+  const qualityModel = String(config.qualityModel || "");
+  const mtModel = String(config.mtModel || "");
   const embeddingModel = String(config.embeddingModel || "");
   const embeddingBaseUrl = String(config.embeddingBaseUrl || "").replace(/\/$/, "");
   const apiKey = String(config.apiKey || "");
@@ -47,7 +50,7 @@ export function saveProviderConfig(config, directory = DEFAULT_PROVIDER_DIRECTOR
   if (embeddingApiKey) atomicWrite(target.embeddingSecret, runDpapi("protect", embeddingApiKey));
   else if (existsSync(target.embeddingSecret)) rmSync(target.embeddingSecret);
   atomicWrite(target.config, JSON.stringify({
-    baseUrl, model, embeddingModel, embeddingBaseUrl,
+    baseUrl, model, fastModel, qualityModel, mtModel, embeddingModel, embeddingBaseUrl,
     inputPricePerMTok, outputPricePerMTok,
     apiKeyConfigured: Boolean(apiKey), embeddingApiKeyConfigured: Boolean(embeddingApiKey),
     updatedAt: new Date().toISOString()
@@ -74,6 +77,9 @@ export function loadProviderConfig(directory = DEFAULT_PROVIDER_DIRECTORY) {
       config: {
         baseUrl: metadata.baseUrl || "",
         model: metadata.model || "",
+        fastModel: metadata.fastModel || "",
+        qualityModel: metadata.qualityModel || "",
+        mtModel: metadata.mtModel || "",
         embeddingModel: metadata.embeddingModel || "",
         embeddingBaseUrl: metadata.embeddingBaseUrl || "",
         inputPricePerMTok: String(metadata.inputPricePerMTok ?? ""),

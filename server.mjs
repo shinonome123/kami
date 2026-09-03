@@ -9,11 +9,11 @@ import { classifyContent, descriptorFromContext, inferContentTags, resolveDomain
 import { buildContextPack } from "./src/context-pack.mjs";
 import { refineCorpus } from "./src/corpus.mjs";
 import { matchTerms } from "./src/matcher.mjs";
-import { adjudicateRuleConflictsWithModel, adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, embed, evaluateAutoQaWithModel, evaluateGrammarWithModel, evaluateTranslationWithModel, getProviderConfig, glossTranslationWithModel, isEmbeddingConfigured, probeModelAvailability, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, updateProviderConfig } from "./src/provider.mjs";
+import { adjudicateRuleConflictsWithModel, adjudicatePotentialTermsWithModel, alignSegmentsWithModel, alignTermSuggestionsWithModel, analyzeSpreadsheetStructureWithModel, analyzeTermTableStructureWithModel, classifyWithModel, costPricingConfigured, embed, evaluateAutoQaWithModel, evaluateGrammarWithModel, evaluateTranslationWithModel, getProviderConfig, glossTranslationWithModel, isEmbeddingConfigured, probeModelAvailability, reviewTermCandidatesWithModel, reviseTranslationWithQa, translateWithReflection, translateWithRoute, updateProviderConfig } from "./src/provider.mjs";
 import { DISTILL_THRESHOLD, distillBatchStyleLearning, distillStyleProfileIfReady, runEvolutionReview } from "./src/evolution.mjs";
 import { calculateQaScore, presentAiQaIssues, runQa } from "./src/qa.mjs";
 import { alignSegmentPairs, buildAlignmentIssues, calculateAutoQaScores, cosineSimilarity, createStructuralAlignmentScorer, dedupeIssues, normalizeQaInputText, runBasicQa, splitQaSegments, summarizeIssues } from "./src/auto-qa.mjs";
-import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getImportPreview, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask, updateStyleProfileRules } from "./src/store.mjs";
+import { DATA_ROOT, completeImport, deleteAsset, getAssets, getAssetStats, getImportPreview, getMemories, getQaCases, getQaRuns, getStoreMetadata, getStyleEvidence, getStyleLearningRuns, getStyleProfile, getUserProfile, initializeStore, rebuildEmbeddings, saveAsset, saveCorpus, saveImportPreview, saveMemory, saveQaCase, saveQaRun, saveStyleEvidence, saveStyleLearningRun, saveStyleProfileEvaluation, findStyleProfile, demoteMemories, approveQaCase, saveBatchRun, getBatchRun, listBatchRuns, listStyleProfiles, activateStyleProfile, rejectStyleProfile, listPendingQaCases, disposeQaCase, saveLearningTrajectory, listLearningTrajectories, getLearningTrajectory, updateLearningTrajectory, saveTranslationSkill, listTranslationSkills, getTranslationSkill, updateTranslationSkill, activateTranslationSkill, rollbackTranslationSkill, saveSkillEvaluation, listSkillEvaluations, saveQaTask, getQaTask, listQaTasks, deleteQaTask, saveShare, getShare, listShares, updateShare, deleteShare, saveBackgroundTask, getBackgroundTask, listBackgroundTasks, deleteBackgroundTask, updateStyleProfileRules, saveQualityAsset, listQualityAssets, getQualityAsset, updateQualityAsset, saveQualityRun, listQualityRuns, saveTrainingRun, listTrainingRuns, getTrainingRun } from "./src/store.mjs";
 import { applyModelDecisions, classifyImportCandidate, expandNestedTermCandidates, extractTermPairs } from "./src/table-term-extractor.mjs";
 import { buildSuggestionCandidates, resolveTermSuggestions } from "./src/term-suggestions.mjs";
 import { narrowByDomain, rankQaCases, rankTranslationMemories, splitReferenceAuthority } from "./src/translation-memory.mjs";
@@ -34,6 +34,14 @@ import { NO_STYLE_PROFILE_ID, STYLE_MIN_EVALUATION_SAMPLES, STYLE_PROMOTION_GUAR
 import { proposeChallengerSkill, selectProposalTrajectories } from "./src/skill-proposal.mjs";
 import { finalizeShareGlossGeneration } from "./src/share-gloss.mjs";
 import { buildAdoptedStyleEvidence, buildKnownIssueFeedbackRequest, presentKnownIssue, selectKnownIssues } from "./src/share-feedback.mjs";
+import { checkFactSchema, detectDeliveryContext, extractFactSchema } from "./src/fact-schema.mjs";
+import { assessTranslationRisk, decideQualityRoute, qualityThresholdForRisk, selectTranslationRoute, TRANSLATION_ROUTES } from "./src/translation-routing.mjs";
+import { deriveTermCandidatesFromHumanFinal } from "./src/asset-governance.mjs";
+import { buildReviewReceipt, normalizeReviewDecision } from "./src/review-receipt.mjs";
+import { createRegressionCandidateFromQaCase, decideRegressionCandidate, normalizeGoldSet, normalizeRegressionSuite } from "./src/gold-regression.mjs";
+import { decideReleaseGate, evaluateGoldRun, evaluateRegressionRun, resolveGateAssets } from "./src/quality-gate.mjs";
+import { buildTrainingExport, datasetToJsonl } from "./src/training-export.mjs";
+import { advanceTrainingRun, buildTrainingManifest, canTransition, createTrainingRun, freezeTrainingDataset } from "./src/training-pipeline.mjs";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("./public", import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
@@ -113,12 +121,141 @@ async function createBackgroundTask({ type, title, locale = "", progress = {} })
   });
 }
 
+/**
+ * 投放上下文：显式传入的项目、渠道、平台、地区优先；没传时按受控词表从原文与
+ * 任务补充信息里识别。术语与翻译记忆的适用范围据此收窄，识别不到就等于不限定。
+ */
+function deliveryContext(body = {}, text = "") {
+  const metadata = Array.isArray(body?.neighborContext?.metadata) ? body.neighborContext.metadata : [];
+  const detected = detectDeliveryContext({ source: text, metadata });
+  return {
+    project: String(body?.project || "default"),
+    channel: body?.channel ? [String(body.channel)] : [],
+    platform: body?.platform ? [String(body.platform)] : detected.platforms,
+    region: body?.region ? [String(body.region)] : detected.regions
+  };
+}
+
 /** 更新后台任务进度；任务已被删除时返回 false，执行方据此停止后续工作。 */
 async function updateBackgroundTaskProgress(id, update) {
   const task = await getBackgroundTask(id);
   if (!task) return false;
   await saveBackgroundTask({ ...task, ...update });
   return true;
+}
+
+/**
+ * 固定质量资产按版本累加：同一 seriesId 只增不改，因此任何一次门禁结论都能
+ * 回到它当时实际跑的那个版本。
+ */
+async function nextQualityAssetVersion(scope, kind, seriesId) {
+  const existing = await listQualityAssets({ ...scope, kind, seriesId, limit: 500 });
+  return existing.reduce((maximum, item) => Math.max(maximum, Number(item.version) || 0), 0) + 1;
+}
+
+/** 启用某个版本时，同族其它版本一律退役，避免两个"当前基准"同时生效。 */
+async function activateQualityAsset(asset) {
+  const siblings = await listQualityAssets({
+    locale: asset.locale, contentType: asset.contentType, domain: asset.domain, project: asset.project,
+    kind: asset.kind, seriesId: asset.seriesId, limit: 500
+  });
+  for (const sibling of siblings) {
+    if (sibling.id === asset.id || !sibling.enabled) continue;
+    await updateQualityAsset(sibling.id, {
+      status: "retired",
+      enabled: false,
+      payload: { ...sibling.payload, status: "retired", enabled: false }
+    });
+  }
+  return updateQualityAsset(asset.id, {
+    status: "active",
+    enabled: true,
+    payload: { ...asset.payload, status: "active", enabled: true }
+  });
+}
+
+/** 解析某作用域当前生效的 Gold 样本与回归案例，附带版本指纹。 */
+async function loadGateAssets(scope) {
+  const [goldRecords, suiteRecords] = await Promise.all([
+    listQualityAssets({ ...scope, kind: "gold_set", limit: 500 }),
+    listQualityAssets({ ...scope, kind: "regression_suite", limit: 500 })
+  ]);
+  return resolveGateAssets({
+    goldSets: goldRecords.map((item) => item.payload).filter(Boolean),
+    regressionSuites: suiteRecords.map((item) => item.payload).filter(Boolean),
+    scope
+  });
+}
+
+/**
+ * 用受测技能把固定资产整体跑一遍。走的是评测同一条基准链路，因此 Gold 样本
+ * 自身的终稿不会通过记忆或问题库回流成为它自己的答案。
+ */
+async function runQualityGate({ scope, skill, triggeredBy = "", onProgress = null }) {
+  const assets = await loadGateAssets(scope);
+  const queue = [
+    ...assets.samples.map((item) => ({ kind: "gold", item })),
+    ...assets.cases.map((item) => ({ kind: "regression", item }))
+  ];
+  const goldResults = [];
+  const regressionResults = [];
+  const failures = [];
+  if (queue.length) {
+    const snapshot = await createBenchmarkSnapshot(
+      scope,
+      queue.map(({ item }) => ({ id: item.id, source: item.source })),
+      { promptVersion: TRANSLATION_PROMPT_VERSION }
+    );
+    for (const [index, entry] of queue.entries()) {
+      if (onProgress && (await onProgress(index, queue.length, entry)) === false) break;
+      try {
+        const benchmark = await benchmarkTranslationSkill(skill, { id: entry.item.id, source: entry.item.source }, { snapshot });
+        const record = { id: entry.item.id, translation: benchmark.translation, qaScore: benchmark.qaScore, hardErrorCount: benchmark.hardErrorCount, latencyMs: benchmark.latencyMs, costUsd: benchmark.costUsd };
+        if (entry.kind === "gold") goldResults.push(record);
+        else regressionResults.push(record);
+      } catch (error) {
+        // 执行失败的样本保持"未执行"，由门禁判定为不完整而不是默认通过。
+        failures.push({ id: entry.item.id, kind: entry.kind, message: error.message });
+      }
+    }
+  }
+  const gold = evaluateGoldRun({ samples: assets.samples, results: goldResults });
+  const regression = evaluateRegressionRun({ cases: assets.cases, results: regressionResults });
+  const gate = decideReleaseGate({ regression, gold });
+  return {
+    gate,
+    gold,
+    regression,
+    executionFailures: failures,
+    assetVersions: { goldSets: assets.goldSetVersions, regressionSuites: assets.regressionSuiteVersions },
+    triggeredBy
+  };
+}
+
+/** 把一次门禁运行落成可追溯的记录。 */
+async function persistQualityRun({ scope, skill, result, triggeredBy }) {
+  return saveQualityRun({
+    ...scope,
+    skillId: skill?.id || "",
+    skillVersion: String(skill?.version ?? ""),
+    decision: result.gate.decision,
+    regressionTotal: result.regression.total,
+    regressionPassed: result.regression.passed,
+    regressionPassRate: result.regression.passRate,
+    goldTotal: result.gold.total,
+    goldTermAccuracy: result.gold.termAccuracy,
+    goldFactAccuracy: result.gold.factAccuracy,
+    assetVersions: result.assetVersions,
+    metrics: result.gold.metrics,
+    report: {
+      gold: { ...result.gold, samples: result.gold.samples.slice(0, 100) },
+      regression: { ...result.regression, cases: result.regression.cases.slice(0, 100) },
+      warnings: result.gate.warnings,
+      executionFailures: result.executionFailures
+    },
+    blocking: result.gate.blocking,
+    triggeredBy
+  });
 }
 
 /**
@@ -360,7 +497,11 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
   const { approved: approvedReferences, machineDrafts } = splitReferenceAuthority(references);
   const qaCases = contextPack.qaGuidance || [];
   let translation = initialTranslation;
-  let hardIssues = runQa({ source: contextPack.source, translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
+  const deterministicIssues = (value) => [
+    ...runQa({ source: contextPack.source, translation: value, matches, locale, titleOverrides: getSettings().orthography.titleBrackets, contentType: contextPack.classification?.contentType || contentType || "general", registerPolicy: contextPack.styleProfile?.reviewRubric?.registerPolicy || null }),
+    ...checkFactSchema({ schema: contextPack.factSchema || extractFactSchema({ source: contextPack.source }), translation: value, locale })
+  ];
+  let hardIssues = deterministicIssues(translation);
   let aiIssues = [];
   let score = calculateQaScore({ hardIssues, aiIssues });
   let initialScore = score;
@@ -397,7 +538,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
         }));
       }
       iterations += 1;
-      hardIssues = runQa({ source: contextPack.source, translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
+      hardIssues = deterministicIssues(translation);
       const notApplicable = new Set(termDecisions.filter((item) => item.decision === "not_applicable").map((item) => `${item.officialSource}\u0000${item.officialTarget}`));
       hardIssues = hardIssues.filter((issue) => issue.type !== "potential_term" || !notApplicable.has(`${issue.sourceTerm}\u0000${issue.targetTerm}`));
       for (const issue of hardIssues) {
@@ -417,7 +558,7 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
       const actionable = [...hardIssues.map((issue) => ({ severity: "critical", category: issue.type, message: issue.message })), ...aiIssues];
       translation = await reviseTranslationWithQa({ contextPack, translation, issues: actionable, references, qaCases });
       iterations += 1;
-      hardIssues = runQa({ source: contextPack.source, translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
+      hardIssues = deterministicIssues(translation);
       aiIssues = await evaluateTranslationWithModel({ contextPack, translation, references: approvedReferences, machineDrafts, qaCases });
       score = calculateQaScore({ hardIssues, aiIssues });
     }
@@ -443,21 +584,18 @@ async function runAiQaLoop({ contextPack, initialTranslation, matches, locale, c
       status: passed ? "machine_verified" : "review"
     });
   }
-  if (passed) {
-    // 沉淀记忆失败不该让已经译好、已经通过质检的结果整体失败——新接入的目标语言
-    // 在记忆表建好之前就是这种状态。失败原因带回给调用方，不静默吞掉。
-    try {
-      await saveMemory(locale, {
-        source: contextPack.source, target: translation, domain, contentType,
-        contentTags: contextPack.contentTags || [],
-        styleProfileId: contextPack.styleProfile?.id, qualityStatus: "machine_verified", qaScore: score,
-        provenance: iterations ? "aiqa-corrected" : "aiqa-passed", batchId
-      });
-    } catch (error) {
-      fallbackReason = [fallbackReason, `译文已通过质检，但未能写入翻译记忆：${error.message}`].filter(Boolean).join("；");
-    }
-  }
-  return { translation, issues, score, status, iterations, used, fallbackReason, references, qaCases, termDecisions, humanDecisions };
+  // 机器结果只留在 QA 运行、学习轨迹和待审批 QA 案例中。即使达到分数门槛，
+  // 也不能直接进入正式 TM；正式翻译记忆只由 /api/feedback/accept 的人工采纳产生。
+  return {
+    translation, issues, score, status, iterations, used, fallbackReason, references, qaCases, termDecisions, humanDecisions,
+    memoryCandidate: passed ? {
+      source: contextPack.source,
+      target: translation,
+      qualityStatus: "candidate",
+      requiresHumanApproval: true,
+      provenance: iterations ? "aiqa-corrected" : "aiqa-passed"
+    } : null
+  };
 }
 
 function importStatistics(candidates) {
@@ -859,7 +997,7 @@ async function apiHandler(req, res, url) {
     const assets = await getAssets(locale);
     return json(res, 200, {
       locale,
-      matches: matchTerms(body.text, assets, { contentType: body.contentType, domain: body.domain })
+      matches: matchTerms(body.text, assets, { contentType: body.contentType, domain: body.domain, ...deliveryContext(body, body.text) })
     });
   }
   if (req.method === "POST" && url.pathname === "/api/corpus/refine") {
@@ -1033,6 +1171,50 @@ async function apiHandler(req, res, url) {
       sourceFile: body.sourceFile || "", sourceRow: body.sourceRow || null
     });
     const qaCaseApproved = body.qaCaseId ? await approveQaCase(String(body.qaCaseId)) : false;
+    let termCandidateBatch = null;
+    let termCandidateWarning = "";
+    try {
+      const assets = await getAssets(locale);
+      const matches = matchTerms(source, assets, { contentType, domain, ...deliveryContext(body, source) });
+      const termCandidates = deriveTermCandidatesFromHumanFinal({
+        locale,
+        source,
+        finalTranslation: translation,
+        matches,
+        suggestions: Array.isArray(body.termSuggestions) ? body.termSuggestions : [],
+        existingTerms: assets.terms || [],
+        contentType,
+        domain,
+        project,
+        batchId: body.batchId || "",
+        taskId: body.trajectoryId || "",
+        sourceFile: body.sourceFile || "",
+        sourceRow: body.sourceRow || null
+      }).filter((candidate) => candidate.proposalAction !== "add_usage_evidence")
+        .map((candidate) => ({
+          ...candidate,
+          score: candidate.confidence,
+          decision: candidate.proposalAction === "create_term" ? "ready" : "review",
+          candidateOrigin: `human-final:${candidate.proposalAction}`,
+          candidateRole: candidate.proposalAction,
+          parentCandidateKey: candidate.originTermId || "",
+          reasons: [candidate.evidence?.reason || "人工终稿中发现术语候选", `建议动作：${candidate.proposalAction}`]
+        }));
+      if (termCandidates.length) {
+        termCandidateBatch = await saveImportPreview({
+          filename: `${String(body.sourceFile || "人工终稿").slice(0, 100)} · 术语候选`,
+          fileType: "human-final",
+          requestedLocale: locale,
+          fileMode: "term",
+          statistics: { rowsScanned: 1, candidates: termCandidates.length, ready: termCandidates.filter((item) => item.decision === "ready").length, review: termCandidates.filter((item) => item.decision === "review").length },
+          ai: { requested: false, used: false, reviewed: 0, total: termCandidates.length, source: "human-final" },
+          sheets: [],
+          candidates: termCandidates
+        });
+      }
+    } catch (error) {
+      termCandidateWarning = `正式译文已采纳，但术语候选生成失败：${error.message}`;
+    }
     let trajectory = null;
     if (linkedTrajectory) {
         const humanDecision = {
@@ -1052,7 +1234,7 @@ async function apiHandler(req, res, url) {
     if (trajectory) {
       triggerAutoProposal({ locale, contentType, domain, project });
     }
-    return json(res, 201, { memory, demoted, evidence, qaCaseApproved, trajectory });
+    return json(res, 201, { memory, demoted, evidence, qaCaseApproved, trajectory, termCandidateBatch, termCandidateWarning });
   }
   if (req.method === "GET" && url.pathname === "/api/style-profiles") {
     const locale = assertLocale(url.searchParams.get("locale"));
@@ -1386,10 +1568,46 @@ async function apiHandler(req, res, url) {
       throw error;
     }
     const scope = learningScope(skill);
+    const body = await readJsonBody(req).catch(() => ({}));
     const [currentChampion] = await listTranslationSkills({ ...scope, status: "champion", limit: 1 });
     const [latest] = await listSkillEvaluations({ challengerSkillId: id, limit: 1 });
     assertCurrentCandidate(skill, currentChampion, latest, { requireEvaluation: true });
-    return json(res, 200, { skill: await activateTranslationSkill(id) });
+    // 发版门禁：固定资产上的回归必须在这个候选上真跑过并通过。人工可以强制放行，
+    // 但放行本身会作为一条带署名和理由的记录留在质量门禁运行表里。
+    const [latestGateRun] = await listQualityRuns({ ...scope, skillId: id, limit: 1 });
+    if (!latestGateRun || latestGateRun.decision !== "pass") {
+      const reviewer = String(body.override?.reviewer || "").trim();
+      const reason = String(body.override?.reason || "").trim();
+      if (!reviewer || !reason) {
+        const error = new Error(latestGateRun
+          ? `质量门禁未通过（${latestGateRun.decision}），不能晋升：${(latestGateRun.blocking || []).map((item) => item.message).join("；") || "无阻断说明"}`
+          : "该候选尚未在固定 Gold Set 与回归集上跑过质量门禁，不能晋升");
+        error.statusCode = 409;
+        error.details = {
+          gate: latestGateRun ? { decision: latestGateRun.decision, blocking: latestGateRun.blocking, runId: latestGateRun.id } : { decision: "not_run" },
+          hint: "先执行 POST /api/quality/runs，或提供 override.reviewer 与 override.reason 由人工署名放行"
+        };
+        throw error;
+      }
+      await saveQualityRun({
+        ...scope,
+        skillId: id,
+        skillVersion: String(skill.version ?? ""),
+        decision: latestGateRun?.decision || "insufficient",
+        regressionTotal: latestGateRun?.regressionTotal || 0,
+        regressionPassed: latestGateRun?.regressionPassed || 0,
+        regressionPassRate: latestGateRun?.regressionPassRate ?? null,
+        goldTotal: latestGateRun?.goldTotal || 0,
+        goldTermAccuracy: latestGateRun?.goldTermAccuracy ?? null,
+        goldFactAccuracy: latestGateRun?.goldFactAccuracy ?? null,
+        assetVersions: latestGateRun?.assetVersions || {},
+        metrics: latestGateRun?.metrics || {},
+        report: { override: { reviewer, reason, overriddenRunId: latestGateRun?.id || "", at: new Date().toISOString() } },
+        blocking: latestGateRun?.blocking || [{ code: "gate_not_run", message: "晋升时尚未执行质量门禁" }],
+        triggeredBy: `override:${reviewer}`
+      });
+    }
+    return json(res, 200, { skill: await activateTranslationSkill(id), gate: latestGateRun || null });
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/reject")) {
     const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/reject".length));
@@ -1404,6 +1622,412 @@ async function apiHandler(req, res, url) {
   if (req.method === "POST" && url.pathname.startsWith("/api/learning/skills/") && url.pathname.endsWith("/rollback")) {
     const id = decodeURIComponent(url.pathname.slice("/api/learning/skills/".length, -"/rollback".length));
     return json(res, 200, await rollbackTranslationSkill(id));
+  }
+  if (req.method === "GET" && url.pathname === "/api/quality/assets") {
+    const scope = learningScope({
+      locale: url.searchParams.get("locale"),
+      contentType: url.searchParams.get("contentType") || "general",
+      domain: url.searchParams.get("domain") || "general",
+      project: url.searchParams.get("project") || "default"
+    });
+    const kind = url.searchParams.get("kind") || "";
+    const [goldSets, candidates, suites] = await Promise.all([
+      kind && kind !== "gold_set" ? [] : listQualityAssets({ ...scope, kind: "gold_set", limit: 200 }),
+      kind && kind !== "regression_candidate" ? [] : listQualityAssets({ ...scope, kind: "regression_candidate", limit: 200 }),
+      kind && kind !== "regression_suite" ? [] : listQualityAssets({ ...scope, kind: "regression_suite", limit: 200 })
+    ]);
+    const active = await loadGateAssets(scope);
+    return json(res, 200, {
+      scope,
+      goldSets,
+      regressionCandidates: candidates,
+      regressionSuites: suites,
+      active: {
+        goldSampleCount: active.samples.length,
+        regressionCaseCount: active.cases.length,
+        goldSetVersions: active.goldSetVersions,
+        regressionSuiteVersions: active.regressionSuiteVersions
+      }
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/quality/gold-sets") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const seriesId = String(body.seriesId || "").trim() || `gold:${scope.locale}:${scope.contentType}:${scope.domain}:${scope.project}`;
+    const version = await nextQualityAssetVersion(scope, "gold_set", seriesId);
+    // 内容不可变：这里永远是新建一个版本，绝不覆盖已存在的版本。
+    const payload = normalizeGoldSet({
+      id: `${seriesId}#v${version}`,
+      seriesId,
+      version,
+      parentVersionId: String(body.parentVersionId || ""),
+      scope,
+      name: String(body.name || "").trim() || `${scope.locale} 固定 Gold Set`,
+      description: String(body.description || ""),
+      status: body.status === "active" ? "active" : "draft",
+      enabled: body.status === "active",
+      samples: Array.isArray(body.samples) ? body.samples : [],
+      createdAt: new Date().toISOString(),
+      createdBy: String(body.createdBy || "").trim(),
+      changeNote: String(body.changeNote || "")
+    });
+    const saved = await saveQualityAsset({ kind: "gold_set", scope, payload, status: payload.status, enabled: payload.enabled });
+    return json(res, 201, { asset: payload.status === "active" ? await activateQualityAsset(saved) : saved });
+  }
+  if (req.method === "POST" && url.pathname === "/api/quality/gold-sets/from-trajectories") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const limit = Math.min(200, Math.max(1, Number(body.limit) || 40));
+    const trajectories = await listLearningTrajectories({ ...scope, limit: 500 });
+    // Gold 样本只能来自人工采纳的终稿：机器自评通过的译文没有资格当基准。
+    const accepted = trajectories.filter((item) => item.status === "completed"
+      && item.humanDecision?.accepted === true
+      && String(item.humanDecision?.finalTranslation || item.finalTranslation || "").trim()
+      && String(item.source || "").trim());
+    const seen = new Set();
+    const samples = [];
+    for (const item of accepted) {
+      const key = String(item.source).trim();
+      if (seen.has(key) || samples.length >= limit) continue;
+      seen.add(key);
+      samples.push({
+        id: `gold-${item.id}`,
+        source: key,
+        referenceTargets: [String(item.humanDecision?.finalTranslation || item.finalTranslation).trim()],
+        notes: `来自人工采纳终稿 ${item.id}`,
+        metadata: { trajectoryId: item.id, batchId: item.batchId || "", createdAt: item.createdAt || "" }
+      });
+    }
+    return json(res, 200, { scope, candidates: samples, acceptedTotal: accepted.length });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/quality/assets/") && url.pathname.endsWith("/activate")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/quality/assets/".length, -"/activate".length));
+    const asset = await getQualityAsset(id);
+    if (!asset) {
+      const error = new Error("未找到质量资产");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (asset.kind === "regression_candidate") {
+      const error = new Error("回归候选通过审批接口决定，不能直接启用");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!asset.itemCount) {
+      const error = new Error("空的固定资产不能启用");
+      error.statusCode = 400;
+      throw error;
+    }
+    return json(res, 200, { asset: await activateQualityAsset(asset) });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/quality/assets/") && url.pathname.endsWith("/retire")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/quality/assets/".length, -"/retire".length));
+    const asset = await getQualityAsset(id);
+    if (!asset) {
+      const error = new Error("未找到质量资产");
+      error.statusCode = 404;
+      throw error;
+    }
+    const retired = await updateQualityAsset(id, { status: "retired", enabled: false, payload: { ...asset.payload, status: "retired", enabled: false } });
+    return json(res, 200, { asset: retired });
+  }
+  if (req.method === "POST" && url.pathname === "/api/quality/regression-candidates") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const qaCaseId = String(body.qaCaseId || "").trim();
+    if (!qaCaseId) {
+      const error = new Error("缺少 qaCaseId");
+      error.statusCode = 400;
+      throw error;
+    }
+    const qaCases = await getQaCases(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 });
+    const qaCase = qaCases.find((item) => String(item.id) === qaCaseId);
+    if (!qaCase) {
+      const error = new Error("未找到该 QA 案例，或它尚未经过人工批准");
+      error.statusCode = 404;
+      throw error;
+    }
+    const existing = await listQualityAssets({ ...scope, kind: "regression_candidate", sourceQaCaseId: qaCaseId, limit: 10 });
+    if (existing.length) return json(res, 200, { asset: existing[0], alreadyExists: true });
+    const payload = createRegressionCandidateFromQaCase({ ...qaCase, scope }, {
+      scope,
+      createdAt: new Date().toISOString(),
+      createdBy: String(body.createdBy || "").trim()
+    });
+    const saved = await saveQualityAsset({ kind: "regression_candidate", scope, payload, status: payload.status, enabled: false });
+    return json(res, 201, { asset: saved });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/quality/regression-candidates/") && url.pathname.endsWith("/decision")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/quality/regression-candidates/".length, -"/decision".length));
+    const body = await readJsonBody(req);
+    const asset = await getQualityAsset(id);
+    if (!asset || asset.kind !== "regression_candidate") {
+      const error = new Error("未找到回归候选");
+      error.statusCode = 404;
+      throw error;
+    }
+    // 第二道人工闸门：候选进回归集之前必须被明确批准或拒绝，拒绝还要写原因。
+    const decided = decideRegressionCandidate(asset.payload, {
+      decision: String(body.decision || ""),
+      reviewer: String(body.reviewer || "").trim(),
+      decidedAt: new Date().toISOString(),
+      note: String(body.note || "")
+    });
+    const updated = await updateQualityAsset(id, { status: decided.status, approval: decided.approval, payload: decided });
+    return json(res, 200, { asset: updated });
+  }
+  if (req.method === "POST" && url.pathname === "/api/quality/regression-suites") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const candidates = await listQualityAssets({ ...scope, kind: "regression_candidate", status: "approved", limit: 500 });
+    if (!candidates.length) {
+      const error = new Error("当前作用域没有已批准的回归候选，无法生成回归集");
+      error.statusCode = 400;
+      throw error;
+    }
+    const seriesId = String(body.seriesId || "").trim() || `regression:${scope.locale}:${scope.contentType}:${scope.domain}:${scope.project}`;
+    const version = await nextQualityAssetVersion(scope, "regression_suite", seriesId);
+    const payload = normalizeRegressionSuite({
+      id: `${seriesId}#v${version}`,
+      seriesId,
+      version,
+      scope,
+      name: String(body.name || "").trim() || `${scope.locale} 失败回归集`,
+      description: String(body.description || ""),
+      status: body.status === "draft" ? "draft" : "active",
+      enabled: body.status !== "draft",
+      candidates: candidates.map((item) => item.payload),
+      createdAt: new Date().toISOString(),
+      createdBy: String(body.createdBy || "").trim(),
+      changeNote: String(body.changeNote || "")
+    });
+    const saved = await saveQualityAsset({ kind: "regression_suite", scope, payload, status: payload.status, enabled: payload.enabled });
+    return json(res, 201, { asset: payload.enabled ? await activateQualityAsset(saved) : saved });
+  }
+  if (req.method === "GET" && url.pathname === "/api/quality/runs") {
+    const scope = learningScope({
+      locale: url.searchParams.get("locale"),
+      contentType: url.searchParams.get("contentType") || "general",
+      domain: url.searchParams.get("domain") || "general",
+      project: url.searchParams.get("project") || "default"
+    });
+    const runs = await listQualityRuns({ ...scope, skillId: url.searchParams.get("skillId") || "", limit: Number(url.searchParams.get("limit")) || 20 });
+    return json(res, 200, { scope, runs });
+  }
+  if (req.method === "POST" && url.pathname === "/api/quality/runs") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const skill = body.skillId ? await getTranslationSkill(String(body.skillId)) : await ensureChampionTranslationSkill(scope);
+    if (!skill) {
+      const error = new Error("未找到受测技能");
+      error.statusCode = 404;
+      throw error;
+    }
+    const assets = await loadGateAssets(scope);
+    const total = assets.samples.length + assets.cases.length;
+    if (!total) {
+      const error = new Error("当前作用域没有启用的 Gold Set 或回归集，先建立固定评测资产");
+      error.statusCode = 400;
+      throw error;
+    }
+    const task = await createBackgroundTask({
+      type: "quality-gate",
+      title: `质量门禁 · ${scope.locale} · ${skill.name || skill.id}`,
+      locale: scope.locale,
+      progress: { total, message: `准备执行 ${total} 个固定样本` }
+    });
+    (async () => {
+      const result = await runQualityGate({
+        scope,
+        skill,
+        triggeredBy: String(body.triggeredBy || "manual"),
+        onProgress: async (index, count) => updateBackgroundTaskProgress(task.id, {
+          progress: { phase: "running", message: `正在执行第 ${index + 1} / ${count} 个固定样本`, percent: Math.round((index / Math.max(count, 1)) * 90), completed: index, total: count }
+        })
+      });
+      const run = await persistQualityRun({ scope, skill, result, triggeredBy: String(body.triggeredBy || "manual") });
+      await updateBackgroundTaskProgress(task.id, {
+        status: "completed",
+        progress: { phase: "completed", message: `门禁结论：${result.gate.decision}`, percent: 100, completed: total, total },
+        payload: { qualityRunId: run.id, decision: result.gate.decision, blocking: result.gate.blocking, skillId: skill.id }
+      });
+    })().catch(async (error) => {
+      console.error("质量门禁后台任务失败", error);
+      await updateBackgroundTaskProgress(task.id, {
+        status: "failed",
+        progress: { phase: "failed", message: `门禁执行失败：${error.message}`, percent: 100 },
+        payload: { error: error.message }
+      }).catch(() => {});
+    });
+    return json(res, 202, { backgroundTaskId: task.id, message: `质量门禁已进入任务中心，将执行 ${total} 个固定样本`, total });
+  }
+  if (req.method === "GET" && url.pathname === "/api/quality/gate") {
+    const scope = learningScope({
+      locale: url.searchParams.get("locale"),
+      contentType: url.searchParams.get("contentType") || "general",
+      domain: url.searchParams.get("domain") || "general",
+      project: url.searchParams.get("project") || "default"
+    });
+    const skillId = url.searchParams.get("skillId") || "";
+    const [assets, runs] = await Promise.all([
+      loadGateAssets(scope),
+      listQualityRuns({ ...scope, ...(skillId ? { skillId } : {}), limit: 5 })
+    ]);
+    const latest = runs[0] || null;
+    return json(res, 200, {
+      scope,
+      latestRun: latest,
+      recentRuns: runs,
+      assets: {
+        goldSampleCount: assets.samples.length,
+        regressionCaseCount: assets.cases.length,
+        goldSetVersions: assets.goldSetVersions,
+        regressionSuiteVersions: assets.regressionSuiteVersions
+      },
+      // 没跑过就是没证据，前端据此显示"未验证"而不是"通过"。
+      status: latest ? latest.decision : "not_run"
+    });
+  }
+  if (req.method === "POST" && url.pathname === "/api/learning/export") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    const format = String(body.format || "json");
+    const [trajectories, qaCases, assets] = await Promise.all([
+      listLearningTrajectories({ ...scope, limit: 1000 }),
+      getQaCases(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
+      loadGateAssets(scope)
+    ]);
+    const bundle = buildTrainingExport({
+      trajectories,
+      qaCases: qaCases.map((item) => ({ ...item, project: scope.project })),
+      goldSamples: assets.samples,
+      regressionCases: assets.cases
+    }, { scope, instruction: String(body.instruction || "") });
+    if (format === "jsonl") {
+      const kind = body.dataset === "dpo" ? "dpo" : "sft";
+      const dataset = kind === "dpo" ? bundle.dpo : bundle.sft;
+      res.writeHead(200, {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Content-Disposition": `attachment; filename="kami-${kind}-${scope.locale}-${Date.now()}.jsonl"`
+      });
+      res.end(datasetToJsonl(dataset));
+      return;
+    }
+    return json(res, 200, {
+      scope,
+      manifest: bundle.manifest,
+      sft: { count: bundle.sft.records.length, audit: bundle.sft.audit },
+      dpo: { count: bundle.dpo.records.length, audit: bundle.dpo.audit }
+    });
+  }
+  if (req.method === "GET" && url.pathname === "/api/training/runs") {
+    const scope = learningScope({
+      locale: url.searchParams.get("locale"),
+      contentType: url.searchParams.get("contentType") || "general",
+      domain: url.searchParams.get("domain") || "general",
+      project: url.searchParams.get("project") || "default"
+    });
+    return json(res, 200, { scope, runs: await listTrainingRuns({ ...scope, limit: 50 }) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/training/runs") {
+    const body = await readJsonBody(req);
+    const scope = learningScope(body);
+    // 冻结数据集：先按当前作用域重新导出一次，把内容指纹钉死，训练用的就是这一份。
+    const [trajectories, qaCases, assets] = await Promise.all([
+      listLearningTrajectories({ ...scope, limit: 1000 }),
+      getQaCases(scope.locale, { contentType: scope.contentType, domain: scope.domain, limit: -1 }),
+      loadGateAssets(scope)
+    ]);
+    const bundle = buildTrainingExport({
+      trajectories,
+      qaCases: qaCases.map((item) => ({ ...item, project: scope.project })),
+      goldSamples: assets.samples,
+      regressionCases: assets.cases
+    }, { scope });
+    const method = String(body.method || "sft").toLowerCase();
+    const datasets = [];
+    if (method === "dpo") datasets.push(freezeTrainingDataset({ kind: "dpo", jsonl: datasetToJsonl(bundle.dpo), audit: bundle.dpo.audit, manifest: bundle.manifest, scope }));
+    else datasets.push(freezeTrainingDataset({ kind: "sft", jsonl: datasetToJsonl(bundle.sft), audit: bundle.sft.audit, manifest: bundle.manifest, scope }));
+    const run = createTrainingRun({
+      scope,
+      name: String(body.name || ""),
+      recipe: {
+        method,
+        baseModel: String(body.baseModel || ""),
+        teacherModel: String(body.teacherModel || ""),
+        ...(body.epochs === undefined ? {} : { epochs: body.epochs }),
+        ...(body.learningRate === undefined ? {} : { learningRate: body.learningRate }),
+        ...(body.batchSize === undefined ? {} : { batchSize: body.batchSize }),
+        ...(body.loraRank === undefined ? {} : { loraRank: body.loraRank })
+      },
+      datasets,
+      createdBy: String(body.createdBy || ""),
+      createdAt: new Date().toISOString(),
+      note: String(body.note || "")
+    });
+    const frozen = advanceTrainingRun(run, { status: "frozen", at: new Date().toISOString(), by: String(body.createdBy || ""), note: "导出并冻结数据集" });
+    const saved = await saveTrainingRun({ scope, payload: frozen });
+    return json(res, 201, { run: saved, manifest: buildTrainingManifest(frozen) });
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/training/runs/") && url.pathname.endsWith("/manifest")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/training/runs/".length, -"/manifest".length));
+    const run = await getTrainingRun(id);
+    if (!run) {
+      const error = new Error("未找到训练任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    return json(res, 200, { manifest: buildTrainingManifest(run.payload) });
+  }
+  if (req.method === "POST" && url.pathname.startsWith("/api/training/runs/") && url.pathname.endsWith("/advance")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/training/runs/".length, -"/advance".length));
+    const body = await readJsonBody(req);
+    const run = await getTrainingRun(id);
+    if (!run) {
+      const error = new Error("未找到训练任务");
+      error.statusCode = 404;
+      throw error;
+    }
+    const status = String(body.status || "");
+    // 先判状态迁移是否合法，再去找门禁记录：否则从 frozen 直接投产会报成
+    // "找不到门禁记录"，把真正的原因（顺序不对）盖掉。
+    if (!canTransition(String(run.payload?.status || run.status || "draft"), status)) {
+      const error = new Error(`训练任务不能从 ${run.payload?.status || run.status} 直接进入 ${status || "空状态"}`);
+      error.statusCode = 409;
+      throw error;
+    }
+    let gate;
+    if (status === "promoted") {
+      // 微调产物投产前必须自己拿到一条通过的门禁记录，和其它候选一视同仁。
+      const scope = learningScope(run);
+      const [latest] = await listQualityRuns({ ...scope, skillId: String(body.gateRunSkillId || run.payload?.artifact?.modelId || ""), limit: 1 });
+      const chosen = body.qualityRunId
+        ? (await listQualityRuns({ ...scope, limit: 50 })).find((item) => item.id === String(body.qualityRunId))
+        : latest;
+      if (!chosen) {
+        const error = new Error("找不到可用于放行的质量门禁记录，请先对该微调模型执行一次门禁");
+        error.statusCode = 409;
+        throw error;
+      }
+      gate = {
+        decision: chosen.decision,
+        runId: chosen.id,
+        regressionPassRate: chosen.regressionPassRate,
+        goldTermAccuracy: chosen.goldTermAccuracy,
+        checkedAt: chosen.createdAt
+      };
+    }
+    const advanced = advanceTrainingRun(run.payload, {
+      status,
+      at: new Date().toISOString(),
+      by: String(body.by || ""),
+      note: String(body.note || ""),
+      ...(body.externalJobId === undefined ? {} : { externalJobId: body.externalJobId }),
+      ...(body.artifact === undefined ? {} : { artifact: body.artifact }),
+      ...(body.error === undefined ? {} : { error: body.error }),
+      ...(gate ? { gate } : {})
+    });
+    return json(res, 200, { run: await saveTrainingRun({ id: run.id, scope: learningScope(run), payload: advanced }) });
   }
   if (req.method === "POST" && url.pathname === "/api/batch/prepare") {
     const body = await readJsonBody(req);
@@ -1550,7 +2174,7 @@ async function apiHandler(req, res, url) {
       if (!qaRun) return segment;
       const references = (qaRun.references || []).filter((item) => item.kind !== "qa_case");
       const qaCases = (qaRun.references || []).filter((item) => item.kind === "qa_case");
-      const matches = matchTerms(segment.source, assets, { contentType: run.contentType, domain: run.domain });
+      const matches = matchTerms(segment.source, assets, { contentType: run.contentType, domain: run.domain, ...deliveryContext(run, segment.source) });
       return {
         ...segment,
         translation: segment.translation || qaRun.finalTranslation,
@@ -1579,12 +2203,13 @@ async function apiHandler(req, res, url) {
     const issueIndex = Number(body.issueIndex);
     const currentIssues = Array.isArray(body.issues) ? body.issues.slice(0, 30) : [];
     const issue = Number.isInteger(issueIndex) ? currentIssues[issueIndex] : null;
-    if (!source || !translation || !issue || !["approve", "revise"].includes(action)) {
+    if (!source || !translation || !issue || !["approve", "accept", "partial", "reject", "revise"].includes(action)) {
       const error = new Error("QA 决定缺少原文、译文、问题或有效操作");
       error.statusCode = 400;
       throw error;
     }
-    if (action === "approve" && issue.severity === "error" && issue.mqmSeverity !== "minor") {
+    const reviewAction = action === "approve" ? "reject" : action;
+    if (reviewAction === "reject" && issue.severity === "error" && issue.mqmSeverity !== "minor") {
       const error = new Error("阻断级 QA 问题不能直接批准，请先让 AI 修订或人工编辑译文");
       error.statusCode = 409;
       throw error;
@@ -1602,7 +2227,7 @@ async function apiHandler(req, res, url) {
       );
     }
     const assets = await getAssets(locale);
-    const matches = matchTerms(source, assets, { contentType, domain });
+    const matches = matchTerms(source, assets, { contentType, domain, ...deliveryContext(body, source) });
     const classification = await classify({ text: source, hint: contentType, useModel: false });
     const styleProfile = await getStyleProfile(locale, contentType, domain);
     const translationSkill = await ensureChampionTranslationSkill(learningScope({ locale, contentType, domain, project }));
@@ -1610,40 +2235,56 @@ async function apiHandler(req, res, url) {
     const contextPack = buildContextPack({
       titleOverrides: getSettings().orthography.titleBrackets, source, locale, classification, matches, domain, styleProfile, translationSkill, qaGuidance });
     const priorDecisions = Array.isArray(body.humanDecisions) ? body.humanDecisions.slice(0, 30) : [];
-    const decision = {
-      decision: action === "approve" ? "approved_as_is" : "revision_requested",
-      issue: {
-        type: issue.type || "qa",
-        category: issue.category || "other",
-        severity: issue.mqmSeverity || issue.severity || "warning",
-        message: issue.message || "",
-        suggestion: issue.suggestion || ""
-      },
-      reason: action === "approve" ? "人工确认当前译文可接受" : "人工要求翻译模型按该建议修订",
-      decidedAt: new Date().toISOString()
-    };
+    const decidedAt = new Date().toISOString();
+    let decision = normalizeReviewDecision({
+      id: randomUUID(),
+      issueId: String(issue.id || `${batchId}:${issueIndex}:${issue.type || issue.category || "qa"}`),
+      segmentId: body.segmentId || "",
+      field: body.field || "translation",
+      category: issue.category || issue.type || "other",
+      severity: issue.mqmSeverity || issue.severity || "warning",
+      issue: issue.message || "QA 意见",
+      suggestion: issue.suggestion || "",
+      action: reviewAction,
+      reason: String(body.reason || (action === "approve" ? "人工确认当前译文可接受，因此拒绝该条建议" : "")),
+      acceptedParts: Array.isArray(body.acceptedParts) ? body.acceptedParts : [],
+      rejectedParts: Array.isArray(body.rejectedParts) ? body.rejectedParts : [],
+      revisionInstruction: String(body.revisionInstruction || (["accept", "partial", "revise"].includes(reviewAction) ? issue.suggestion || issue.message || "按该条 QA 意见修订" : "")),
+      beforeTranslation: translation,
+      decidedBy: String(body.reviewer || "当前用户"),
+      decidedAt
+    });
     const humanDecisions = [...priorDecisions, decision];
 
-    if (action === "revise") {
+    if (["accept", "partial", "revise"].includes(reviewAction)) {
       const revisedTranslation = await reviseTranslationWithQa({
-        contextPack, translation, issues: [issue],
+        contextPack, translation, issues: [{
+          ...issue,
+          message: reviewAction === "partial"
+            ? `仅修订人工接受的部分：${decision.acceptedParts.join("；")}。不得采纳这些部分：${decision.rejectedParts.join("；")}。${decision.revisionInstruction}`
+            : decision.revisionInstruction
+        }],
         references: Array.isArray(body.references) ? body.references : [], qaCases: qaGuidance
       });
-      decision.beforeTranslation = translation;
-      decision.afterTranslation = revisedTranslation;
+      decision = normalizeReviewDecision({ ...decision, afterTranslation: revisedTranslation });
+      humanDecisions[humanDecisions.length - 1] = decision;
       const aiQa = await runAiQaLoop({
         contextPack, initialTranslation: revisedTranslation, matches, locale, contentType, domain, batchId, humanDecisions
+      });
+      const receipt = buildReviewReceipt({
+        id: randomUUID(), taskId: body.trajectoryId || batchId, taskName: body.taskName || "翻译 QA",
+        batchId, locale, processedBy: decision.decidedBy || "当前用户", processedAt: decidedAt, decisions: [decision]
       });
       if (linkedTrajectory) {
         await updateLearningTrajectory(linkedTrajectory.id, {
           finalTranslation: aiQa.translation,
           qaAfter: { ...trajectoryMetricsFromIssues(aiQa.issues, aiQa.score, matches), issues: aiQa.issues, iterations: aiQa.iterations },
-          humanDecision: { accepted: false, action: "revision_requested", decisions: humanDecisions, decidedAt: decision.decidedAt },
+          humanDecision: { accepted: reviewAction === "accept", action: reviewAction, decisions: humanDecisions, receipt, decidedAt },
           status: aiQa.status === "passed" ? "completed" : "review",
-          events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "human_revision_requested", at: decision.decidedAt }]
+          events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: `human_${reviewAction}`, at: decidedAt, receiptId: receipt.id }]
         });
       }
-      return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, styleProfile: contextPack.styleProfile, trajectoryId: body.trajectoryId || "" });
+      return json(res, 200, { matches, translation: aiQa.translation, issues: aiQa.issues, qaScore: aiQa.score, aiQa, reviewReceipt: receipt, styleProfile: contextPack.styleProfile, trajectoryId: body.trajectoryId || "" });
     }
 
     const remainingIssues = currentIssues.filter((_, index) => index !== issueIndex);
@@ -1662,12 +2303,16 @@ async function apiHandler(req, res, url) {
       await updateLearningTrajectory(linkedTrajectory.id, {
         finalTranslation: translation,
         qaAfter: { ...trajectoryMetricsFromIssues(remainingIssues, score, matches), issues: remainingIssues, iterations: Number(body.iterations) || 0 },
-        humanDecision: { accepted: true, action: "qa_issue_approved", decisions: humanDecisions, decidedAt: decision.decidedAt },
+        humanDecision: { accepted: false, action: "qa_issue_rejected", decisions: humanDecisions, decidedAt },
         status: status === "passed" ? "completed" : "review",
-        events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "qa_issue_approved", at: decision.decidedAt }]
+        events: [...(Array.isArray(linkedTrajectory.events) ? linkedTrajectory.events : []), { type: "qa_issue_rejected", at: decidedAt }]
       });
       triggerAutoProposal({ locale, contentType, domain, project });
     }
+    const receipt = buildReviewReceipt({
+      id: randomUUID(), taskId: body.trajectoryId || batchId, taskName: body.taskName || "翻译 QA",
+      batchId, locale, processedBy: decision.decidedBy || "当前用户", processedAt: decidedAt, decisions: [decision]
+    });
     return json(res, 200, {
       matches, translation, issues: remainingIssues, qaScore: score,
       aiQa: {
@@ -1676,6 +2321,7 @@ async function apiHandler(req, res, url) {
         qaCases: references.filter((item) => item.kind === "qa_case"), termDecisions, humanDecisions
       },
       styleProfile: contextPack.styleProfile,
+      reviewReceipt: receipt,
       trajectoryId: body.trajectoryId || ""
     });
   }
@@ -1685,8 +2331,8 @@ async function apiHandler(req, res, url) {
     const assets = await getAssets(locale);
     const contentType = body.contentType || "general";
     const domain = concreteDomain(body.domain, { text: body.source || "", contentType });
-    const matches = matchTerms(body.source || "", assets, { contentType, domain });
-    if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches, locale, titleOverrides: getSettings().orthography.titleBrackets }) });
+    const matches = matchTerms(body.source || "", assets, { contentType, domain, ...deliveryContext(body, body.source || "") });
+    if (body.aiQa !== true) return json(res, 200, { matches, issues: runQa({ source: body.source || "", translation: body.translation || "", matches, locale, titleOverrides: getSettings().orthography.titleBrackets, contentType }) });
     const classification = await classify({ text: body.source || "", hint: contentType, useModel: false });
     const styleProfile = await getStyleProfile(locale, contentType, domain);
     const translationSkill = await ensureChampionTranslationSkill(learningScope({ locale, contentType, domain, project: body.project || "default" }));
@@ -1728,13 +2374,13 @@ async function apiHandler(req, res, url) {
     const domainResolution = resolveDomain(cleanSource, body.domain, { contentType: scopeContentType });
     const domain = domainResolution.domain;
     // 术语匹配放在识别之后，用真正生效的语体与领域加权，而不是界面提交的原始值。
-    const matches = matchTerms(cleanSource, assets, { contentType: scopeContentType, domain });
+    const matches = matchTerms(cleanSource, assets, { contentType: scopeContentType, domain, ...deliveryContext(body, cleanSource) });
     const styleProfile = await getStyleProfile(locale, scopeContentType, domain);
     const queryEmbedding = await embedSource(cleanSource);
     const narrowedMemories = narrowByDomain(await getMemories(locale, { contentType: scopeContentType, domain: "general", limit: -1, exactContentType: true }), domain);
     const narrowedQaCases = narrowByDomain(await getQaCases(locale, { contentType: scopeContentType, domain: "general", limit: -1 }), domain);
     domainResolution.relaxedRetrieval = narrowedMemories.relaxed || narrowedQaCases.relaxed;
-    const references = rankTranslationMemories(cleanSource, narrowedMemories.items, { limit: 5, queryEmbedding, contentTags: classification.contentTags || [] });
+    const references = rankTranslationMemories(cleanSource, narrowedMemories.items, { limit: 5, queryEmbedding, contentTags: classification.contentTags || [], locale, contentType: scopeContentType, domain, campaign: String(body.campaign || ""), ...deliveryContext(body, cleanSource) });
     const qaCases = rankQaCases(cleanSource, narrowedQaCases.items, { limit: 3, queryEmbedding });
     const evidence = positiveEvidenceOnly(await getStyleEvidence(locale, { contentType: scopeContentType, domain, limit: 12 })).slice(0, 6);
     // 只有人工批准的译例能充当"标准"；机器译文另开一档，仅供一致性参考。
@@ -1808,8 +2454,8 @@ async function apiHandler(req, res, url) {
     const pairTasks = pairPlan.pairs.map((pair) => async () => {
       const pairSource = pair.sourceIndices.map((index) => sourceSegments[index]).join("\n");
       const pairTranslation = pair.translationIndices.map((index) => translationSegments[index]).join("\n");
-      const segmentMatches = matchTerms(pairSource, assets, { contentType: scopeContentType, domain });
-      const basicIssues = runBasicQa({ source: pairSource, translation: pairTranslation, matches: segmentMatches, locale, titleOverrides: getSettings().orthography.titleBrackets });
+      const segmentMatches = matchTerms(pairSource, assets, { contentType: scopeContentType, domain, ...deliveryContext(body, pairSource) });
+      const basicIssues = runBasicQa({ source: pairSource, translation: pairTranslation, matches: segmentMatches, locale, titleOverrides: getSettings().orthography.titleBrackets, contentType: scopeContentType });
       const [grammarResult, aiResult] = await Promise.allSettled([
         evaluateGrammarWithModel({ translation: pairTranslation, locale, contentType: scopeContentType }),
         evaluateAutoQaWithModel({
@@ -2052,6 +2698,33 @@ async function apiHandler(req, res, url) {
         issues: (segment.issues || []).map((issue) => presentKnownIssue(issue))
       })),
       feedbackCount: share.feedbacks.length,
+      // 逐条公开处置结果：提意见的同事得看得到自己的意见最后被怎么处理了。
+      feedbacks: (share.feedbacks || []).map((entry) => ({
+        id: entry.id,
+        segmentIndex: entry.segmentIndex,
+        reviewer: entry.reviewer || "匿名",
+        request: entry.request || "",
+        suggestedTranslation: entry.suggestedTranslation || "",
+        status: entry.status || "pending",
+        createdAt: entry.createdAt || "",
+        resolvedAt: entry.resolvedAt || "",
+        resolution: entry.resolution
+          ? {
+            actionLabel: entry.resolution.actionLabel,
+            reason: entry.resolution.reason,
+            afterTranslation: entry.resolution.afterTranslation,
+            translationChanged: entry.resolution.translationChanged,
+            decidedBy: entry.resolution.decidedBy,
+            decidedAt: entry.resolution.decidedAt
+          }
+          : null
+      })),
+      feedbackSummary: {
+        total: (share.feedbacks || []).length,
+        pending: (share.feedbacks || []).filter((entry) => (entry.status || "pending") === "pending").length,
+        adopted: (share.feedbacks || []).filter((entry) => entry.status === "adopted").length,
+        ignored: (share.feedbacks || []).filter((entry) => entry.status === "ignored").length
+      },
       status: share.status || "ready",
       glossedSegments: Number(share.glossedSegments) || 0,
       totalSegments: Number(share.totalSegments) || share.segments.length,
@@ -2201,11 +2874,28 @@ async function apiHandler(req, res, url) {
       }
     }
     const resolvedAt = new Date().toISOString();
+    // 每条意见都留一份结构化处置回执，审阅人在分享页就能看到自己的意见去哪了，
+    // 而不是只看到一个总数。
+    const resolution = normalizeReviewDecision({
+      issueId: feedbackId,
+      segmentId: String(feedback.segmentIndex ?? ""),
+      category: "同事反馈",
+      issue: feedback.request || "（未填写意见正文）",
+      suggestion: feedback.suggestedTranslation || "",
+      action: action === "adopt" ? "accept" : "reject",
+      reason: String(body.note || "").trim() || (action === "adopt" ? "已采纳并更新译文" : "经复核后未采纳"),
+      beforeTranslation: String(share.segments?.[feedback.segmentIndex]?.translation || ""),
+      afterTranslation: action === "adopt" ? String(feedback.suggestedTranslation || "") : "",
+      decidedBy: String(body.handledBy || "").trim() || "工作台处理人",
+      decidedAt: resolvedAt
+    });
     await updateShare(token, (item) => ({
       ...item,
-      feedbacks: item.feedbacks.map((entry) => entry.id === feedbackId ? { ...entry, status: action === "adopt" ? "adopted" : "ignored", resolvedAt } : entry)
+      feedbacks: item.feedbacks.map((entry) => entry.id === feedbackId
+        ? { ...entry, status: action === "adopt" ? "adopted" : "ignored", resolvedAt, resolution }
+        : entry)
     }));
-    return json(res, 200, { ok: true, status: action === "adopt" ? "adopted" : "ignored" });
+    return json(res, 200, { ok: true, status: action === "adopt" ? "adopted" : "ignored", resolution });
   }
   if (req.method === "POST" && url.pathname === "/api/translate") {
     const body = await readJsonBody(req);
@@ -2231,9 +2921,11 @@ async function apiHandler(req, res, url) {
       translationSkill.strategy?.qa?.minimumScore, factory.qa.minimumScore, tuning.quality.qaPassScore)));
     const maxRevisions = Math.min(4, Math.max(0, effectiveStrategyValue(
       translationSkill.strategy?.qa?.maximumRevisionAttempts, factory.qa.maximumRevisionAttempts, tuning.quality.maxRevisionAttempts)));
+    const delivery = deliveryContext(body, body.source);
     const matches = matchTerms(body.source, assets, {
       contentType: classification.contentType,
-      domain
+      domain,
+      ...delivery
     });
     const queryEmbedding = await embedSource(body.source);
     const [storedStyleProfile, localeQaCases, localeMemories, userProfile] = await Promise.all([
@@ -2246,7 +2938,7 @@ async function apiHandler(req, res, url) {
     const narrowedMemories = narrowByDomain(localeMemories, domain);
     domainResolution.relaxedRetrieval = narrowedMemories.relaxed || narrowedQaCases.relaxed;
     const qaGuidance = rankQaCases(body.source, narrowedQaCases.items, { limit: qaCaseLimit, queryEmbedding });
-    const translationReferences = rankTranslationMemories(body.source, narrowedMemories.items, { limit: memoryLimit, queryEmbedding, contentTags: classification.contentTags || [] });
+    const translationReferences = rankTranslationMemories(body.source, narrowedMemories.items, { limit: memoryLimit, queryEmbedding, contentTags: classification.contentTags || [], locale, contentType: classification.contentType, domain, campaign: String(body.campaign || ""), ...delivery });
     // 批次排比/韵文检测：同一批次的多行共用一种句式时，注入模板约束；
     // 客户端顺序翻译时还会带上本批已定稿译文作为风格锚点。
     let batchVerse = null;
@@ -2256,6 +2948,12 @@ async function apiHandler(req, res, url) {
         batchVerse = detectBatchVerse(batchRun?.segments || []);
       } catch { /* 批次记录不可用不影响翻译 */ }
     }
+    const neighborMetadata = Array.isArray(body.neighborContext?.metadata) ? body.neighborContext.metadata : [];
+    const factSchema = extractFactSchema({
+      source: body.source,
+      metadata: neighborMetadata.filter((item) => item?.role !== "constraint"),
+      constraints: neighborMetadata.filter((item) => item?.role === "constraint")
+    });
     const contextPack = buildContextPack({
       titleOverrides: getSettings().orthography.titleBrackets,
       source: body.source,
@@ -2270,7 +2968,24 @@ async function apiHandler(req, res, url) {
       userProfile,
       translationReferences,
       batchVerse,
-      batchReferences: body.batchReferences || []
+      batchReferences: body.batchReferences || [],
+      factSchema
+    });
+    const provider = getProviderConfig();
+    const risk = assessTranslationRisk({
+      source: body.source,
+      contentType: classification.contentType,
+      facts: { count: factSchema.summary?.translationFacts || 0 },
+      metadata: neighborMetadata,
+      protectedTokens: contextPack.protectedTokens
+    });
+    let routing = selectTranslationRoute({
+      source: body.source,
+      contentType: classification.contentType,
+      risk,
+      manualRoute: body.route || "auto",
+      candidateCount: body.candidateCount,
+      provider
     });
     const startedAt = Date.now();
     let trajectory = null;
@@ -2285,22 +3000,65 @@ async function apiHandler(req, res, url) {
           memoryIds: translationReferences.map((item) => item.id).filter(Boolean),
           qaCaseIds: qaGuidance.map((item) => item.id).filter(Boolean)
         },
-        model: getProviderConfig().model, promptVersion: TRANSLATION_PROMPT_VERSION,
-        status: "running", events: [{ type: "started", at: new Date().toISOString() }]
+        model: routing.model || provider.model, promptVersion: TRANSLATION_PROMPT_VERSION,
+        status: "running", events: [{ type: "started", at: new Date().toISOString(), routing }]
       });
     } catch (error) {
       learningCaptureError = error.message;
     }
     try {
       const aiQaEnabled = body.aiQa !== false;
-      const result = await translateWithReflection(contextPack, { reflect: !aiQaEnabled && body.reflect !== false });
-      const aiQa = aiQaEnabled
+      const routedPassScore = Math.max(passScore, qualityThresholdForRisk(risk.tier));
+      let result = await translateWithRoute(contextPack, { routePlan: routing, reflect: !aiQaEnabled && body.reflect !== false });
+      let aiQa = aiQaEnabled
         ? await runAiQaLoop({
           contextPack, initialTranslation: result.translation, matches, locale,
           contentType: classification.contentType, domain, batchId: body.batchId || "",
-          providedReferences: translationReferences, passScore, maxRevisions
+          providedReferences: translationReferences, passScore: routedPassScore, maxRevisions
         })
-        : { translation: result.translation, issues: runQa({ source: body.source, translation: result.translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets }), score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
+        : { translation: result.translation, issues: [
+          ...runQa({ source: body.source, translation: result.translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets, contentType: classification.contentType, registerPolicy: contextPack.styleProfile?.reviewRubric?.registerPolicy || null }),
+          ...checkFactSchema({ schema: factSchema, translation: result.translation, locale })
+        ], score: null, status: "disabled", iterations: 0, used: false, fallbackReason: "", references: [] };
+      let qualityRoute = decideQualityRoute({
+        qaScore: aiQa.score,
+        hardErrorCount: (aiQa.issues || []).filter((issue) => issue.severity === "error").length,
+        riskTier: risk.tier,
+        hasQualityUpgrade: Boolean(provider.qualityModel) && routing.model !== provider.qualityModel,
+        aiQaUsed: aiQa.used
+      });
+      if (qualityRoute.decision === "escalate_model") {
+        const previousResult = result;
+        const escalationPlan = {
+          ...routing,
+          route: "fact_guarded",
+          label: "质量升级修订",
+          description: "低于当前风险门槛，已自动升级高质量模型并重新执行完整 QA。",
+          model: provider.qualityModel,
+          modelRole: "quality",
+          candidateCount: 1,
+          escalated: true
+        };
+        result = await translateWithRoute(contextPack, { routePlan: escalationPlan, reflect: true });
+        aiQa = await runAiQaLoop({
+          contextPack, initialTranslation: result.translation, matches, locale,
+          contentType: classification.contentType, domain, batchId: body.batchId || "",
+          providedReferences: translationReferences, passScore: routedPassScore, maxRevisions
+        });
+        const combinedCandidates = [...(result.candidates || []), ...(previousResult.candidates || [])]
+          .filter((item, index, list) => list.findIndex((other) => other.translation === item.translation) === index)
+          .slice(0, 4);
+        result = { ...result, candidates: combinedCandidates };
+        routing = { ...escalationPlan, previousRoute: routing.route };
+        qualityRoute = decideQualityRoute({
+          qaScore: aiQa.score,
+          hardErrorCount: (aiQa.issues || []).filter((issue) => issue.severity === "error").length,
+          riskTier: risk.tier,
+          hasQualityUpgrade: true,
+          alreadyEscalated: true,
+          aiQaUsed: aiQa.used
+        });
+      }
       const suggestionCandidates = buildSuggestionCandidates(aiQa.translation, matches);
       let alignment = { requested: suggestionCandidates.length > 0, used: false, fallbackReason: "" };
       let modelSuggestions = [];
@@ -2313,7 +3071,7 @@ async function apiHandler(req, res, url) {
         }
       }
       const termSuggestions = resolveTermSuggestions(aiQa.translation, suggestionCandidates, modelSuggestions);
-      const initialIssues = runQa({ source: body.source, translation: result.initial || result.translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets });
+      const initialIssues = runQa({ source: body.source, translation: result.initial || result.translation, matches, locale, titleOverrides: getSettings().orthography.titleBrackets, contentType: classification.contentType, registerPolicy: contextPack.styleProfile?.reviewRubric?.registerPolicy || null });
       let completedTrajectory = trajectory;
       if (trajectory) {
         try {
@@ -2327,7 +3085,7 @@ async function apiHandler(req, res, url) {
               { type: "started", at: trajectory.createdAt },
               { type: "completed", at: new Date().toISOString(), latencyMs: Date.now() - startedAt, aiQaIterations: aiQa.iterations }
             ],
-            status: aiQa.status === "review" ? "review" : "completed",
+            status: aiQa.status === "review" || qualityRoute.decision === "human_review" ? "review" : "completed",
             error: aiQa.fallbackReason || ""
           });
         } catch (error) {
@@ -2342,9 +3100,18 @@ async function apiHandler(req, res, url) {
         contextPack,
         ...result,
         translation: aiQa.translation,
+        candidates: [
+          ...((result.candidates || []).some((item) => item.translation === aiQa.translation)
+            ? []
+            : [{ index: -1, translation: aiQa.translation, recommended: true, reason: "QA 修订终稿" }]),
+          ...(result.candidates || []).map((item) => ({ ...item, recommended: item.translation === aiQa.translation }))
+        ],
         issues: aiQa.issues,
         qaScore: aiQa.score,
         aiQa,
+        factSchema,
+        routing,
+        qualityRoute,
         styleProfile: contextPack.styleProfile,
         translationSkill: { id: translationSkill.id, name: translationSkill.name, version: translationSkill.version, status: translationSkill.status },
         trajectoryId: completedTrajectory?.id || "",

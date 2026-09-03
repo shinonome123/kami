@@ -99,6 +99,24 @@ function dateField(field, translation, special, sort) {
   };
 }
 
+function editableDateField(field, translation, sort) {
+  return {
+    field,
+    type: "timestamp",
+    meta: { interface: "datetime", width: "half", sort, translations: label(translation) },
+    schema: { is_nullable: true }
+  };
+}
+
+function booleanField(field, translation, { defaultValue = false, sort } = {}) {
+  return {
+    field,
+    type: "boolean",
+    meta: { interface: "boolean", width: "half", sort, translations: label(translation) },
+    schema: { is_nullable: false, default_value: defaultValue }
+  };
+}
+
 function uniqueInternalField(field, sort) {
   return {
     field,
@@ -125,8 +143,21 @@ function termFields() {
     selectField("status", "审批状态", statusValues, { defaultValue: "draft", sort: 9 }),
     textField("provenance", "来源", { width: "half", sort: 10 }),
     textField("note", "备注", { multiline: true, sort: 11 }),
-    dateField("date_created", "创建时间", "date-created", 12),
-    dateField("date_updated", "更新时间", "date-updated", 13)
+    selectField("asset_tier", "资产层级", [["候选", "candidate"], ["工作中", "working"], ["正式", "formal"]], { defaultValue: "formal", sort: 12 }),
+    booleanField("case_sensitive", "区分大小写", { sort: 13 }),
+    booleanField("preserve_original", "保留原文", { sort: 14 }),
+    { field: "version", type: "integer", meta: { interface: "input", width: "half", sort: 15, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
+    textField("version_group_id", "版本族 ID", { width: "half", sort: 16 }),
+    selectField("lifecycle_status", "生命周期", [["生效", "active"], ["已废弃", "deprecated"], ["已归档", "archived"]], { defaultValue: "active", sort: 17 }),
+    editableDateField("valid_from", "生效时间", 18),
+    editableDateField("valid_to", "失效时间", 19),
+    jsonField("projects", "适用项目", { sort: 20 }),
+    jsonField("channels", "适用渠道", { sort: 21 }),
+    jsonField("platforms", "适用平台", { sort: 22 }),
+    jsonField("regions", "适用地区", { sort: 23 }),
+    textField("superseded_by", "替代版本 ID", { width: "half", sort: 24 }),
+    dateField("date_created", "创建时间", "date-created", 25),
+    dateField("date_updated", "更新时间", "date-updated", 26)
   ];
 }
 
@@ -147,8 +178,20 @@ function memoryFields() {
     textField("batch_id", "批次 ID", { width: "half", sort: 12 }),
     { field: "source_row", type: "integer", meta: { interface: "input", width: "half", sort: 13, translations: label("来源行号") }, schema: { is_nullable: true } },
     jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 14 }),
-    dateField("date_created", "创建时间", "date-created", 15),
-    dateField("date_updated", "更新时间", "date-updated", 16)
+    selectField("asset_tier", "资产层级", [["候选", "candidate"], ["工作中", "working"], ["正式", "formal"]], { nullable: true, sort: 15 }),
+    { field: "version", type: "integer", meta: { interface: "input", width: "half", sort: 16, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
+    textField("version_group_id", "版本族 ID", { width: "half", sort: 17 }),
+    selectField("lifecycle_status", "生命周期", [["生效", "active"], ["已废弃", "deprecated"], ["已归档", "archived"]], { defaultValue: "active", sort: 18 }),
+    editableDateField("valid_from", "生效时间", 19),
+    editableDateField("valid_to", "失效时间", 20),
+    textField("project", "项目", { width: "half", sort: 21 }),
+    textField("campaign", "活动", { width: "half", sort: 22 }),
+    textField("platform", "平台", { width: "half", sort: 23 }),
+    textField("region", "地区", { width: "half", sort: 24 }),
+    textField("audience", "目标受众", { width: "half", sort: 25 }),
+    textField("superseded_by", "替代版本 ID", { width: "half", sort: 26 }),
+    dateField("date_created", "创建时间", "date-created", 27),
+    dateField("date_updated", "更新时间", "date-updated", 28)
   ];
 }
 
@@ -346,6 +389,7 @@ const definitions = [
       jsonField("content_tags", "细分类标签", { note: "本风格规范覆盖的场景标签。", sort: 5 }),
       textField("domain", "业务领域", { width: "half", sort: 5 }),
       textField("instructions", "翻译规则", { required: true, multiline: true, sort: 6 }),
+      jsonField("review_rubric", "评审标准", { note: "与生成提示分离的 Accuracy、Fluency、Terminology、Style、Locale、Platform 评审口径。", sort: 7 }),
       jsonField("examples", "正反例", { sort: 7 }),
       { field: "version", type: "integer", meta: { interface: "input", width: "half", sort: 8, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
       textField("parent_id", "上一版本 ID", { width: "half", sort: 9 }),
@@ -535,6 +579,112 @@ const definitions = [
     ]
   },
   {
+    collection: "quality_assets",
+    meta: {
+      icon: "verified",
+      note: "固定 Gold Set、回归候选与回归集。内容不可变、按版本累加，是发版门禁唯一认可的评测依据。",
+      display_template: "{{name}} · v{{version}} · {{status}}",
+      group: "localization_learning",
+      sort: 4,
+      accountability: "all",
+      translations: label("固定质量资产")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("kind", "资产类型", [["Gold Set", "gold_set"], ["回归候选", "regression_candidate"], ["回归集", "regression_suite"]], { sort: 2 }),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 3 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 4 }),
+      textField("domain", "业务领域", { width: "half", sort: 5 }),
+      textField("project", "项目", { width: "half", sort: 6 }),
+      textField("name", "名称", { sort: 7 }),
+      textField("description", "说明", { multiline: true, sort: 8 }),
+      textField("series_id", "版本族 ID", { width: "half", sort: 9 }),
+      { field: "version", type: "integer", meta: { interface: "input", width: "half", sort: 10, translations: label("版本") }, schema: { is_nullable: false, default_value: 1 } },
+      textField("parent_version_id", "父版本 ID", { width: "half", sort: 11 }),
+      selectField("status", "状态", [["草稿", "draft"], ["生效", "active"], ["已退役", "retired"], ["待审批", "pending"], ["已批准", "approved"], ["已拒绝", "rejected"]], { defaultValue: "draft", sort: 12 }),
+      booleanField("enabled", "启用", { defaultValue: false, sort: 13 }),
+      { field: "item_count", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 14, translations: label("样本数") }, schema: { is_nullable: false, default_value: 0 } },
+      textField("source_qa_case_id", "来源 QA 案例 ID", { width: "half", sort: 15 }),
+      textField("fingerprint", "内容指纹", { width: "half", sort: 16 }),
+      jsonField("payload", "完整记录", { note: "gold-regression 模块归一化后的不可变记录，改内容必须发新版本。", sort: 17 }),
+      jsonField("approval", "人工审批", { sort: 18 }),
+      textField("change_note", "本版变更说明", { multiline: true, sort: 19 }),
+      textField("created_by", "创建人", { width: "half", sort: 20 }),
+      dateField("date_created", "创建时间", "date-created", 21),
+      dateField("date_updated", "更新时间", "date-updated", 22)
+    ]
+  },
+  {
+    collection: "quality_runs",
+    meta: {
+      icon: "rule",
+      note: "固定 Gold Set 与回归集的执行留档，含门禁结论。每次发版审批都必须能追到这里的一条记录。",
+      display_template: "{{target_locale}} · {{decision}} · {{regression_pass_rate}}",
+      group: "localization_learning",
+      sort: 5,
+      accountability: "all",
+      translations: label("质量门禁运行")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("project", "项目", { width: "half", sort: 5 }),
+      textField("skill_id", "受测技能 ID", { width: "half", sort: 6 }),
+      textField("skill_version", "受测技能版本", { width: "half", sort: 7 }),
+      selectField("decision", "门禁结论", [["通过", "pass"], ["阻断", "block"], ["证据不足", "insufficient"]], { defaultValue: "insufficient", sort: 8 }),
+      { field: "regression_total", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 9, translations: label("回归案例数") }, schema: { is_nullable: false, default_value: 0 } },
+      { field: "regression_passed", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 10, translations: label("回归通过数") }, schema: { is_nullable: false, default_value: 0 } },
+      { field: "regression_pass_rate", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 11, translations: label("回归通过率") }, schema: { is_nullable: true } },
+      { field: "gold_total", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 12, translations: label("Gold 样本数") }, schema: { is_nullable: false, default_value: 0 } },
+      { field: "gold_term_accuracy", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 13, translations: label("Gold 术语准确率") }, schema: { is_nullable: true } },
+      { field: "gold_fact_accuracy", type: "float", meta: { interface: "input", readonly: true, width: "half", sort: 14, translations: label("Gold 事实准确率") }, schema: { is_nullable: true } },
+      jsonField("asset_versions", "受测资产版本", { note: "本次运行实际使用的 Gold Set 与回归集版本指纹。", sort: 15 }),
+      jsonField("metrics", "质量指标", { sort: 16 }),
+      jsonField("report", "完整运行报告", { sort: 17 }),
+      jsonField("blocking", "阻断原因", { sort: 18 }),
+      textField("triggered_by", "触发来源", { width: "half", sort: 19 }),
+      dateField("date_created", "创建时间", "date-created", 20)
+    ]
+  },
+  {
+    collection: "training_runs",
+    meta: {
+      icon: "model_training",
+      note: "微调与蒸馏任务：冻结的数据集指纹、训练配方、产出模型与投产前的质量门禁结论。训练本身在外部执行，这里保证它可追溯、可复算。",
+      display_template: "{{name}} · {{method}} · {{status}}",
+      group: "localization_learning",
+      sort: 6,
+      accountability: "all",
+      translations: label("微调与蒸馏任务")
+    },
+    schema: {},
+    fields: [
+      uuidField(),
+      selectField("target_locale", "目标语言", Object.keys(localeCollections).map((locale) => [locale, locale]), { sort: 2 }),
+      selectField("content_type", "内容语体", contentTypeValues, { defaultValue: "general", sort: 3 }),
+      textField("domain", "业务领域", { width: "half", sort: 4 }),
+      textField("project", "项目", { width: "half", sort: 5 }),
+      textField("name", "任务名称", { sort: 6 }),
+      selectField("method", "训练方法", [["监督微调", "sft"], ["偏好优化", "dpo"], ["蒸馏", "distillation"]], { defaultValue: "sft", sort: 7 }),
+      selectField("status", "状态", [["草稿", "draft"], ["数据已冻结", "frozen"], ["已提交", "submitted"], ["训练中", "running"], ["训练成功", "succeeded"], ["失败", "failed"], ["已取消", "cancelled"], ["产物已登记", "registered"], ["已投产", "promoted"]], { defaultValue: "draft", sort: 8 }),
+      textField("base_model", "基座模型", { width: "half", sort: 9 }),
+      textField("teacher_model", "教师模型", { width: "half", sort: 10 }),
+      textField("artifact_model_id", "产出模型 ID", { width: "half", sort: 11 }),
+      textField("external_job_id", "外部训练任务 ID", { width: "half", sort: 12 }),
+      { field: "total_records", type: "integer", meta: { interface: "input", readonly: true, width: "half", sort: 13, translations: label("训练样本数") }, schema: { is_nullable: false, default_value: 0 } },
+      textField("run_fingerprint", "任务指纹", { width: "half", sort: 14 }),
+      jsonField("payload", "完整任务记录", { note: "training-pipeline 模块归一化后的记录，含数据集指纹、配方、产物与门禁结论。", sort: 15 }),
+      textField("error", "失败原因", { multiline: true, sort: 16 }),
+      textField("created_by", "创建人", { width: "half", sort: 17 }),
+      dateField("date_created", "创建时间", "date-created", 18),
+      dateField("date_updated", "更新时间", "date-updated", 19)
+    ]
+  },
+  {
     collection: "qa_runs",
     meta: { icon: "fact_check", note: "每次翻译的检索证据、质量评分与修订轨迹。", display_template: "{{target_locale}} · {{score}}", group: "localization_pipeline", sort: 10, accountability: "all", translations: label("AIQA 运行记录") },
     schema: {},
@@ -577,7 +727,17 @@ const definitions = [
       { field: "score_after", type: "float", meta: { interface: "input", width: "half", sort: 10, translations: label("修订后分数") }, schema: { is_nullable: true } },
       selectField("status", "状态", [["机器验证", "machine_verified"], ["人工批准", "human_approved"], ["待复核", "review"]], { defaultValue: "review", sort: 11 }),
       jsonField("embedding", "语义向量", { note: "embedding 模型生成的归一化向量，用于语义相似度检索。", sort: 12 }),
-      dateField("date_created", "创建时间", "date-created", 13)
+      selectField("case_kind", "案例类型", [["AIQA 候选", "qa"], ["Gold Set 样本", "gold"], ["回归案例", "regression"]], { defaultValue: "qa", sort: 13 }),
+      textField("suite_id", "评测集 ID", { width: "half", sort: 14 }),
+      { field: "suite_version", type: "integer", meta: { interface: "input", width: "half", sort: 15, translations: label("评测集版本") }, schema: { is_nullable: false, default_value: 1 } },
+      booleanField("enabled", "启用", { defaultValue: true, sort: 16 }),
+      textField("project", "项目", { width: "half", sort: 17 }),
+      jsonField("required_terms", "期望术语", { sort: 18 }),
+      jsonField("facts", "事实锚点", { sort: 19 }),
+      jsonField("approval", "人工审批", { sort: 20 }),
+      jsonField("metadata", "评测元数据", { sort: 21 }),
+      textField("fingerprint", "内容指纹", { width: "half", sort: 22 }),
+      dateField("date_created", "创建时间", "date-created", 23)
     ]
   },
   {
@@ -817,6 +977,9 @@ async function ensureServiceAccount() {
     ...["create", "read", "update"].map((action) => ["learning_trajectories", action]),
     ...["create", "read", "update"].map((action) => ["translation_skills", action]),
     ...["create", "read", "update"].map((action) => ["skill_evaluations", action]),
+    ...["create", "read", "update"].map((action) => ["quality_assets", action]),
+    ...["create", "read"].map((action) => ["quality_runs", action]),
+    ...["create", "read", "update"].map((action) => ["training_runs", action]),
     ...["create", "read"].map((action) => ["qa_runs", action]),
     ...["create", "read", "update", "delete"].map((action) => ["qa_cases", action]),
     ...["create", "read", "update", "delete"].map((action) => ["qa_tasks", action]),

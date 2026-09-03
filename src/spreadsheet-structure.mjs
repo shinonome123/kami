@@ -1,5 +1,5 @@
 const COLUMN_ROLES = new Set(["source_text", "context", "constraint", "existing_translation", "ignore"]);
-const SOURCE_HEADERS = ["中文", "简中", "简体", "简体中文", "chinese simp", "chinese simplified", "zh-cn", "source", "source text", "原文", "待翻译"];
+const SOURCE_HEADERS = ["中文", "中文原文", "简中", "简中原文", "简体", "简体中文", "chinese simp", "chinese simplified", "zh-cn", "source", "source text", "原文", "待翻译"];
 const CONTEXT_HEADERS = ["位置", "渠道", "平台", "用途", "投放位置", "发布位置", "场景", "备注", "说明", "类型", "content type"];
 const CONSTRAINT_HEADERS = ["ddl", "截止", "交付", "字数", "字符", "长度", "语种要求", "语言要求", "要求", "限制", "deadline", "limit", "language requirement"];
 const TRANSLATION_HEADERS = ["english", "英文", "日语", "日文", "japanese", "korean", "韩语", "韩文", "繁中", "繁体", "traditional chinese", "thai", "泰语", "译文", "translation"];
@@ -105,11 +105,13 @@ function headerRole(value) {
   return null;
 }
 
-function findHeaderRow(sheet) {
+function findHeaderRow(sheet, options = {}) {
   let best = null;
   for (const row of sheet.rows.filter((item) => item.row <= 12)) {
-    const known = row.cells.filter((cell) => headerRole(cell.text)).length;
-    if (known < 2) continue;
+    const roles = row.cells.map((cell) => headerRole(cell.text)).filter(Boolean);
+    const known = roles.length;
+    const singleColumnHeader = options.allowSingleColumnHeader && row.cells.length === 1 && known === 1 && ["source_text", "existing_translation"].includes(roles[0]);
+    if (known < 2 && !singleColumnHeader) continue;
     const score = known * 4 + Math.min(row.cells.length, 8) - row.row * 0.05;
     if (!best || score > best.score) best = { row: row.row, score, known };
   }
@@ -125,9 +127,9 @@ function columnRuleScore(column, headerRow) {
   return hanRatio * 0.44 + Math.min(column.averageLength / 70, 1) * 0.25 + narrativeRatio * 0.31 - constraintRatio * 0.55;
 }
 
-export function inferSpreadsheetStructure(snapshot) {
+export function inferSpreadsheetStructure(snapshot, options = {}) {
   const sheets = snapshot.sheets.map((sheet) => {
-    const headerRow = findHeaderRow(sheet);
+    const headerRow = findHeaderRow(sheet, options);
     const header = new Map((sheet.rows.find((row) => row.row === headerRow)?.cells || []).map((cell) => [cell.column, cell.text]));
     const ruleScores = sheet.columns.map((column) => ({ column: column.column, score: columnRuleScore(column, headerRow) }));
     const highestScore = Math.max(0, ...ruleScores.map((item) => item.score));

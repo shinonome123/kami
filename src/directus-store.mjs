@@ -148,6 +148,19 @@ function toTerm(item) {
     note: item.note || "",
     status: item.status || "observed",
     provenance: item.provenance || "directus",
+    assetTier: item.asset_tier || (item.status === "approved" ? "formal" : "candidate"),
+    caseSensitive: Boolean(item.case_sensitive),
+    preserveOriginal: Boolean(item.preserve_original),
+    version: Number(item.version) || 1,
+    versionGroupId: item.version_group_id || "",
+    lifecycleStatus: item.lifecycle_status || "active",
+    validFrom: item.valid_from || null,
+    validTo: item.valid_to || null,
+    projects: arrayValue(item.projects),
+    channels: arrayValue(item.channels),
+    platforms: arrayValue(item.platforms),
+    regions: arrayValue(item.regions),
+    supersededBy: item.superseded_by || "",
     createdAt: item.date_created,
     updatedAt: item.date_updated
   };
@@ -166,7 +179,20 @@ function toDirectusTerm(input) {
     enforcement: input.enforcement || "required",
     note: String(input.note || "").trim(),
     status: input.status || "approved",
-    provenance: input.provenance || "kami-workbench"
+    provenance: input.provenance || "kami-workbench",
+    asset_tier: input.assetTier || (input.status === "approved" || !input.status ? "formal" : "candidate"),
+    case_sensitive: Boolean(input.caseSensitive),
+    preserve_original: Boolean(input.preserveOriginal),
+    version: Math.max(1, Number(input.version) || 1),
+    version_group_id: input.versionGroupId || "",
+    lifecycle_status: input.lifecycleStatus || "active",
+    valid_from: input.validFrom || null,
+    valid_to: input.validTo || null,
+    projects: input.projects || [],
+    channels: input.channels || [],
+    platforms: input.platforms || [],
+    regions: input.regions || [],
+    superseded_by: input.supersededBy || ""
   };
 }
 
@@ -201,7 +227,7 @@ export async function initializeDirectusStore() {
 export async function getDirectusMemories(locale, { contentType = "general", domain = "general", limit = 500, exactContentType = false } = {}) {
   const collection = memoryCollectionFor(locale);
   const directusLimit = Number(limit) <= 0 ? "-1" : String(Math.min(1000, limit));
-  const params = new URLSearchParams({ limit: directusLimit, sort: "-date_updated,-date_created", fields: "id,source,target,domain,content_type,content_tags,channel,style_profile_id,quality_status,qa_score,provenance,source_file,batch_id,source_row,embedding,date_created,date_updated" });
+  const params = new URLSearchParams({ limit: directusLimit, sort: "-date_updated,-date_created", fields: "id,source,target,domain,content_type,content_tags,channel,style_profile_id,quality_status,qa_score,provenance,source_file,batch_id,source_row,embedding,asset_tier,version,version_group_id,lifecycle_status,valid_from,valid_to,project,campaign,platform,region,audience,superseded_by,date_created,date_updated" });
   const items = await request(`/items/${collection}?${params}`);
   return items.filter((item) =>
     (!contentType || (exactContentType ? item.content_type === contentType : contentType === "general" || item.content_type === contentType || item.content_type === "general"))
@@ -218,6 +244,18 @@ export async function getDirectusMemories(locale, { contentType = "general", dom
     qualityStatus: item.quality_status || "provisional",
     qaScore: Number(item.qa_score) || 0,
     provenance: item.provenance || "directus",
+    assetTier: item.asset_tier || (item.quality_status === "human_approved" ? "formal" : item.quality_status === "machine_verified" ? "working" : "candidate"),
+    version: Number(item.version) || 1,
+    versionGroupId: item.version_group_id || "",
+    lifecycleStatus: item.lifecycle_status || "active",
+    validFrom: item.valid_from || null,
+    validTo: item.valid_to || null,
+    project: item.project || "",
+    campaign: item.campaign || "",
+    platform: item.platform || "",
+    region: item.region || "",
+    audience: item.audience || "",
+    supersededBy: item.superseded_by || "",
     sourceFile: item.source_file || "",
     batchId: item.batch_id || "",
     sourceRow: item.source_row || null,
@@ -251,6 +289,18 @@ export async function saveDirectusMemory(locale, input) {
     source_file: input.sourceFile || "",
     batch_id: input.batchId || "",
     source_row: Number(input.sourceRow) || null,
+    asset_tier: input.assetTier || (input.qualityStatus === "human_approved" ? "formal" : input.qualityStatus === "machine_verified" ? "working" : "candidate"),
+    version: Math.max(1, Number(input.version) || 1),
+    version_group_id: input.versionGroupId || "",
+    lifecycle_status: input.lifecycleStatus || "active",
+    valid_from: input.validFrom || null,
+    valid_to: input.validTo || null,
+    project: input.project || "",
+    campaign: input.campaign || "",
+    platform: input.platform || "",
+    region: input.region || "",
+    audience: input.audience || "",
+    superseded_by: input.supersededBy || "",
     ...(embedding ? { embedding } : {})
   };
   const saved = existing[0]
@@ -261,7 +311,7 @@ export async function saveDirectusMemory(locale, input) {
 
 export async function getDirectusStyleProfile(locale, contentType, domain = "general") {
   assertLocale(locale);
-  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,content_tags,domain,instructions,examples,rules,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
+  const params = new URLSearchParams({ limit: "20", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,content_tags,domain,instructions,review_rubric,examples,rules,version,parent_id,evidence_count,evidence_ids,generated_by,source_batch_id,learning_run_id,status,date_updated" });
   params.set("filter[target_locale][_eq]", locale);
   params.set("filter[content_type][_eq]", contentType || "general");
   params.set("filter[status][_eq]", "active");
@@ -277,6 +327,8 @@ export async function getDirectusStyleProfile(locale, contentType, domain = "gen
     contentTags: arrayValue(profile.content_tags),
     domain: profile.domain || "general",
     instruction: profile.instructions,
+    reviewRubric: profile.review_rubric || null,
+    rules: arrayValue(profile.rules),
     examples: arrayValue(profile.examples),
     version: Number(profile.version) || 1,
     evidenceCount: Number(profile.evidence_count) || 0,
@@ -375,6 +427,7 @@ export async function saveDirectusUserProfile(input) {
     name: input.name || `${locale} 译者画像`,
     target_locale: locale,
     instructions: input.instruction,
+    review_rubric: input.reviewRubric || null,
     examples: input.examples || [],
     version: (Number(previous?.version) || 0) + 1,
     parent_id: previous?.id || null,
@@ -412,7 +465,7 @@ export async function saveDirectusStyleProfile(input) {
     status: input.status || "active"
   } });
   if (previous?.id && saved.status === "active") await request(`/items/style_profiles/${previous.id}`, { method: "PATCH", body: { status: "inactive" } });
-  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, examples: saved.examples || [], rules: arrayValue(saved.rules), version: saved.version, locale, contentType: saved.content_type, contentTags: arrayValue(saved.content_tags), domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
+  return { id: saved.id, name: saved.name, source: "style-library", instruction: saved.instructions, reviewRubric: saved.review_rubric || null, examples: saved.examples || [], rules: arrayValue(saved.rules), version: saved.version, locale, contentType: saved.content_type, contentTags: arrayValue(saved.content_tags), domain: saved.domain, sourceBatchId: saved.source_batch_id || "", learningRunId: saved.learning_run_id || "", status: saved.status };
 }
 
 function mapStyleLearningRun(item) {
@@ -520,7 +573,7 @@ export async function getDirectusQaCases(locale, { contentType = "general", doma
   params.set("filter[target_locale][_eq]", locale);
   if (contentType) params.set("filter[content_type][_eq]", contentType);
   const items = await request(`/items/qa_cases?${params}`);
-  return items.filter((item) => (!domain || domain === "general" || item.domain === domain || item.domain === "general") && ["machine_verified", "human_approved"].includes(item.status)).map((item) => ({
+  return items.filter((item) => (!domain || domain === "general" || item.domain === domain || item.domain === "general") && item.status === "human_approved").map((item) => ({
     id: item.id, locale: item.target_locale, contentType: item.content_type, domain: item.domain || "general", source: item.source,
     rejectedTranslation: item.rejected_translation, correctedTranslation: item.corrected_translation, issues: arrayValue(item.issues),
     scoreBefore: Number(item.score_before) || 0, scoreAfter: Number(item.score_after) || 0, status: item.status, embedding: item.embedding || null, createdAt: item.date_created
@@ -529,7 +582,7 @@ export async function getDirectusQaCases(locale, { contentType = "general", doma
 
 export async function getDirectusAssets(locale) {
   const collection = collectionFor(locale);
-  const fields = "id,source,aliases,target,forbidden,domains,content_types,content_tags,enforcement,note,status,provenance,date_created,date_updated";
+  const fields = "id,source,aliases,target,forbidden,domains,content_types,content_tags,enforcement,note,status,provenance,asset_tier,case_sensitive,preserve_original,version,version_group_id,lifecycle_status,valid_from,valid_to,projects,channels,platforms,regions,superseded_by,date_created,date_updated";
   const items = await request(`/items/${collection}?limit=-1&sort=-date_updated&fields=${fields}`);
   const latest = items.map((item) => item.date_updated || item.date_created).filter(Boolean).sort().at(-1);
   return {
@@ -1132,11 +1185,11 @@ export async function deleteDirectusBackgroundTask(id) {
 }
 
 export async function findDirectusStyleProfile(id) {
-  const fields = "id,name,target_locale,content_type,domain,instructions,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated";
+  const fields = "id,name,target_locale,content_type,domain,instructions,review_rubric,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated";
   const shape = (item, kind) => ({
     id: item.id, name: item.name, locale: item.target_locale,
     contentType: item.content_type || "", domain: item.domain || "general",
-    instruction: item.instructions, examples: arrayValue(item.examples), rules: arrayValue(item.rules),
+    instruction: item.instructions, reviewRubric: item.review_rubric || null, examples: arrayValue(item.examples), rules: arrayValue(item.rules),
     version: Number(item.version) || 1, parentId: item.parent_id || null,
     evidenceCount: Number(item.evidence_count) || 0, evaluation: item.evaluation || null,
     status: item.status, kind, updatedAt: item.date_updated
@@ -1174,7 +1227,7 @@ export async function saveDirectusStyleProfileEvaluation(id, evaluation) {
 
 export async function listDirectusStyleProfiles(locale, status, scope = null) {
   assertLocale(locale);
-  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,content_tags,domain,instructions,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
+  const styleParams = new URLSearchParams({ limit: "50", sort: "-version,-date_updated", fields: "id,name,target_locale,content_type,content_tags,domain,instructions,review_rubric,examples,rules,version,parent_id,evidence_count,generated_by,source_batch_id,learning_run_id,evaluation,status,date_updated" });
   styleParams.set("filter[target_locale][_eq]", locale);
   if (status) styleParams.set("filter[status][_eq]", status);
   if (scope?.contentType) {
@@ -1192,7 +1245,7 @@ export async function listDirectusStyleProfiles(locale, status, scope = null) {
   return {
     styleProfiles: styleProfiles.map((item) => ({
       id: item.id, name: item.name, locale: item.target_locale, contentType: item.content_type, contentTags: arrayValue(item.content_tags), domain: item.domain || "general",
-      instruction: item.instructions, examples: arrayValue(item.examples), rules: arrayValue(item.rules), version: Number(item.version) || 1,
+      instruction: item.instructions, reviewRubric: item.review_rubric || null, examples: arrayValue(item.examples), rules: arrayValue(item.rules), version: Number(item.version) || 1,
       parentId: item.parent_id || null, evidenceCount: Number(item.evidence_count) || 0,
       sourceBatchId: item.source_batch_id || "", learningRunId: item.learning_run_id || "",
       evaluation: item.evaluation || null,
@@ -1767,6 +1820,266 @@ export async function updateDirectusSkillEvaluation(id, patch) {
   if (body.decision === "promote") await validateDirectusSkillEvaluation({ ...existing, decision: body.decision });
   if (!Object.keys(body).length) return existing;
   return mapSkillEvaluation(await request(`/items/skill_evaluations/${encodeURIComponent(String(id))}`, { method: "PATCH", body }));
+}
+
+const QUALITY_ASSET_KINDS = new Set(["gold_set", "regression_candidate", "regression_suite"]);
+const QUALITY_GATE_DECISIONS = new Set(["pass", "block", "insufficient"]);
+
+function mapQualityAsset(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    kind: item.kind || "",
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    project: item.project || "default",
+    name: item.name || "",
+    description: item.description || "",
+    seriesId: item.series_id || "",
+    version: Number(item.version) || 1,
+    parentVersionId: item.parent_version_id || "",
+    status: item.status || "draft",
+    enabled: Boolean(item.enabled),
+    itemCount: Number(item.item_count) || 0,
+    sourceQaCaseId: item.source_qa_case_id || "",
+    fingerprint: item.fingerprint || "",
+    payload: directusJson(item.payload),
+    approval: directusJson(item.approval, null),
+    changeNote: item.change_note || "",
+    createdBy: item.created_by || "",
+    createdAt: item.date_created || null,
+    updatedAt: item.date_updated || item.date_created || null
+  };
+}
+
+/**
+ * The normalized record from gold-regression.mjs is stored verbatim in
+ * `payload`; the columns are projections used only for admin browsing and
+ * filtering. Nothing reads a quality asset back out of the columns.
+ */
+function qualityAssetBody(input) {
+  const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+  const scope = directusLearningScope(input.scope || payload.scope || input, {});
+  const kind = assertLearningChoice(String(input.kind ?? payload.kind ?? ""), QUALITY_ASSET_KINDS, "quality asset kind");
+  const items = Array.isArray(payload.samples) ? payload.samples : Array.isArray(payload.cases) ? payload.cases : [];
+  return {
+    kind,
+    target_locale: scope.locale,
+    content_type: scope.contentType,
+    domain: scope.domain,
+    project: scope.project,
+    name: String(payload.name ?? input.name ?? "").trim(),
+    description: String(payload.description ?? input.description ?? ""),
+    series_id: String(payload.seriesId ?? input.seriesId ?? payload.id ?? ""),
+    version: Number(payload.version ?? input.version ?? 1),
+    parent_version_id: String(payload.parentVersionId ?? input.parentVersionId ?? ""),
+    status: String(payload.status ?? input.status ?? "draft"),
+    enabled: Boolean(payload.enabled ?? input.enabled ?? false),
+    item_count: items.length,
+    source_qa_case_id: String(payload.sourceQaCaseId ?? input.sourceQaCaseId ?? ""),
+    fingerprint: String(payload.fingerprint ?? input.fingerprint ?? ""),
+    payload,
+    approval: payload.approval ?? input.approval ?? null,
+    change_note: String(payload.changeNote ?? input.changeNote ?? ""),
+    created_by: String(payload.createdBy ?? input.createdBy ?? "")
+  };
+}
+
+/**
+ * The row id is Directus's own UUID. The asset's semantic id (`series#v2`)
+ * stays inside the payload, because a version-scoped string is not a valid
+ * primary key here and Directus rejects one as a permission error.
+ */
+export async function saveDirectusQualityAsset(input) {
+  const body = qualityAssetBody(input);
+  const id = String(input.id ?? "");
+  if (id) {
+    const existing = await getDirectusQualityAsset(id);
+    if (existing) return mapQualityAsset(await request(`/items/quality_assets/${encodeURIComponent(id)}`, { method: "PATCH", body }));
+  }
+  return mapQualityAsset(await request("/items/quality_assets", { method: "POST", body }));
+}
+
+export async function listDirectusQualityAssets(filters = {}) {
+  const params = addLearningScopeFilters(new URLSearchParams({
+    limit: directusListLimit(filters.limit, 200),
+    sort: "-date_created",
+    fields: "*"
+  }), filters);
+  if (filters.kind) params.set("filter[kind][_eq]", assertLearningChoice(String(filters.kind), QUALITY_ASSET_KINDS, "quality asset kind"));
+  if (filters.status) params.set("filter[status][_eq]", String(filters.status));
+  if (filters.seriesId) params.set("filter[series_id][_eq]", String(filters.seriesId));
+  if (filters.sourceQaCaseId) params.set("filter[source_qa_case_id][_eq]", String(filters.sourceQaCaseId));
+  if (filters.enabled !== undefined) params.set("filter[enabled][_eq]", filters.enabled ? "true" : "false");
+  return (await request(`/items/quality_assets?${params}`)).map(mapQualityAsset);
+}
+
+export async function getDirectusQualityAsset(id) {
+  try {
+    return mapQualityAsset(await request(`/items/quality_assets/${encodeURIComponent(String(id))}?fields=*`));
+  } catch (error) {
+    if (isMissingItem(error)) return null;
+    throw error;
+  }
+}
+
+/**
+ * Only lifecycle columns are patchable. Changing the content of a fixed asset
+ * requires a new version, which is what keeps a gate result reproducible.
+ */
+export async function updateDirectusQualityAsset(id, patch = {}) {
+  const existing = await getDirectusQualityAsset(id);
+  if (!existing) return null;
+  const body = {};
+  if (patch.status !== undefined) body.status = String(patch.status);
+  if (patch.enabled !== undefined) body.enabled = Boolean(patch.enabled);
+  if (patch.approval !== undefined) body.approval = patch.approval;
+  if (patch.changeNote !== undefined) body.change_note = String(patch.changeNote);
+  if (patch.payload !== undefined) body.payload = patch.payload;
+  if (!Object.keys(body).length) return existing;
+  return mapQualityAsset(await request(`/items/quality_assets/${encodeURIComponent(String(id))}`, { method: "PATCH", body }));
+}
+
+function mapQualityRun(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    project: item.project || "default",
+    skillId: item.skill_id || "",
+    skillVersion: item.skill_version || "",
+    decision: item.decision || "insufficient",
+    regressionTotal: Number(item.regression_total) || 0,
+    regressionPassed: Number(item.regression_passed) || 0,
+    regressionPassRate: item.regression_pass_rate === null || item.regression_pass_rate === undefined ? null : Number(item.regression_pass_rate),
+    goldTotal: Number(item.gold_total) || 0,
+    goldTermAccuracy: item.gold_term_accuracy === null || item.gold_term_accuracy === undefined ? null : Number(item.gold_term_accuracy),
+    goldFactAccuracy: item.gold_fact_accuracy === null || item.gold_fact_accuracy === undefined ? null : Number(item.gold_fact_accuracy),
+    assetVersions: directusJson(item.asset_versions, {}),
+    metrics: directusJson(item.metrics, {}),
+    report: directusJson(item.report, {}),
+    blocking: directusJson(item.blocking, []),
+    triggeredBy: item.triggered_by || "",
+    createdAt: item.date_created || null
+  };
+}
+
+export async function saveDirectusQualityRun(input) {
+  const scope = directusLearningScope(input.scope || input, {});
+  const body = {
+    target_locale: scope.locale,
+    content_type: scope.contentType,
+    domain: scope.domain,
+    project: scope.project,
+    skill_id: String(input.skillId ?? ""),
+    skill_version: String(input.skillVersion ?? ""),
+    decision: assertLearningChoice(String(input.decision ?? "insufficient"), QUALITY_GATE_DECISIONS, "quality gate decision"),
+    regression_total: Number(input.regressionTotal) || 0,
+    regression_passed: Number(input.regressionPassed) || 0,
+    regression_pass_rate: Number.isFinite(Number(input.regressionPassRate)) ? Number(input.regressionPassRate) : null,
+    gold_total: Number(input.goldTotal) || 0,
+    gold_term_accuracy: Number.isFinite(Number(input.goldTermAccuracy)) ? Number(input.goldTermAccuracy) : null,
+    gold_fact_accuracy: Number.isFinite(Number(input.goldFactAccuracy)) ? Number(input.goldFactAccuracy) : null,
+    asset_versions: input.assetVersions ?? {},
+    metrics: input.metrics ?? {},
+    report: input.report ?? {},
+    blocking: input.blocking ?? [],
+    triggered_by: String(input.triggeredBy ?? "")
+  };
+  return mapQualityRun(await request("/items/quality_runs", { method: "POST", body }));
+}
+
+export async function listDirectusQualityRuns(filters = {}) {
+  const params = addLearningScopeFilters(new URLSearchParams({
+    limit: directusListLimit(filters.limit, 50),
+    sort: "-date_created",
+    fields: "*"
+  }), filters);
+  if (filters.skillId) params.set("filter[skill_id][_eq]", String(filters.skillId));
+  if (filters.decision) params.set("filter[decision][_eq]", String(filters.decision));
+  return (await request(`/items/quality_runs?${params}`)).map(mapQualityRun);
+}
+
+function mapTrainingRun(item) {
+  if (!item) return null;
+  const payload = directusJson(item.payload);
+  return {
+    id: item.id,
+    locale: item.target_locale,
+    contentType: item.content_type || "general",
+    domain: item.domain || "general",
+    project: item.project || "default",
+    name: item.name || "",
+    method: item.method || "sft",
+    status: item.status || "draft",
+    baseModel: item.base_model || "",
+    teacherModel: item.teacher_model || "",
+    artifactModelId: item.artifact_model_id || "",
+    externalJobId: item.external_job_id || "",
+    totalRecords: Number(item.total_records) || 0,
+    runFingerprint: item.run_fingerprint || "",
+    payload,
+    error: item.error || "",
+    createdBy: item.created_by || "",
+    createdAt: item.date_created || null,
+    updatedAt: item.date_updated || item.date_created || null
+  };
+}
+
+function trainingRunBody(input) {
+  const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+  const scope = directusLearningScope(input.scope || payload.scope || input, {});
+  return {
+    target_locale: scope.locale,
+    content_type: scope.contentType,
+    domain: scope.domain,
+    project: scope.project,
+    name: String(payload.name || ""),
+    method: String(payload.recipe?.method || "sft"),
+    status: String(payload.status || "draft"),
+    base_model: String(payload.recipe?.baseModel || ""),
+    teacher_model: String(payload.recipe?.teacherModel || ""),
+    artifact_model_id: String(payload.artifact?.modelId || ""),
+    external_job_id: String(payload.externalJobId || ""),
+    total_records: Number(payload.totalRecords) || 0,
+    run_fingerprint: String(payload.fingerprint || ""),
+    payload,
+    error: String(payload.error || ""),
+    created_by: String(payload.createdBy || "")
+  };
+}
+
+export async function saveDirectusTrainingRun(input) {
+  const body = trainingRunBody(input);
+  const id = String(input.id || "");
+  if (id) {
+    const existing = await getDirectusTrainingRun(id);
+    if (existing) return mapTrainingRun(await request(`/items/training_runs/${encodeURIComponent(id)}`, { method: "PATCH", body }));
+  }
+  return mapTrainingRun(await request("/items/training_runs", { method: "POST", body }));
+}
+
+export async function listDirectusTrainingRuns(filters = {}) {
+  const params = addLearningScopeFilters(new URLSearchParams({
+    limit: directusListLimit(filters.limit, 50),
+    sort: "-date_created",
+    fields: "*"
+  }), filters);
+  if (filters.status) params.set("filter[status][_eq]", String(filters.status));
+  if (filters.method) params.set("filter[method][_eq]", String(filters.method));
+  return (await request(`/items/training_runs?${params}`)).map(mapTrainingRun);
+}
+
+export async function getDirectusTrainingRun(id) {
+  try {
+    return mapTrainingRun(await request(`/items/training_runs/${encodeURIComponent(String(id))}?fields=*`));
+  } catch (error) {
+    if (isMissingItem(error)) return null;
+    throw error;
+  }
 }
 
 export function getDirectusMetadata() {

@@ -8,6 +8,9 @@ let runtimeConfig = {
   baseUrl: process.env.LLM_BASE_URL || loadedProvider.config.baseUrl || "http://localhost:11434/v1",
   apiKey: process.env.LLM_API_KEY || loadedProvider.config.apiKey || "",
   model: process.env.LLM_MODEL || loadedProvider.config.model || "qwen3:14b",
+  fastModel: process.env.LLM_FAST_MODEL || loadedProvider.config.fastModel || "",
+  qualityModel: process.env.LLM_QUALITY_MODEL || loadedProvider.config.qualityModel || "",
+  mtModel: process.env.LLM_MT_MODEL || loadedProvider.config.mtModel || "",
   embeddingModel: process.env.LLM_EMBEDDING_MODEL || loadedProvider.config.embeddingModel || "",
   embeddingBaseUrl: process.env.LLM_EMBEDDING_BASE_URL || loadedProvider.config.embeddingBaseUrl || "",
   embeddingApiKey: process.env.LLM_EMBEDDING_API_KEY || loadedProvider.config.embeddingApiKey || "",
@@ -33,6 +36,9 @@ export function updateProviderConfig(input = {}) {
     baseUrl: String(input.baseUrl || runtimeConfig.baseUrl).replace(/\/$/, ""),
     apiKey: input.clearApiKey === true ? "" : (submittedApiKey || runtimeConfig.apiKey),
     model: String(input.model || runtimeConfig.model),
+    fastModel: Object.hasOwn(input, "fastModel") ? String(input.fastModel || "").trim() : runtimeConfig.fastModel,
+    qualityModel: Object.hasOwn(input, "qualityModel") ? String(input.qualityModel || "").trim() : runtimeConfig.qualityModel,
+    mtModel: Object.hasOwn(input, "mtModel") ? String(input.mtModel || "").trim() : runtimeConfig.mtModel,
     embeddingModel: Object.hasOwn(input, "embeddingModel") ? String(input.embeddingModel || "").trim() : runtimeConfig.embeddingModel,
     embeddingBaseUrl: Object.hasOwn(input, "embeddingBaseUrl") ? String(input.embeddingBaseUrl || "").replace(/\/$/, "") : runtimeConfig.embeddingBaseUrl,
     embeddingApiKey: input.clearEmbeddingApiKey === true ? "" : (submittedEmbeddingApiKey || runtimeConfig.embeddingApiKey),
@@ -131,6 +137,8 @@ function packPrompt(contextPack) {
   return `你是资深游戏本地化写手。你的任务不是逐字翻译，而是把简体中文文案用 ${contextPack.targetLanguage} 玩家最自然的方式重新表达：先读懂这句话在游戏场景里的意图、情绪与角色，再用目标语言母语者会用的说法写出来。只改变表达方式，不改变信息。\n\n` +
     `内容类型：${contextPack.contentTypeLabel}\n` +
     `语体要求：${contextPack.register}\n` +
+    `本语体写作口径：${contextPack.styleProfile?.contentTypeDirective || ""}\n` +
+    `语域上限（写完会用同一口径判定，超出会被标记）：${JSON.stringify(contextPack.styleProfile?.registerPolicy || {})}——promotional 推销感、casual 口语网感、generic 套话平淡，数值越低表示该倾向越不被允许。\n` +
     `翻译风格：${contextPack.styleProfile?.name || contextPack.contentTypeLabel} · 版本 ${contextPack.styleProfile?.version || 1} · ${contextPack.styleProfile?.instruction || contextPack.register}\n` +
     `风格正反例：${JSON.stringify(contextPack.styleProfile?.examples || [])}\n` +
     `翻译技能：${translationSkill ? `${translationSkill.name} · v${translationSkill.version} · ${translationSkill.instruction || "沿用当前稳定流程"}` : "默认稳定流程"}\n` +
@@ -149,6 +157,8 @@ function packPrompt(contextPack) {
     `强制术语：${JSON.stringify(contextPack.requiredTerms, null, 2)}\n` +
     `参考术语：${JSON.stringify(contextPack.preferredTerms, null, 2)}\n` +
     `必须原样保留（URL、占位符、标签、带单位的数值）：${JSON.stringify(contextPack.protectedTokens)}
+` +
+    `结构化事实锚点（translation 范围必须在译文中保持等价；task 范围只作为交付约束，不得翻译进正文）：${JSON.stringify(contextPack.factSchema || { facts: [], limits: [] })}
 ` +
     `数字与日期：数值必须等价，但格式要按目标语言习惯改写。中文的日期简写（如 820 表示 8 月 20 日）必须展开为目标语言的正常写法，不得为了保留字面而在译文里额外塞入原样数字。
 
@@ -598,7 +608,7 @@ export async function evaluateTranslationWithModel({ contextPack, translation, r
   const messages = [
     {
       role: "system",
-      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查准确性、漏译/增译、术语、语体、流畅度、本地自然度、一致性、格式、约束、韵律与重复、翻译腔。approvedReferences 是人工批准的译例，只有同语种、同语体且语义相关时才引用，且仍不能盲从。machineDrafts 是本系统自己此前产出的机器译文，只能用于发现同一文档内自相矛盾，绝不能当作正确与否的依据，也不得以"与 machineDrafts 不一致"为由报告问题。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。category 使用简短英文代码；message、suggestion 和其他解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 必须逐字保留原文或译文中的证据片段。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy","sourceSpan":"原文片段","targetSpan":"译文片段","message":"简体中文问题原因","suggestion":"简体中文可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
+      content: `你是独立于翻译器的亚洲语言本地化 QA 审校员。按照 MQM 思路逐项检查六个一级维度：Accuracy、Fluency、Terminology、Style、Locale、Platform。category 必须以小写一级维度开头，可细分为 accuracy_omission、accuracy_addition、accuracy_mistranslation、fluency_grammar、fluency_naturalness、terminology_required、terminology_forbidden、style_register、style_brand、locale_convention、platform_constraint、platform_placeholder。contextPack.styleProfile.reviewRubric 是评审标准，不是生成提示。approvedReferences 是人工批准的译例，只有同语种、同语体且语义相关时才引用，且仍不能盲从。machineDrafts 是本系统自己此前产出的机器译文，只能用于发现同一文档内自相矛盾，绝不能当作正确与否的依据，也不得以"与 machineDrafts 不一致"为由报告问题。不要直接给总分，只报告可定位的问题。严重度只能是 critical、major、minor。message、suggestion 和其他解释性字段必须全部使用简体中文，禁止用目标语言解释问题；sourceSpan、targetSpan 必须逐字保留原文或译文中的证据片段。特别注意：只有语义确实丢失或凭空添加事实才算漏译/增译；调整语序、换用同义地道表达、重写修辞都不是问题。发现译文逐字直译、翻译腔、不像目标语言原生文案时，记 major（category 用 fluency_naturalness）。原文含押韵、对仗、重复或口号结构时，译文必须用目标语言自然重现节奏与韵律；机械逐字重复、把闲散语气译成命令口吻、韵律完全丢失都应记 major。若输入里的 contextPack 携带 batchVerse 或 batchReferences（同批排比韵文），必须检查当前译文与本批已定稿译文的句式、节奏与用词风格是否一致，明显不一致记 major。没有问题返回空数组。输出严格 JSON：{"issues":[{"severity":"major","category":"accuracy_omission","sourceSpan":"原文片段","targetSpan":"译文片段","message":"简体中文问题原因","suggestion":"简体中文可执行修订意见","evidenceMemoryId":"可选ID","confidence":0.9}]}`
     },
     { role: "user", content: JSON.stringify({ contextPack, translation, approvedReferences: references.slice(0, 5), machineDrafts: machineDrafts.slice(0, 3), qaCases: qaCases.slice(0, 3) }) }
   ];
@@ -654,7 +664,7 @@ export async function evaluateAutoQaWithModel({ source, translation, locale, con
   const evidencePayload = {
     source, translation, locale, contentType, domain,
     multiSentence: String(source).includes("\n"),
-    styleProfile: styleProfile ? { name: styleProfile.name, version: styleProfile.version, instruction: styleProfile.instruction, examples: styleProfile.examples } : null,
+    styleProfile: styleProfile ? { name: styleProfile.name, version: styleProfile.version, instruction: styleProfile.instruction, reviewRubric: styleProfile.reviewRubric || null, examples: styleProfile.examples } : null,
     // approvedReferences 是唯一可以充当"标准"的一档；machineDrafts 只是本系统
     // 自己此前的输出，拿它当依据会让一次错误在下一次评审里变成规范。
     approvedReferences: references.slice(0, 5),
@@ -1259,12 +1269,13 @@ export async function classifyWithModel(text, { descriptor = "", location = "" }
   return { ...JSON.parse(match[0]), source: "model" };
 }
 
-export async function translateWithReflection(contextPack, { reflect = true, onUsage = null, temperature = undefined, seed = undefined, onSeedUnsupported = null } = {}) {
+export async function translateWithReflection(contextPack, { reflect = true, onUsage = null, temperature = undefined, seed = undefined, onSeedUnsupported = null, model = "" } = {}) {
   const rhymeLike = contextPack?.rhymeLike === true;
   const batchVerse = contextPack?.batchVerse?.active === true;
+  const callConfig = model ? { ...runtimeConfig, model } : runtimeConfig;
   // 温度：普通文本 0.6 给地道表达留空间，韵文/批排比 0.85 给节奏与韵脚再创作。
   const translationTemperature = Number.isFinite(Number(temperature)) ? Number(temperature) : (rhymeLike || batchVerse ? 0.85 : 0.6);
-  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], runtimeConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: translationTemperature, seed, onSeedUnsupported, onUsage });
+  const initial = await chat([{ role: "user", content: packPrompt(contextPack) }], callConfig, { timeoutMs: 75_000, requestLabel: "翻译", temperature: translationTemperature, seed, onSeedUnsupported, onUsage });
   if (!reflect && !rhymeLike) return { initial, translation: initial, reflection: "" };
   if (rhymeLike) {
     // 韵文本地化专用通道：初译只作参考，要求模型以目标语言玩家视角再创作，
@@ -1272,17 +1283,110 @@ export async function translateWithReflection(contextPack, { reflect = true, onU
     const localized = await chat([
       { role: "system", content: "你是游戏文案韵文本地化师。把简体中文顺口溜/韵文改写为目标语言地道的押韵短句：保留原意与情绪（自嘲、洒脱、吆喝等），重现节奏、叠词与韵脚，允许换用拟态词、惯用句和谚语；严禁机械逐字直译，严禁把闲散语气译成命令口吻。只输出一行最终译文，不解释。\n\n改写示范（达到这个质量才算合格）：\n原文：走走走，游游游，甘为铜钱做马牛。\n译文：とことこ歩いて、ぶらぶら遊んで、銭のためなら馬にも牛にも。" },
       { role: "user", content: `原文：${contextPack.source}\n参考技巧：中文三字重复可译为日语叠词/拟态词（とことこ、ぶらぶら等），尾韵可用同一语尾（〜て、〜で、〜う）呼应。不要参考任何现成译文，直接从原文创作。` }
-    ], runtimeConfig, { temperature: translationTemperature, seed, onSeedUnsupported, timeoutMs: 75_000, requestLabel: "韵文本地化", onUsage });
+    ], callConfig, { temperature: translationTemperature, seed, onSeedUnsupported, timeoutMs: 75_000, requestLabel: "韵文本地化", onUsage });
     return { initial, translation: localized, reflection: "rhyme-localized" };
   }
   const reflection = await chat([
     { role: "system", content: "你是严格的双语本地化审校。只指出漏译、误译、术语、事实、语体、翻译腔和韵律/重复结构丢失问题（原文押韵、对仗或口号式重复时，译文须自然重现节奏与语气）；若上下文带有同批已定稿译文，还要检查句式与风格是否保持一致；没有问题则回答 PASS。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：\n${initial}` }
-  ], runtimeConfig, { temperature: 0.35, timeoutMs: 60_000, requestLabel: "翻译自检", onUsage });
+  ], callConfig, { temperature: 0.35, timeoutMs: 60_000, requestLabel: "翻译自检", onUsage });
   if (/^PASS[。.!]?$/i.test(reflection)) return { initial, translation: initial, reflection };
   const translation = await chat([
     { role: "system", content: "你是最终修订译者。根据审校意见做最小必要修改，严格保留事实、格式和指定术语。只输出最终译文。" },
     { role: "user", content: `上下文要求：${JSON.stringify(contextPack)}\n\n初译：${initial}\n\n审校意见：${reflection}` }
-  ], runtimeConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "翻译修订", onUsage });
+  ], callConfig, { temperature: 0.15, timeoutMs: 75_000, requestLabel: "翻译修订", onUsage });
   return { initial, translation, reflection };
+}
+
+function uniqueCandidateTexts(items = []) {
+  const seen = new Set();
+  return items.map((item) => String(item || "").trim()).filter((item) => {
+    if (!item || seen.has(item)) return false;
+    seen.add(item);
+    return true;
+  });
+}
+
+async function chooseTranslationCandidate(contextPack, candidates, config, onUsage) {
+  if (candidates.length < 2) return { index: 0, reason: "只有一个有效候选" };
+  try {
+    const content = await chat([
+      { role: "system", content: "你是资深本地化主编。按原意忠实、事实完整、强制术语、目标语言自然度、当前语体和品牌风格选择最佳候选。不得改写候选。输出严格 JSON：{\"index\":0,\"reason\":\"简短理由\"}。index 从 0 开始。" },
+      { role: "user", content: JSON.stringify({ source: contextPack.source, locale: contextPack.targetLocale, contentType: contextPack.contentType, facts: contextPack.factSchema || null, candidates }) }
+    ], config, { temperature: 0, timeoutMs: 60_000, requestLabel: "候选择优", onUsage });
+    const match = content.match(/\{[\s\S]*\}/);
+    const parsed = match ? JSON.parse(match[0]) : {};
+    const index = Number(parsed.index);
+    if (!Number.isInteger(index) || index < 0 || index >= candidates.length) throw new Error("候选编号无效");
+    return { index, reason: String(parsed.reason || "模型综合择优") };
+  } catch (error) {
+    return { index: 0, reason: `候选择优降级为首项：${error.message}`, fallbackReason: error.message };
+  }
+}
+
+/**
+ * 执行由服务端风险路由器选定的翻译路线。routePlan 由服务端生成，浏览器
+ * 只能请求策略名称，不能把任意模型或密钥注入模型调用。
+ */
+export async function translateWithRoute(contextPack, { routePlan = null, reflect = true, onUsage = null } = {}) {
+  const plan = routePlan || { route: "reflective", candidateCount: 1, model: runtimeConfig.model, modelRole: "main" };
+  const selectedModel = String(plan.model || runtimeConfig.model);
+  const selectedConfig = { ...runtimeConfig, model: selectedModel };
+
+  if (plan.route === "mt_post_edit") {
+    const draftModel = runtimeConfig.mtModel || runtimeConfig.fastModel || runtimeConfig.model;
+    const draft = await chat([{ role: "user", content: packPrompt(contextPack) }], { ...runtimeConfig, model: draftModel }, {
+      temperature: 0.25, timeoutMs: 75_000, requestLabel: "机器初译", onUsage
+    });
+    const finalModel = runtimeConfig.qualityModel || runtimeConfig.model;
+    const translation = await chat([
+      { role: "system", content: "你是目标语言母语本地化编辑。把机器初译改成可发布译文；按结构化术语、翻译记忆、风格规则和事实锚点做最小必要后编辑。不得漏译、增译或改变数字、日期、平台、地区、URL、占位符和承诺强度。只输出最终译文。" },
+      { role: "user", content: `${packPrompt(contextPack)}\n\n机器初译：\n${draft}` }
+    ], { ...runtimeConfig, model: finalModel }, {
+      temperature: 0.15, timeoutMs: 75_000, requestLabel: "LLM 后编辑", onUsage
+    });
+    return {
+      initial: draft,
+      translation,
+      reflection: "mt-post-edited",
+      candidates: [{ index: 0, translation, recommended: true, reason: "后编辑终稿" }],
+      routeExecution: { route: plan.route, draftModel, finalModel }
+    };
+  }
+
+  if (["transcreation", "multi_candidate"].includes(plan.route)) {
+    const count = Math.min(3, Math.max(2, Number(plan.candidateCount) || 3));
+    const directions = [
+      "平衡忠实度与母语自然度，作为稳妥可发布版本。",
+      "在不改变事实与术语的前提下，提高目标语言感染力与节奏。",
+      "优先目标平台和受众的自然表达，避免翻译腔与过度营销。"
+    ];
+    const generated = await Promise.all(directions.slice(0, count).map((direction, index) => chat([
+      { role: "user", content: `${packPrompt(contextPack)}\n\n候选方向 ${index + 1}：${direction}\n只输出这一版完整译文。` }
+    ], selectedConfig, {
+      temperature: index === 0 ? 0.55 : 0.78,
+      timeoutMs: 75_000,
+      requestLabel: `候选 ${index + 1}`,
+      onUsage
+    })));
+    const candidates = uniqueCandidateTexts(generated);
+    const selectionModel = runtimeConfig.qualityModel || selectedModel;
+    const selection = await chooseTranslationCandidate(contextPack, candidates, { ...runtimeConfig, model: selectionModel }, onUsage);
+    const translation = candidates[selection.index] || candidates[0] || "";
+    return {
+      initial: candidates[0] || "",
+      translation,
+      reflection: `candidate-selection: ${selection.reason}`,
+      candidates: candidates.map((text, index) => ({ index, translation: text, recommended: index === selection.index, reason: index === selection.index ? selection.reason : directions[index] })),
+      routeExecution: { route: plan.route, model: selectedModel, selectionModel, selectionFallback: selection.fallbackReason || "" }
+    };
+  }
+
+  const forceReflection = plan.route === "fact_guarded" ? true : (plan.route === "direct" ? false : reflect);
+  const result = await translateWithReflection(contextPack, { reflect: forceReflection, onUsage, model: selectedModel });
+  return {
+    ...result,
+    candidates: [{ index: 0, translation: result.translation, recommended: true, reason: plan.label || "系统推荐" }],
+    routeExecution: { route: plan.route, model: selectedModel }
+  };
 }

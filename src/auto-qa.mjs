@@ -300,8 +300,8 @@ function escapeRegExp(value) {
  * 复用硬 QA（受保护内容、强制/禁用术语、空译文）并叠加拼写、品牌名、标点与语气启发式。
  * 返回的每条 issue 都带 dimension: "basic"。
  */
-export function runBasicQa({ source, translation, matches = [], locale = "", titleOverrides = null }) {
-  const issues = runQa({ source, translation, matches, locale, titleOverrides }).map((issue) => ({
+export function runBasicQa({ source, translation, matches = [], locale = "", titleOverrides = null, contentType = "general", registerPolicy = null }) {
+  const issues = runQa({ source, translation, matches, locale, titleOverrides, contentType, registerPolicy }).map((issue) => ({
     ...issue,
     dimension: "basic",
     category: issue.category || "basic"

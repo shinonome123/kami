@@ -62,6 +62,7 @@
           <div class="control-row compact-controls">
             <label><span>内容语体</span><select id="contentType"><option value="auto">自动识别</option></select></label>
             <label><span>业务领域</span><select id="domain"><option value="auto">自动识别</option><option value="game">游戏</option><option value="general">通用</option><option value="marketing">市场营销</option><option value="community">社区运营</option></select></label>
+            <label><span>生成路线</span><select id="translationRoute"><option value="auto">按风险自动选择</option><option value="direct">直接翻译</option><option value="reflective">翻译 + 自检</option><option value="fact_guarded">事实保护</option><option value="transcreation">宣发创译</option><option value="mt_post_edit">机器初译 + LLM 后编辑</option><option value="multi_candidate">三候选</option></select></label>
             <label class="toggle-label"><input type="checkbox" id="reflect" checked /><span class="toggle"></span><span>译后反思</span></label>
           </div>
           <div id="singleWorkspace">
@@ -74,6 +75,7 @@
             <article class="editor-card target-card">
               <div class="card-head"><div><span class="card-kicker" id="targetKicker">TARGET · JA-JP</span><h2 id="targetTitle">日本語译文</h2></div><div class="target-status"><span class="term-legends" id="targetLegend" hidden><span class="term-legend official" id="officialLegend"><i></i><span id="officialCount">0 处正式术语</span></span><span class="term-legend suggestion" id="suggestionLegend"><i></i><span id="suggestionCount">0 处疑似术语</span></span></span><button class="button ghost small" id="toggleTargetEdit" hidden>编辑译文</button><button class="button ghost small" id="sendToAutoQa" hidden>转 Auto QA</button><button class="button ghost small" id="acceptTranslation" disabled>采纳为正式译法</button><span class="badge neutral" id="translationState">等待翻译</span></div></div>
               <div class="target-output empty" id="targetOutput">译文将在这里显示</div>
+              <div class="translation-candidates" id="translationCandidates" hidden></div>
             </article>
           </div>
           <div class="workflow-status" id="classificationPreview"><span class="pulse-dot"></span><span>输入后自动识别语体，并从当前语言术语库匹配</span></div>
@@ -88,8 +90,8 @@
               <article class="panel batch-source-panel">
                 <div class="panel-head"><div><span class="card-kicker">SOURCE DOCUMENT</span><h2>粘贴文本与文件</h2></div><span class="count" id="batchSourceMeta">尚未载入</span></div>
                 <label class="drop-zone batch-drop-zone" id="batchDropZone" for="batchFile">
-                  <input id="batchFile" type="file" accept=".txt,.md,.docx,.xlsx" hidden />
-                  <span class="upload-mark">↑</span><strong id="batchFilePrompt">拖入或点击选择文件</strong><small id="batchFileMeta">拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX，最大 10MB</small>
+                  <input id="batchFile" type="file" accept=".txt,.md,.docx,.xlsx,.csv" hidden />
+                  <span class="upload-mark">↑</span><strong id="batchFilePrompt">拖入或点击选择文件</strong><small id="batchFileMeta">拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX、CSV，最大 10MB</small>
                 </label>
                 <div class="batch-or"><span>或直接粘贴文本 · 粘贴后自动解析</span></div>
                 <textarea id="batchPasteText" class="batch-paste" placeholder="粘贴单句、公告、剧情或运营文案；系统会立即按完整句子生成队列。"></textarea>
@@ -315,6 +317,50 @@
             <div class="learning-evaluation-matrix" id="learningEvaluationMatrix"><div class="empty-list learning-empty">运行候选评测后展示对比指标</div></div>
           </article>
 
+          <article class="panel learning-quality-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">RELEASE GATE</span><h2>固定 Gold Set 与失败回归</h2><p class="panel-caption">候选晋升前必须在这套不随人工终稿漂移的固定资产上真跑一遍。回归案例一票否决，Gold 术语或事实退化同样阻断发版。</p></div>
+              <div class="learning-quality-actions">
+                <span class="asset-count subtle" id="learningGateStatus">尚未运行</span>
+                <button class="button ghost small" type="button" id="learningGateRun">运行门禁</button>
+              </div>
+            </div>
+            <div class="learning-quality-grid" id="learningQualityAssets"><div class="empty-list learning-empty">正在读取固定质量资产……</div></div>
+            <div class="learning-quality-toolbar">
+              <button class="button ghost small" type="button" id="learningGoldSeed">从人工终稿建 Gold Set</button>
+              <button class="button ghost small" type="button" id="learningRegressionBuild">用已批准候选建回归集</button>
+              <span class="learning-quality-hint">Gold 样本只取人工采纳终稿；回归候选来自人工批准的 QA 失败案例，进集合前还要再过一道人工审批。</span>
+            </div>
+            <div class="learning-quality-list" id="learningRegressionCandidates"></div>
+          </article>
+
+          <article class="panel learning-export-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">TRAINING EXPORT</span><h2>SFT / DPO 数据导出</h2><p class="panel-caption">只导出人工采纳的终稿与人工批准的 QA 修订。命中固定评测资产的样本一律剔除，并在审计里写清丢了多少、为什么丢。</p></div>
+              <div class="asset-count subtle" id="learningExportSummary">尚未统计</div>
+            </div>
+            <div class="learning-quality-toolbar">
+              <button class="button ghost small" type="button" id="learningExportAudit">统计并审计</button>
+              <button class="button ghost small" type="button" id="learningExportSft">下载 SFT JSONL</button>
+              <button class="button ghost small" type="button" id="learningExportDpo">下载 DPO JSONL</button>
+            </div>
+            <div class="learning-export-report" id="learningExportReport"><div class="empty-list learning-empty">点击「统计并审计」查看当前范围可导出的数据量与清洗结果</div></div>
+          </article>
+
+          <article class="panel learning-training-panel">
+            <div class="panel-head learning-section-head">
+              <div><span class="card-kicker">FINE-TUNE PIPELINE</span><h2>微调与蒸馏流水线</h2><p class="panel-caption">建任务时把数据集连同内容指纹一起冻结，训练在外部执行，产出模型登记回来后必须先过固定 Gold Set 与失败回归，才能投入生产。</p></div>
+              <div class="asset-count subtle" id="learningTrainingCount">0 个任务</div>
+            </div>
+            <div class="learning-training-form">
+              <label><span>训练方法</span><select id="trainingMethod"><option value="sft">监督微调 SFT</option><option value="dpo">偏好优化 DPO</option><option value="distillation">蒸馏</option></select></label>
+              <label><span>基座模型</span><input id="trainingBaseModel" placeholder="例如 qwen3-14b-base" /></label>
+              <label><span>教师模型（仅蒸馏）</span><input id="trainingTeacherModel" placeholder="留空表示不做蒸馏" /></label>
+              <button class="button ghost small" type="button" id="trainingCreate">冻结数据并建任务</button>
+            </div>
+            <div class="learning-training-list" id="learningTrainingList"><div class="empty-list learning-empty">当前范围还没有微调任务</div></div>
+          </article>
+
           <article class="panel learning-conflict-panel">
             <div class="panel-head learning-section-head">
               <div><span class="card-kicker">RULE CONFLICTS</span><h2>规则冲突审查</h2><p class="panel-caption">风格规范、技能附加规则与译者画像会往同一份提示词里写文字。这里比对三者是否互相矛盾，衡量证据强弱后给出处置建议。</p></div>
@@ -371,6 +417,9 @@
         <div class="dialog-head"><div><span class="card-kicker">OPENAI-COMPATIBLE</span><h2>模型服务设置</h2></div><button class="icon-button" type="button" data-close="providerDialog" aria-label="关闭">×</button></div>
         <label><span>Base URL</span><input name="baseUrl" placeholder="http://localhost:11434/v1" /></label>
         <label><span>模型名称</span><input name="model" placeholder="qwen3:14b" /></label>
+        <label><span>快速模型（可选，低风险短文本）</span><input name="fastModel" placeholder="留空则使用主模型" /></label>
+        <label><span>高质量模型（可选，高风险、创译与升级重试）</span><input name="qualityModel" placeholder="留空则使用主模型" /></label>
+        <label><span>机器翻译底模（可选，仅用于 MT + 后编辑路线）</span><input name="mtModel" placeholder="留空则使用快速模型或主模型" /></label>
         <label><span>Embedding 模型（可选，留空禁用向量检索）</span><input name="embeddingModel" placeholder="nomic-embed-text" /></label>
         <label><span>Embedding API 地址（可填 Base URL 或完整端点）</span><input name="embeddingBaseUrl" placeholder="http://localhost:11434/v1" /></label>
         <label><span>输入价格（美元 / 百万 token，用于评测成本门禁）</span><input name="inputPricePerMTok" type="number" step="any" min="0" placeholder="例如 0.27" /></label>

@@ -1,9 +1,10 @@
 import { extname, basename } from "node:path";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import { csvValues, parseCsvDocument, replaceCsvCells } from "./csv-document.mjs";
 import { buildSpreadsheetSnapshot, describeSpreadsheetAnalysis, inferSpreadsheetStructure, mergeSpreadsheetAnalysis } from "./spreadsheet-structure.mjs";
 
-const SUPPORTED_EXTENSIONS = new Set([".txt", ".md", ".docx", ".xlsx"]);
+const SUPPORTED_EXTENSIONS = new Set([".txt", ".md", ".docx", ".xlsx", ".csv"]);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SEGMENTS = 2_000;
 
@@ -104,11 +105,9 @@ function excelCellText(cell) {
   return String(cell.text || "").trim();
 }
 
-async function prepareXlsx(buffer, segmentationMode, analyzeSpreadsheet) {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+async function prepareSpreadsheet(workbook, segmentationMode, analyzeSpreadsheet, format = "xlsx") {
   const snapshot = buildSpreadsheetSnapshot(workbook, excelCellText);
-  const ruleAnalysis = inferSpreadsheetStructure(snapshot);
+  const ruleAnalysis = inferSpreadsheetStructure(snapshot, { allowSingleColumnHeader: format === "csv" });
   let analysis = ruleAnalysis;
   let fallbackReason = "";
   if (analyzeSpreadsheet) {
@@ -153,13 +152,14 @@ async function prepareXlsx(buffer, segmentationMode, analyzeSpreadsheet) {
           metadata,
           referenceTranslations: references
         };
-        const segmentIds = collector.add(source, { type: "xlsx-cell", sheet: worksheet.name, address: cell.address }, context);
-        cells.push({ sheet: worksheet.name, address: cell.address, segmentIds });
+        const locator = { type: `${format}-cell`, sheet: worksheet.name, address: cell.address, row: row.number, column: columnNumber };
+        const segmentIds = collector.add(source, locator, context);
+        cells.push({ sheet: worksheet.name, address: cell.address, row: row.number, column: columnNumber, segmentIds });
       }
     });
   });
   return {
-    format: "xlsx",
+    format,
     segments: collector.segments,
     structure: { cells },
     spreadsheetAnalysis: {
@@ -171,17 +171,41 @@ async function prepareXlsx(buffer, segmentationMode, analyzeSpreadsheet) {
   };
 }
 
+async function prepareXlsx(buffer, segmentationMode, analyzeSpreadsheet) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  return prepareSpreadsheet(workbook, segmentationMode, analyzeSpreadsheet, "xlsx");
+}
+
+async function prepareCsv(buffer, segmentationMode, analyzeSpreadsheet) {
+  const document = parseCsvDocument(buffer.toString("utf8"));
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("CSV");
+  for (const row of csvValues(document)) worksheet.addRow(row);
+  const prepared = await prepareSpreadsheet(workbook, segmentationMode, analyzeSpreadsheet, "csv");
+  return {
+    ...prepared,
+    structure: {
+      ...prepared.structure,
+      csv: { delimiter: document.delimiter, bom: document.bom, rows: document.rows.length }
+    }
+  };
+}
+
 export async function prepareBatchDocument(input = {}, options = {}) {
   const filename = String(input.filename || (input.text ? "粘贴长文.txt" : "")).trim();
   const extension = extname(filename).toLowerCase();
-  if (!filename || !SUPPORTED_EXTENSIONS.has(extension)) fail("仅支持 .txt、.md、.docx、.xlsx 文件");
+  if (!filename || !SUPPORTED_EXTENSIONS.has(extension)) fail("仅支持 .txt、.md、.docx、.xlsx、.csv 文件");
   const segmentationMode = input.segmentationMode === "paragraph" ? "paragraph" : "sentence";
   let prepared;
   if (extension === ".txt" || extension === ".md") {
     const text = input.text !== undefined ? String(input.text) : decodeBase64(input.base64).toString("utf8");
     prepared = preparePlainText(text, filename, segmentationMode);
   } else if (extension === ".docx") prepared = await prepareDocx(decodeBase64(input.base64), segmentationMode);
-  else prepared = await prepareXlsx(decodeBase64(input.base64), segmentationMode, options.analyzeSpreadsheet);
+  else if (extension === ".csv") {
+    const buffer = input.text !== undefined ? Buffer.from(String(input.text), "utf8") : decodeBase64(input.base64);
+    prepared = await prepareCsv(buffer, segmentationMode, options.analyzeSpreadsheet);
+  } else prepared = await prepareXlsx(decodeBase64(input.base64), segmentationMode, options.analyzeSpreadsheet);
   if (!prepared.segments.length) fail("没有找到可翻译的中文内容");
   return {
     filename,
@@ -284,6 +308,17 @@ export async function exportBatchDocument(input = {}) {
     buffer = Buffer.from(await workbook.xlsx.writeBuffer());
     mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     extension = ".xlsx";
+  } else if (format === "csv") {
+    const original = input.text !== undefined ? String(input.text) : decodeBase64(input.base64).toString("utf8");
+    const document = parseCsvDocument(original, { delimiter: input.structure?.csv?.delimiter });
+    const replacements = (input.structure?.cells || []).map((item) => ({
+      row: Number(item.row),
+      column: Number(item.column),
+      value: translatedGroup(item.segmentIds, translations)
+    })).filter((item) => Number.isInteger(item.row) && item.row > 0 && Number.isInteger(item.column) && item.column > 0);
+    buffer = Buffer.from(replaceCsvCells(document, replacements), "utf8");
+    mimeType = "text/csv; charset=utf-8";
+    extension = ".csv";
   } else fail("不支持的导出格式");
 
   return {

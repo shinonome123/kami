@@ -58,7 +58,41 @@ function renderMeta(meta) {
   return `<section class="share-meta">${scoreCards}${modelWarning}${alignmentNote}${alignmentIssues}</section>`;
 }
 
-function renderSegment(segment, modelIncomplete = false) {
+const FEEDBACK_STATUS_LABEL = { pending: "待处理", adopted: "已采纳", ignored: "未采纳" };
+
+/**
+ * 逐条显示这一段收到的意见和它最后被怎么处理了。
+ * 只显示数量等于让审阅人把意见投进黑洞，他们下次就不提了。
+ */
+function renderFeedbackReceipts(feedbacks = []) {
+  if (!feedbacks.length) return "";
+  const rows = feedbacks.map((item) => {
+    const status = item.status || "pending";
+    const resolution = item.resolution;
+    const detail = resolution
+      ? `<p class="share-receipt-reason">${escapeHtml(resolution.actionLabel || FEEDBACK_STATUS_LABEL[status])}：${escapeHtml(resolution.reason || "")}</p>`
+        + (resolution.translationChanged && resolution.afterTranslation
+          ? `<p class="share-receipt-after"><span>已更新为</span>${escapeHtml(resolution.afterTranslation)}</p>`
+          : "")
+        + `<p class="share-receipt-meta">处理人 ${escapeHtml(resolution.decidedBy || "工作台")}${resolution.decidedAt ? ` · ${new Date(resolution.decidedAt).toLocaleString("zh-CN")}` : ""}</p>`
+      : status === "pending"
+        ? '<p class="share-receipt-meta">尚未处理，处理后会在这里显示结果。</p>'
+        : `<p class="share-receipt-meta">已于 ${item.resolvedAt ? new Date(item.resolvedAt).toLocaleString("zh-CN") : "早前"}处理，该条早于回执功能上线，没有留下详细说明。</p>`;
+    return `<li class="share-receipt-item" data-status="${escapeHtml(status)}">
+      <div class="share-receipt-head">
+        <span class="share-receipt-status">${escapeHtml(FEEDBACK_STATUS_LABEL[status] || status)}</span>
+        <strong>${escapeHtml(item.reviewer || "匿名")}</strong>
+        <small>${item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN") : ""}</small>
+      </div>
+      ${item.request ? `<p class="share-receipt-request">${escapeHtml(item.request)}</p>` : ""}
+      ${item.suggestedTranslation ? `<p class="share-receipt-suggestion"><span>建议译法</span>${escapeHtml(item.suggestedTranslation)}</p>` : ""}
+      ${detail}
+    </li>`;
+  }).join("");
+  return `<div class="share-receipts"><div class="share-receipts-title">本段收到的意见与处理结果（${feedbacks.length}）</div><ul>${rows}</ul></div>`;
+}
+
+function renderSegment(segment, modelIncomplete = false, feedbacks = []) {
   const formId = `share-feedback-${Number(segment.index)}`;
   const qa = modelIncomplete
     ? '<span class="autoqa-segment-score">QA —</span>'
@@ -98,6 +132,7 @@ function renderSegment(segment, modelIncomplete = false) {
     </div>
     ${gloss}
     ${issues}
+    ${renderFeedbackReceipts(feedbacks)}
     <form class="share-feedback-form" id="${formId}">
       <div class="share-feedback-fields">
         <input name="reviewer" placeholder="你的名字（可留空）" maxlength="80" />
@@ -171,9 +206,13 @@ async function initialize() {
     document.title = `${payload.filename} · Kami 分享验证`;
     $("#shareTitle").textContent = payload.filename;
     $("#shareMeta").textContent = `${locale?.label || payload.locale} · ${payload.segments.length} 段 · ${payload.feedbackCount} 条反馈 · 分享于 ${new Date(payload.createdAt).toLocaleString("zh-CN")}`;
-    const pending = payload.feedbackCount;
+    const summary = payload.feedbackSummary || { total: payload.feedbackCount, pending: payload.feedbackCount, adopted: 0, ignored: 0 };
     $("#shareSummary").hidden = false;
-    $("#shareSummary").innerHTML = `<span>共 ${payload.segments.length} 段</span><span>已收反馈 ${pending} 条</span>`;
+    $("#shareSummary").innerHTML = `<span>共 ${payload.segments.length} 段</span>`
+      + `<span>已收反馈 ${summary.total} 条</span>`
+      + `<span>已采纳 ${summary.adopted} 条</span>`
+      + `<span>未采纳 ${summary.ignored} 条</span>`
+      + `<span>待处理 ${summary.pending} 条</span>`;
     if (shareStatus === "generating") {
       $("#shareGeneratingBanner").hidden = false;
       $("#shareGeneratingText").textContent = `语素拆解与字面直译正在后台生成（${payload.glossedSegments} / ${Math.min(payload.totalSegments, 30)}），页面会自动刷新；您可以先查看原文、译文与评分。`;
@@ -184,8 +223,14 @@ async function initialize() {
       $("#shareError").textContent = `辅助拆解生成失败：${payload.generationError || "模型服务调用失败，请由项目负责人检查模型配置或余额后重新生成分享。"} 分享链接仍可用于核对原文与译文。`;
     }
     const modelIncomplete = Boolean(payload.meta?.fallbackReason);
+    const feedbacksBySegment = new Map();
+    for (const item of payload.feedbacks || []) {
+      const key = Number(item.segmentIndex);
+      if (!feedbacksBySegment.has(key)) feedbacksBySegment.set(key, []);
+      feedbacksBySegment.get(key).push(item);
+    }
     $("#shareSegments").innerHTML = (payload.segments.length || payload.meta)
-      ? `${renderMeta(payload.meta)}${payload.segments.map((segment) => renderSegment(segment, modelIncomplete)).join("")}`
+      ? `${renderMeta(payload.meta)}${payload.segments.map((segment) => renderSegment(segment, modelIncomplete, feedbacksBySegment.get(Number(segment.index)) || [])).join("")}`
       : '<div class="empty-list">该分享没有可展示的段落。</div>';
     $$(".share-feedback-form").forEach((form) => {
       form.addEventListener("submit", submitFeedback);

@@ -1,3 +1,4 @@
+import { expectedTermTarget, filterEffectiveTerms } from "./asset-governance.mjs";
 import { normalizeSource, similarity } from "./text.mjs";
 
 function scopeBoost(term, contentType, domain) {
@@ -13,6 +14,18 @@ function scopeBoost(term, contentType, domain) {
 function isContentScopeCompatible(term, contentType) {
   const scopes = Array.isArray(term.contentTypes) ? term.contentTypes.filter(Boolean) : [];
   return !scopes.length || scopes.includes(contentType) || scopes.includes("general");
+}
+
+/**
+ * Same folding as `normalizeSource` minus the case fold, so a case-sensitive
+ * term can be compared without lowercasing the text first.
+ */
+function foldPreservingCase(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function unorderedCharacterSimilarity(left, right) {
@@ -43,21 +56,49 @@ function couldFuzzyMatch(sourceCharacters, normalizedVariant) {
   return shared / variantCharacters.length >= 0.6;
 }
 
-export function matchTerms(text, assets, { contentType = "general", domain = "general", limit = 20 } = {}) {
+/**
+ * @param options.project/channel/platform/region  投放上下文。术语上标注的适用
+ *   项目、渠道、平台和地区据此生效；调用方不传就等于不限定，与旧行为一致。
+ * @param options.now  判定术语有效期的时点。过期、未生效和已废弃的术语不再参与
+ *   匹配，因此它们既不会被强制要求，也不会再触发 QA 报错。
+ *
+ * 内容语体与业务领域不参与准入过滤：跨语体的术语仍会被匹配出来并标记
+ * `scopeMismatch`，交由人工判断，这是既有约定。
+ */
+export function matchTerms(text, assets, {
+  contentType = "general",
+  domain = "general",
+  limit = 20,
+  project = "",
+  channel = "",
+  platform = "",
+  region = "",
+  now = new Date()
+} = {}) {
   if (!assets?.locale) throw new Error("Asset collection must have an explicit locale");
   const normalizedText = normalizeSource(text);
+  const caseSensitiveText = foldPreservingCase(text);
   const sourceCharacters = new Set([...normalizedText]);
   const matches = [];
-  for (const term of assets.terms ?? []) {
-    if (term.status !== "approved") continue;
+  // 治理准入：只保留已批准、正式层级、当前有效且投放范围命中的术语版本。
+  const governedTerms = filterEffectiveTerms(assets.terms ?? [], {
+    locale: assets.locale, project, channel, platform, region
+  }, { now });
+  for (const term of governedTerms) {
+    const caseSensitive = Boolean(term.caseSensitive);
     const variants = [term.source, ...(term.aliases ?? [])].filter(Boolean);
     let best = null;
     for (const variant of variants) {
       const normalizedVariant = normalizeSource(variant);
       if (!normalizedVariant) continue;
       if (normalizedText.includes(normalizedVariant)) {
+        // 区分大小写的术语只有大小写也一致才算精确命中；仅拼写相同的，降级成
+        // 待确认提示，让人工决定 iOS / ios 是不是同一个东西。
+        const caseMatched = !caseSensitive || caseSensitiveText.includes(foldPreservingCase(variant));
         const exactness = normalizedVariant === normalizedText ? 1 : 0.92;
-        const candidate = { mode: "exact", variant, matchPhrase: variant, score: exactness };
+        const candidate = caseMatched
+          ? { mode: "exact", variant, matchPhrase: variant, score: exactness }
+          : { mode: "fuzzy", variant, matchPhrase: variant, score: exactness * 0.82, caseMismatch: true };
         if (!best || candidate.score > best.score) best = candidate;
         continue;
       }
@@ -86,6 +127,10 @@ export function matchTerms(text, assets, { contentType = "general", domain = "ge
       score: Math.min(1, best.score + scopeBoost(term, contentType, domain)),
       locale: assets.locale,
       scopeMismatch: !isContentScopeCompatible(term, contentType),
+      caseSensitive,
+      // 保留原文的术语，期望译文里出现的是原文形态本身，而不是 target 字段。
+      expectedTarget: expectedTermTarget(term, { matchedSource: best.matchPhrase || term.source }),
+      preserveOriginal: Boolean(term.preserveOriginal),
       term
     });
   }

@@ -1,4 +1,5 @@
 import { normalizeSource, similarity } from "./text.mjs";
+import { MEMORY_PURPOSES, partitionTranslationMemories } from "./asset-governance.mjs";
 
 const QUALITY_RANK = Object.freeze({ human_approved: 2, machine_verified: 1, provisional: 0, rejected: -1 });
 
@@ -37,10 +38,77 @@ function tagOverlap(left = [], right = []) {
   return common / Math.max(query.size, stored.size);
 }
 
-export function rankTranslationMemories(source, memories = [], { limit = 5, queryEmbedding = null, contentTags = [] } = {}) {
+/**
+ * 投放亲和度：平台、活动、地区、渠道命中程度，加上一条新鲜度衰减。
+ *
+ * 它只影响同样相关的译例谁排在前面，不参与相关度门槛判定——把它加进相关度会
+ * 重蹈"可信度与相关度相加"的覆辙，让同平台但完全无关的译例挤进上下文。
+ */
+const CONTEXT_RANK_WEIGHT = 0.12;
+const RECENCY_HALF_LIFE_MS = 90 * 24 * 60 * 60 * 1000;
+
+function dimensionHit(memoryValue, requested) {
+  const wanted = (Array.isArray(requested) ? requested : [requested]).map((value) => String(value ?? "").trim().toLocaleLowerCase()).filter(Boolean);
+  if (!wanted.length) return null;
+  const stored = String(memoryValue ?? "").trim().toLocaleLowerCase();
+  if (!stored) return null;
+  return wanted.includes(stored) ? 1 : 0;
+}
+
+function recencyScore(memory, nowMs) {
+  const stamp = Date.parse(memory?.dateUpdated || memory?.updatedAt || memory?.dateCreated || memory?.createdAt || "");
+  if (!Number.isFinite(stamp)) return null;
+  const age = Math.max(0, nowMs - stamp);
+  return 0.5 ** (age / RECENCY_HALF_LIFE_MS);
+}
+
+function contextAffinity(memory, context, nowMs) {
+  const parts = [
+    { weight: 0.34, value: dimensionHit(memory.platform, context.platform) },
+    { weight: 0.26, value: dimensionHit(memory.campaign, context.campaign) },
+    { weight: 0.16, value: dimensionHit(memory.region, context.region) },
+    { weight: 0.10, value: dimensionHit(memory.channel, context.channel) },
+    { weight: 0.14, value: recencyScore(memory, nowMs) }
+  ].filter((part) => part.value !== null);
+  if (!parts.length) return 0;
+  const total = parts.reduce((sum, part) => sum + part.weight, 0);
+  return parts.reduce((sum, part) => sum + part.weight * part.value, 0) / total;
+}
+
+export function rankTranslationMemories(source, memories = [], {
+  limit = 5,
+  queryEmbedding = null,
+  contentTags = [],
+  retrievalPurpose = MEMORY_PURPOSES.PRODUCTION,
+  locale = "",
+  contentType = "",
+  domain = "",
+  project = "",
+  channel = "",
+  platform = "",
+  region = "",
+  campaign = "",
+  batchId = "",
+  taskId = "",
+  sessionId = "",
+  now = new Date(),
+  workingWindowMs,
+  allowRecentWorking = false
+} = {}) {
   const normalized = normalizeSource(source);
-  const ranked = memories
-    .filter((memory) => memory.source && memory.target && ["human_approved", "machine_verified"].includes(memory.qualityStatus))
+  const nowMs = now instanceof Date ? now.valueOf() : Date.parse(now);
+  // Production and long-term retrieval are formal-only by default. A caller
+  // must explicitly request working_consistency and provide a batch/task/session
+  // binding before a machine-verified draft can enter the reference list.
+  const governed = partitionTranslationMemories(memories, {
+    locale, contentType, domain, project, channel, platform, region, batchId, taskId, sessionId
+  }, {
+    purpose: retrievalPurpose,
+    now,
+    ...(workingWindowMs === undefined ? {} : { workingWindowMs }),
+    allowRecentWorking
+  });
+  const ranked = governed.references
     .map((memory) => {
       const { edit, overlap, exact } = lexicalScore(normalized, memory);
       // 可信度决定一条译例能不能充当规范，相关度决定它是否属于当前句。
@@ -54,10 +122,21 @@ export function rankTranslationMemories(source, memories = [], { limit = 5, quer
         : Math.min(1, (localVector ? 0.72 : 0.42) * lexical + (localVector ? 0.28 : 0.58) * cosine);
       const tags = tagOverlap(contentTags, memory.contentTags);
       const score = Math.min(1, Math.max(lexical, blended) + tags * 0.06);
-      return { ...memory, similarity: Number(score.toFixed(3)), semantic: cosine === null ? null : Number(cosine.toFixed(3)), tagMatch: Number(tags.toFixed(3)) };
+      const affinity = contextAffinity(memory, { platform, region, channel, campaign, project }, nowMs);
+      return {
+        ...memory,
+        similarity: Number(score.toFixed(3)),
+        semantic: cosine === null ? null : Number(cosine.toFixed(3)),
+        tagMatch: Number(tags.toFixed(3)),
+        contextAffinity: Number(affinity.toFixed(3)),
+        // 相关度单独保留：投放亲和度只参与排序，绝不把不相关的译例推过检索门槛。
+        // 排序分不封顶——原文完全一致时相关度本就是 1，封顶会把投放差异抹平。
+        rankScore: Number((score + affinity * CONTEXT_RANK_WEIGHT).toFixed(4))
+      };
     })
     .filter((memory) => memory.similarity >= 0.28)
-    .sort((a, b) => b.similarity - a.similarity
+    .sort((a, b) => b.rankScore - a.rankScore
+      || b.similarity - a.similarity
       || (QUALITY_RANK[b.qualityStatus] ?? 0) - (QUALITY_RANK[a.qualityStatus] ?? 0)
       || (b.qaScore || 0) - (a.qaScore || 0));
   // 找不到可靠译例时宁可返回空数组，也不为了凑满 UI 数量注入无关内容。

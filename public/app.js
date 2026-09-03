@@ -261,6 +261,8 @@ function updateWorkbenchLocale(locale) {
   $("#acceptTranslation").disabled = true;
   $("#sendToAutoQa").hidden = true;
   $("#targetLegend").hidden = true;
+  $("#translationCandidates").hidden = true;
+  $("#translationCandidates").innerHTML = "";
   $("#termMatches").textContent = "尚未匹配";
   $("#termMatches").className = "term-matches empty-list";
   $("#qaList").textContent = "翻译后显示相似译例、评分与修订结果";
@@ -304,11 +306,15 @@ function renderQa(result) {
     return `${Math.round(item.similarity * 100)}% · ${contentTypeLabel(item.contentType || "general")}${tags.length ? ` / ${tags.join(" / ")}` : ""} · ${origin}\n${item.source} → ${item.target}`;
   }).map(escapeHtml).join("\n\n")}</div>` : "";
   const qaCases = result.aiQa?.qaCases?.length ? `<div class="reflection-box"><strong>历史 AIQA 反例</strong>\n${result.aiQa.qaCases.map((item) => `${Math.round(item.similarity * 100)}% · ${item.rejectedTranslation} → ${item.correctedTranslation}`).map(escapeHtml).join("\n")}</div>` : "";
-  const issues = result.issues.map((issue, index) => `<div class="qa-item ${issue.severity}"><div>${escapeHtml(issue.message)}</div><div class="qa-decision-actions"><button class="button ghost small single-qa-action" data-action="revise" data-issue-index="${index}">让 AI 按建议修订</button>${issue.severity !== "error" || issue.mqmSeverity === "minor" ? `<button class="button ghost small single-qa-action" data-action="approve" data-issue-index="${index}">批准当前译文</button>` : ""}</div></div>`).join("");
-  const humanDecisions = result.aiQa?.humanDecisions?.length ? `<div class="reflection-box"><strong>人工 QA 决定</strong>\n${result.aiQa.humanDecisions.map((item) => `${item.decision === "approved_as_is" ? "已批准当前译文" : "已要求 AI 修订"} · ${item.issue?.message || "QA 意见"}`).map(escapeHtml).join("\n")}</div>` : "";
+  const issues = result.issues.map((issue, index) => `<div class="qa-item ${issue.severity}"><div>${escapeHtml(issue.message)}</div><div class="qa-decision-actions"><button class="button ghost small single-qa-action" data-action="accept" data-issue-index="${index}">采纳并让 AI 修订</button><button class="button ghost small single-qa-action" data-action="partial" data-issue-index="${index}">部分采纳</button>${issue.severity !== "error" || issue.mqmSeverity === "minor" ? `<button class="button ghost small single-qa-action" data-action="reject" data-issue-index="${index}">拒绝意见</button>` : ""}</div></div>`).join("");
+  const humanDecisions = result.aiQa?.humanDecisions?.length ? `<div class="reflection-box"><strong>人工 QA 决定</strong>\n${result.aiQa.humanDecisions.map((item) => `${item.actionLabel || item.action || item.decision || "已处理"} · ${item.issue?.message || item.issue || "QA 意见"}`).map(escapeHtml).join("\n")}</div>` : "";
+  const receipt = result.reviewReceipt?.textZh ? `<div class="reflection-box review-receipt"><strong>审阅意见处理回执</strong>\n${escapeHtml(result.reviewReceipt.textZh)}</div>` : "";
+  const routing = result.routing ? `<div class="reflection-box"><strong>风险与生成路线</strong>\n${escapeHtml(`${result.routing.risk?.tier || "medium"} 风险 · ${result.routing.label || result.routing.route} · ${result.routing.modelRole || "main"} 模型${result.routing.modelFallback ? "（未配置专用模型，已回退主模型）" : ""}`)}\n${escapeHtml((result.routing.risk?.reasons || []).join("；"))}</div>` : "";
+  const qualityRoute = result.qualityRoute ? `<div class="reflection-box"><strong>质量路由</strong>\n${escapeHtml(`${result.qualityRoute.decision || "human_review"} · ${result.qualityRoute.reason || ""}`)}</div>` : "";
+  const factSummary = result.factSchema?.facts?.length || result.factSchema?.limits?.length ? `<div class="reflection-box"><strong>事实与交付约束</strong>\n${escapeHtml(`${result.factSchema.facts?.length || 0} 个事实锚点 · ${result.factSchema.limits?.length || 0} 项交付限制`)}</div>` : "";
   $("#qaList").className = "qa-list";
   const fallback = result.aiQa?.fallbackReason ? `<div class="qa-item warning">AIQA 暂未完成：${escapeHtml(result.aiQa.fallbackReason)}</div>` : "";
-  $("#qaList").innerHTML = `${reflection}${retrieval}${qaCases}${humanDecisions}${fallback}${issues || (!fallback ? '<div class="qa-item">硬规则与检索式 AIQA 均通过</div>' : '')}`;
+  $("#qaList").innerHTML = `${routing}${qualityRoute}${factSummary}${reflection}${retrieval}${qaCases}${humanDecisions}${receipt}${fallback}${issues || (!fallback ? '<div class="qa-item">硬规则与检索式 AIQA 均通过</div>' : '')}`;
   $$(".single-qa-action").forEach((button) => button.addEventListener("click", () => resolveSingleQaIssue(Number(button.dataset.issueIndex), button.dataset.action, button)));
 }
 
@@ -643,7 +649,7 @@ function compactQaReferences(aiQa = {}) {
     .map(({ embedding, ...item }) => item);
 }
 
-function qaResolutionBody({ source, translation, result, action, issueIndex, contentType, domain, batchId }) {
+function qaResolutionBody({ source, translation, result, action, issueIndex, contentType, domain, batchId, review = {} }) {
   return {
     source, translation, action, issueIndex,
     issues: result.issues || [], qaScore: result.qaScore,
@@ -652,29 +658,48 @@ function qaResolutionBody({ source, translation, result, action, issueIndex, con
     iterations: result.aiQa?.iterations || 0,
     references: compactQaReferences(result.aiQa),
     termDecisions: result.aiQa?.termDecisions || [],
-    humanDecisions: result.aiQa?.humanDecisions || []
+    humanDecisions: result.aiQa?.humanDecisions || [],
+    ...review
   };
 }
 
 async function resolveSingleQaIssue(issueIndex, action, button) {
   const result = state.lastResult;
   if (!result?.issues?.[issueIndex]) return;
-  if (action === "approve" && !confirm("确认批准当前译文并豁免这一条 QA 建议？该决定会写入审核记录。")) return;
+  const issue = result.issues[issueIndex];
+  const review = {};
+  if (action === "accept" && !confirm("确认采纳这条 QA 意见，并让翻译模型按意见做最小修订？")) return;
+  if (action === "partial") {
+    const accepted = prompt("填写要采纳的部分（多项可用分号分隔）：", issue.suggestion || issue.message || "");
+    if (accepted == null) return;
+    const rejected = prompt("填写不采纳的部分及边界（必填）：", "其余表述保持不变");
+    if (rejected == null) return;
+    const instruction = prompt("给翻译模型的精确修订要求：", accepted);
+    if (instruction == null) return;
+    review.acceptedParts = accepted.split(/[；;]/).map((item) => item.trim()).filter(Boolean);
+    review.rejectedParts = rejected.split(/[；;]/).map((item) => item.trim()).filter(Boolean);
+    review.revisionInstruction = instruction.trim();
+  }
+  if (action === "reject") {
+    const reason = prompt("请说明拒绝这条 QA 意见的原因（会写入处理回执）：", "当前译文在本语境中可接受");
+    if (reason == null || !reason.trim()) return;
+    review.reason = reason.trim();
+  }
   button.disabled = true;
-  button.textContent = action === "revise" ? "AI 修订中…" : "批准中…";
+  button.textContent = ["accept", "partial", "revise"].includes(action) ? "AI 修订中…" : "记录中…";
   try {
     const resolved = await api("/api/qa/resolve", { method: "POST", body: JSON.stringify(qaResolutionBody({
       source: $("#sourceText").value.trim(), translation: result.translation, result, action, issueIndex,
-      contentType: result.classification?.contentType || "general", domain: $("#domain").value, batchId: "single-review"
+      contentType: result.classification?.contentType || "general", domain: $("#domain").value, batchId: "single-review", review
     })) });
-    state.lastResult = { ...result, ...resolved, translation: resolved.translation, issues: resolved.issues, qaScore: resolved.qaScore, aiQa: resolved.aiQa };
+    state.lastResult = { ...result, ...resolved, translation: resolved.translation, issues: resolved.issues, qaScore: resolved.qaScore, aiQa: resolved.aiQa, reviewReceipt: resolved.reviewReceipt };
     renderTranslationOutput();
     renderQa(state.lastResult);
     setResultStatus(state.lastResult.issues, state.lastResult.aiQa);
-    toast(action === "revise" ? `AI 已按建议修订并重新 QA：${resolved.qaScore} 分` : "已批准当前译文，该建议已从待处理项移除");
+    toast(["accept", "partial", "revise"].includes(action) ? `AI 已按决定修订并重新 QA：${resolved.qaScore} 分` : "已拒绝该条建议并生成处理回执");
   } catch (error) {
     button.disabled = false;
-    button.textContent = action === "revise" ? "让 AI 按建议修订" : "批准当前译文";
+    button.textContent = action === "accept" ? "采纳并让 AI 修订" : action === "partial" ? "部分采纳" : "拒绝意见";
     toast(error.message);
   }
 }
@@ -733,6 +758,49 @@ function renderTranslationOutput() {
   $("#toggleTargetEdit").textContent = editable ? "完成编辑" : "编辑译文";
   $("#acceptTranslation").disabled = !result.translation;
   $("#sendToAutoQa").hidden = !result.translation;
+  renderTranslationCandidates(result);
+}
+
+function renderTranslationCandidates(result) {
+  const panel = $("#translationCandidates");
+  const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
+  if (candidates.length < 2) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  panel.hidden = false;
+  panel.innerHTML = `<div class="candidate-picker-head"><div><strong>模型候选</strong><small>${escapeHtml(result.routing?.label || "多候选路线")} · 推荐项已完成本轮 QA</small></div><span>${candidates.length} 版</span></div><div class="candidate-picker-list">${candidates.map((candidate, index) => {
+    const selected = candidate.translation === result.translation;
+    return `<button class="candidate-translation ${selected ? "selected" : ""}" data-translation-candidate="${index}" type="button"><span>${selected ? "当前采用" : `候选 ${index + 1}`}${candidate.recommended ? " · 系统推荐" : ""}</span><strong>${escapeHtml(candidate.translation)}</strong><small>${escapeHtml(candidate.reason || "点击采用并重新 QA")}</small></button>`;
+  }).join("")}</div>`;
+  $$('[data-translation-candidate]').forEach((button) => button.addEventListener("click", () => selectTranslationCandidate(Number(button.dataset.translationCandidate), button)));
+}
+
+async function selectTranslationCandidate(index, button) {
+  const result = state.lastResult;
+  const candidate = result?.candidates?.[index];
+  if (!candidate || candidate.translation === result.translation) return;
+  button.disabled = true;
+  try {
+    const qa = await api("/api/qa", { method: "POST", body: JSON.stringify({
+      source: $("#sourceText").value.trim(),
+      translation: candidate.translation,
+      locale: state.workbenchLocale,
+      contentType: result.classification?.contentType || "general",
+      domain: result.domainResolution?.domain || $("#domain").value,
+      aiQa: true
+    }) });
+    state.lastResult = { ...result, ...qa, candidates: result.candidates, routing: result.routing, translation: qa.translation };
+    renderTranslationOutput();
+    renderMatches(state.lastResult.matches || result.matches || []);
+    renderQa(state.lastResult);
+    setResultStatus(state.lastResult.issues || [], state.lastResult.aiQa);
+    toast(`已采用候选 ${index + 1} 并重新完成 QA`);
+  } catch (error) {
+    button.disabled = false;
+    toast(`候选暂未采用：${error.message}`);
+  }
 }
 
 function toggleTargetEdit() {
@@ -764,10 +832,11 @@ async function acceptSingleTranslation() {
       domain: $("#domain").value,
       styleProfileId: state.lastResult.styleProfile?.id || "",
       qaCaseId: state.lastResult.aiQa?.qaCases?.[0]?.id || "",
+      termSuggestions: state.lastResult.termSuggestions || [],
       trajectoryId: state.lastResult.trajectoryId || state.lastResult.trajectory_id || ""
     }) });
     if (output.isContentEditable) toggleTargetEdit();
-    toast(`已采纳为正式译法${result.demoted ? `，${result.demoted} 条旧机器译文已降权` : ""}，并沉淀为风格证据`);
+    toast(`${result.termCandidateWarning || `已采纳为正式译法${result.demoted ? `，${result.demoted} 条旧机器译文已降权` : ""}，并沉淀为风格证据${result.termCandidateBatch ? "；新术语已进入待审核候选" : ""}`}`);
   } catch (error) { toast(error.message); }
   finally { setBusy(false); }
 }
@@ -839,7 +908,7 @@ async function translate() {
   try {
     const result = await api("/api/translate", { method: "POST", body: JSON.stringify({
       source, locale: state.workbenchLocale, contentType: $("#contentType").value, domain: $("#domain").value,
-      neighborContext: $("#neighborContext").value, reflect: $("#reflect").checked, useModelClassification: true
+      neighborContext: $("#neighborContext").value, reflect: $("#reflect").checked, route: $("#translationRoute").value, useModelClassification: true
     }) });
     state.lastResult = result;
     renderTranslationOutput();
@@ -917,7 +986,7 @@ function resetBatch() {
   $("#batchFile").value = "";
   $("#batchPasteText").value = "";
   $("#batchFilePrompt").textContent = "拖入或点击选择文件";
-  $("#batchFileMeta").textContent = "拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX，最大 10MB";
+  $("#batchFileMeta").textContent = "拖入后自动识别；支持 TXT、Markdown、DOCX、XLSX、CSV，最大 10MB";
   $("#batchDropZone").classList.remove("has-file");
   $("#batchSourceMeta").textContent = "尚未载入";
   $("#spreadsheetAnalysis").hidden = true;
@@ -971,8 +1040,8 @@ function batchIssueHtml(issue, index, segmentId) {
   const severity = issue.mqmSeverity || issue.severity || "warning";
   const label = severity === "critical" ? "严重" : severity === "major" || severity === "error" ? "主要" : "次要";
   const spans = [issue.sourceSpan ? `原文：${issue.sourceSpan}` : "", issue.targetSpan ? `译文：${issue.targetSpan}` : ""].filter(Boolean).join(" · ");
-  const approve = issue.severity !== "error" || issue.mqmSeverity === "minor" ? `<button class="button ghost small batch-qa-action" data-action="approve" data-id="${escapeHtml(segmentId)}" data-issue-index="${index}">批准当前译文</button>` : "";
-  return `<div class="batch-qa-issue ${escapeHtml(severity)}"><strong>${label} · ${escapeHtml(issue.category || issue.type || "QA")}</strong><p>${escapeHtml(issue.message || "未说明问题")}</p>${issue.suggestion ? `<p class="suggestion">建议：${escapeHtml(issue.suggestion)}</p>` : ""}${spans ? `<small>${escapeHtml(spans)}</small>` : ""}<div class="qa-decision-actions"><button class="button ghost small batch-qa-action" data-action="revise" data-id="${escapeHtml(segmentId)}" data-issue-index="${index}">让 AI 按建议修订</button>${approve}</div></div>`;
+  const reject = issue.severity !== "error" || issue.mqmSeverity === "minor" ? `<button class="button ghost small batch-qa-action" data-action="reject" data-id="${escapeHtml(segmentId)}" data-issue-index="${index}">拒绝意见</button>` : "";
+  return `<div class="batch-qa-issue ${escapeHtml(severity)}"><strong>${label} · ${escapeHtml(issue.category || issue.type || "QA")}</strong><p>${escapeHtml(issue.message || "未说明问题")}</p>${issue.suggestion ? `<p class="suggestion">建议：${escapeHtml(issue.suggestion)}</p>` : ""}${spans ? `<small>${escapeHtml(spans)}</small>` : ""}<div class="qa-decision-actions"><button class="button ghost small batch-qa-action" data-action="accept" data-id="${escapeHtml(segmentId)}" data-issue-index="${index}">采纳并让 AI 修订</button><button class="button ghost small batch-qa-action" data-action="partial" data-id="${escapeHtml(segmentId)}" data-issue-index="${index}">部分采纳</button>${reject}</div></div>`;
 }
 
 function renderBatchDetails(segment) {
@@ -1004,7 +1073,8 @@ function renderBatchDetails(segment) {
   }).join("") : '<div class="batch-detail-empty">没有达到相关度门槛的同类译例</div>';
   const qaCasesHtml = qaCases.length ? `<section><h5>历史 AIQA 反例</h5>${qaCases.map((item) => `<div class="batch-memory-item"><div><p>${escapeHtml(item.rejectedTranslation || "")}</p><p class="target">修订：${escapeHtml(item.correctedTranslation || "")}</p></div></div>`).join("")}</section>` : "";
   const decisionsHtml = termDecisions.length ? `<section><h5>AI 术语裁决</h5>${termDecisions.map((item) => `<div class="batch-detail-item"><strong>${item.decision === "apply" ? "已采用" : "不强制替换"} · ${escapeHtml(item.matchedSource)} → ${escapeHtml(item.officialTarget)}</strong><small>${escapeHtml(item.reason)}</small></div>`).join("")}</section>` : "";
-  const humanDecisionsHtml = humanDecisions.length ? `<section><h5>人工 QA 决定</h5>${humanDecisions.map((item) => `<div class="batch-detail-item"><strong>${item.decision === "approved_as_is" ? "已批准当前译文" : "已要求 AI 修订"}</strong><small>${escapeHtml(item.issue?.message || item.reason || "QA 意见")}</small></div>`).join("")}</section>` : "";
+  const humanDecisionsHtml = humanDecisions.length ? `<section><h5>人工 QA 决定</h5>${humanDecisions.map((item) => `<div class="batch-detail-item"><strong>${escapeHtml(item.actionLabel || item.action || item.decision || "已处理")}</strong><small>${escapeHtml(item.issue?.message || item.issue || item.reason || "QA 意见")}</small></div>`).join("")}</section>` : "";
+  const receiptHtml = result.reviewReceipt?.textZh ? `<section><h5>处理回执</h5><div class="reflection-box review-receipt">${escapeHtml(result.reviewReceipt.textZh)}</div></section>` : "";
   const fallback = aiQa.fallbackReason ? `<div class="batch-qa-fallback"><strong>AIQA 未完成</strong><span>${escapeHtml(aiQa.fallbackReason)}</span><button type="button" class="button ghost small retry-segment-qa" data-id="${escapeHtml(segment.id)}">仅重跑本段 QA</button></div>` : "";
   return `<details class="batch-segment-details${aiQa.fallbackReason ? " has-warning" : ""}">
     <summary>${escapeHtml(summary)}<span>查看术语、译例与 QA 意见</span></summary>
@@ -1016,6 +1086,7 @@ function renderBatchDetails(segment) {
       ${qaCasesHtml}
       ${decisionsHtml}
       ${humanDecisionsHtml}
+      ${receiptHtml}
     </div>
   </details>`;
 }
@@ -1088,25 +1159,43 @@ function renderBatchSegments() {
 async function resolveBatchQaIssue(segmentId, issueIndex, action, button) {
   const segment = state.batchPreview?.segments.find((item) => item.id === segmentId);
   if (!segment?.result?.issues?.[issueIndex]) return;
-  if (action === "approve" && !confirm("确认批准当前译文并豁免这一条 QA 建议？该决定会写入审核记录。")) return;
+  const issue = segment.result.issues[issueIndex];
+  const review = {};
+  if (action === "accept" && !confirm("确认采纳这条 QA 意见，并让翻译模型按意见修订本段？")) return;
+  if (action === "partial") {
+    const accepted = prompt("填写要采纳的部分（多项可用分号分隔）：", issue.suggestion || issue.message || "");
+    if (accepted == null) return;
+    const rejected = prompt("填写不采纳的部分及边界（必填）：", "其余表述保持不变");
+    if (rejected == null) return;
+    const instruction = prompt("给翻译模型的精确修订要求：", accepted);
+    if (instruction == null) return;
+    review.acceptedParts = accepted.split(/[；;]/).map((item) => item.trim()).filter(Boolean);
+    review.rejectedParts = rejected.split(/[；;]/).map((item) => item.trim()).filter(Boolean);
+    review.revisionInstruction = instruction.trim();
+  }
+  if (action === "reject") {
+    const reason = prompt("请说明拒绝这条 QA 意见的原因（会写入处理回执）：", "当前译文在本语境中可接受");
+    if (reason == null || !reason.trim()) return;
+    review.reason = reason.trim();
+  }
   button.disabled = true;
-  button.textContent = action === "revise" ? "AI 修订中…" : "批准中…";
+  button.textContent = ["accept", "partial", "revise"].includes(action) ? "AI 修订中…" : "记录中…";
   try {
     const resolved = await api("/api/qa/resolve", { method: "POST", body: JSON.stringify(qaResolutionBody({
       source: segment.source, translation: segment.translation, result: segment.result, action, issueIndex,
       contentType: state.batchClassification?.contentType || "general", domain: $("#domain").value,
-      batchId: state.batchPreview.batchId || "batch-review"
+      batchId: state.batchPreview.batchId || "batch-review", review
     })) });
     segment.translation = resolved.translation || segment.translation;
-    segment.result = { ...segment.result, ...resolved, translation: segment.translation, issues: resolved.issues, qaScore: resolved.qaScore, aiQa: resolved.aiQa };
+    segment.result = { ...segment.result, ...resolved, translation: segment.translation, issues: resolved.issues, qaScore: resolved.qaScore, aiQa: resolved.aiQa, reviewReceipt: resolved.reviewReceipt };
     segment.status = "done";
     segment.accepted = false;
     await saveBatchProgress();
     renderBatchSegments();
-    toast(action === "revise" ? `第 ${segment.index} 段已由 AI 修订并重新 QA：${resolved.qaScore} 分` : `第 ${segment.index} 段已批准当前译文`);
+    toast(["accept", "partial", "revise"].includes(action) ? `第 ${segment.index} 段已由 AI 修订并重新 QA：${resolved.qaScore} 分` : `第 ${segment.index} 段已记录拒绝意见`);
   } catch (error) {
     button.disabled = false;
-    button.textContent = action === "revise" ? "让 AI 按建议修订" : "批准当前译文";
+    button.textContent = action === "accept" ? "采纳并让 AI 修订" : action === "partial" ? "部分采纳" : "拒绝意见";
     toast(error.message);
   }
 }
@@ -1239,6 +1328,7 @@ async function runBatch() {
         batchId: state.batchPreview.batchId || state.batchPreview.filename,
         segmentId: segment.id,
         batchReferences,
+        route: $("#translationRoute").value,
         reflect: $("#reflect").checked,
         useModelClassification: false
       }) });
@@ -1779,6 +1869,7 @@ async function acceptSegment(segmentId) {
       domain: $("#domain").value,
       styleProfileId: state.batchStyleProfile?.id || "",
       qaCaseId: segment.result?.aiQa?.qaCases?.[0]?.id || "",
+      termSuggestions: segment.result?.termSuggestions || [],
       batchId: state.batchPreview.batchId || "",
       sourceFile: state.batchPreview.filename || "",
       trajectoryId: segment.result?.trajectoryId || segment.result?.trajectory_id || ""
@@ -1807,6 +1898,7 @@ async function acceptAllSegments() {
         domain: $("#domain").value,
         styleProfileId: state.batchStyleProfile?.id || "",
         qaCaseId: segment.result?.aiQa?.qaCases?.[0]?.id || "",
+        termSuggestions: segment.result?.termSuggestions || [],
         batchId: state.batchPreview.batchId || "",
         sourceFile: state.batchPreview.filename || "",
         trajectoryId: segment.result?.trajectoryId || segment.result?.trajectory_id || ""
@@ -2843,6 +2935,350 @@ async function retireConflictRule(button) {
   }
 }
 
+const GATE_STATUS_LABELS = {
+  pass: "上次门禁通过",
+  block: "上次门禁阻断",
+  insufficient: "证据不足",
+  not_run: "尚未运行"
+};
+
+function qualityPercent(value) {
+  return value === null || value === undefined ? "—" : `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+async function loadQualityGate() {
+  const params = new URLSearchParams(learningActionBody());
+  try {
+    const [assets, gate] = await Promise.all([
+      api(`/api/quality/assets?${params}`),
+      api(`/api/quality/gate?${params}`)
+    ]);
+    state.qualityAssets = assets;
+    state.qualityGate = gate;
+    renderQualityGate();
+  } catch (error) {
+    state.qualityAssets = null;
+    state.qualityGate = null;
+    $("#learningGateStatus").textContent = "读取失败";
+    $("#learningQualityAssets").innerHTML = `<div class="empty-list learning-empty">固定质量资产读取失败：${escapeHtml(error.message)}</div>`;
+    $("#learningRegressionCandidates").innerHTML = "";
+  }
+}
+
+function renderQualityGate() {
+  const assets = state.qualityAssets;
+  const gate = state.qualityGate;
+  if (!assets || !gate) return;
+  const status = gate.status || "not_run";
+  const badge = $("#learningGateStatus");
+  badge.textContent = GATE_STATUS_LABELS[status] || status;
+  badge.dataset.gateStatus = status;
+  const latest = gate.latestRun;
+  const cards = [
+    { label: "启用 Gold 样本", value: gate.assets.goldSampleCount, hint: gate.assets.goldSetVersions.join("、") || "尚未启用 Gold Set" },
+    { label: "启用回归案例", value: gate.assets.regressionCaseCount, hint: gate.assets.regressionSuiteVersions.join("、") || "尚未启用回归集" },
+    { label: "回归通过率", value: latest ? qualityPercent(latest.regressionPassRate) : "—", hint: latest ? `${latest.regressionPassed} / ${latest.regressionTotal} 通过` : "尚未运行门禁" },
+    { label: "Gold 术语准确率", value: latest ? qualityPercent(latest.goldTermAccuracy) : "—", hint: latest ? `事实准确率 ${qualityPercent(latest.goldFactAccuracy)}` : "尚未运行门禁" }
+  ];
+  const blocking = (latest?.blocking || []).map((item) => `<li>${escapeHtml(item.message || item.code || "")}</li>`).join("");
+  $("#learningQualityAssets").innerHTML = `
+    <div class="learning-quality-cards">
+      ${cards.map((card) => `<article class="learning-quality-card"><strong>${escapeHtml(String(card.value))}</strong><span>${escapeHtml(card.label)}</span><small>${escapeHtml(card.hint)}</small></article>`).join("")}
+    </div>
+    ${blocking ? `<div class="learning-quality-blocking"><strong>阻断原因</strong><ul>${blocking}</ul></div>` : ""}
+    ${latest ? `<p class="learning-quality-meta">最近一次运行：${escapeHtml(latest.createdAt || "")} · 受测技能 ${escapeHtml(latest.skillId || "未记录")} · 触发方式 ${escapeHtml(latest.triggeredBy || "manual")}</p>` : ""}`;
+
+  const candidates = assets.regressionCandidates || [];
+  const pending = candidates.filter((item) => item.status === "pending");
+  $("#learningRegressionCandidates").innerHTML = candidates.length
+    ? `<div class="learning-quality-candidates"><h3>回归候选（${pending.length} 条待审批 / 共 ${candidates.length} 条）</h3>${candidates.slice(0, 20).map((item) => {
+      const payload = item.payload || {};
+      return `<article class="learning-quality-candidate" data-status="${escapeHtml(item.status)}">
+        <div class="learning-quality-candidate-body">
+          <p class="learning-quality-source">${escapeHtml(payload.source || "")}</p>
+          <p class="learning-quality-pair"><span class="bad">${escapeHtml(payload.failingTranslation || "")}</span><span class="good">${escapeHtml(payload.expectedTranslation || "")}</span></p>
+          <small>状态：${escapeHtml(item.status)}${item.approval?.reviewer ? ` · 审批人 ${escapeHtml(item.approval.reviewer)}` : ""}${item.approval?.note ? ` · ${escapeHtml(item.approval.note)}` : ""}</small>
+        </div>
+        ${item.status === "pending" ? `<div class="learning-quality-candidate-actions">
+          <button class="button ghost small" type="button" data-regression-decision="approve" data-asset-id="${escapeHtml(item.id)}">批准入集</button>
+          <button class="button ghost small" type="button" data-regression-decision="reject" data-asset-id="${escapeHtml(item.id)}">拒绝</button>
+        </div>` : ""}
+      </article>`;
+    }).join("")}</div>`
+    : '<div class="empty-list learning-empty">当前范围还没有回归候选。人工批准的 AIQA 失败案例可以在问题库里提为候选。</div>';
+  $$("[data-regression-decision]").forEach((button) => button.addEventListener("click", () => decideRegressionCandidateFromUi(button.dataset.assetId, button.dataset.regressionDecision, button)));
+}
+
+async function decideRegressionCandidateFromUi(assetId, decision, button) {
+  const reviewer = prompt(decision === "approve" ? "批准人姓名（会写进审批记录）" : "拒绝人姓名（会写进审批记录）");
+  if (!reviewer) return;
+  const note = decision === "reject" ? prompt("拒绝原因（必填）") : prompt("批准备注（可留空）") || "";
+  if (decision === "reject" && !note) return toast("拒绝回归候选必须写原因");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "处理中……";
+  try {
+    await api(`/api/quality/regression-candidates/${encodeURIComponent(assetId)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ ...learningActionBody(), decision, reviewer, note })
+    });
+    toast(decision === "approve" ? "回归候选已批准，可并入回归集" : "回归候选已拒绝");
+    await loadQualityGate();
+  } catch (error) {
+    toast(error.message);
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function seedGoldSetFromTrajectories(button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "生成中……";
+  try {
+    const preview = await api("/api/quality/gold-sets/from-trajectories", { method: "POST", body: JSON.stringify(learningActionBody()) });
+    if (!preview.candidates.length) {
+      toast("当前范围还没有人工采纳的终稿，无法生成 Gold Set");
+      return;
+    }
+    if (!confirm(`将从 ${preview.acceptedTotal} 条人工采纳终稿中取 ${preview.candidates.length} 条建立固定 Gold Set 并启用。建立后内容不可改，只能发新版本。继续？`)) return;
+    const created = await api("/api/quality/gold-sets", {
+      method: "POST",
+      body: JSON.stringify({ ...learningActionBody(), samples: preview.candidates, status: "active", changeNote: "从人工采纳终稿生成" })
+    });
+    toast(`已建立 Gold Set ${created.asset.seriesId} v${created.asset.version}，共 ${created.asset.itemCount} 个样本`);
+    await loadQualityGate();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function buildRegressionSuiteFromUi(button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "生成中……";
+  try {
+    const created = await api("/api/quality/regression-suites", { method: "POST", body: JSON.stringify({ ...learningActionBody(), changeNote: "由已批准回归候选生成" }) });
+    toast(`已建立回归集 v${created.asset.version}，共 ${created.asset.itemCount} 个失败案例`);
+    await loadQualityGate();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function runQualityGateFromUi(button) {
+  const original = button.textContent;
+  const previousRunId = state.qualityGate?.latestRun?.id || "";
+  try {
+    const started = await api("/api/quality/runs", { method: "POST", body: JSON.stringify({ ...learningActionBody(), triggeredBy: "ui" }) });
+    toast(started.message || "质量门禁已进入任务中心");
+    button.disabled = true;
+    button.textContent = "执行中……";
+    // 门禁按固定样本逐条真跑模型，耗时随样本数增长；这里只轮询结论是否落库。
+    const deadline = Date.now() + 2 * 60 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await loadQualityGate();
+      const latest = state.qualityGate?.latestRun;
+      if (latest && latest.id !== previousRunId) {
+        toast(latest.decision === "pass" ? "质量门禁通过" : `质量门禁未通过：${latest.decision}`);
+        break;
+      }
+    }
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function auditTrainingExport(button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "统计中……";
+  try {
+    const report = await api("/api/learning/export", { method: "POST", body: JSON.stringify({ ...learningActionBody(), format: "json" }) });
+    state.trainingExport = report;
+    $("#learningExportSummary").textContent = `SFT ${report.sft.count} 条 · DPO ${report.dpo.count} 条`;
+    const reasons = (audit) => Object.entries(audit.droppedByReason || {}).map(([reason, count]) => `<li>${escapeHtml(reason)} · ${count} 条</li>`).join("") || "<li>没有丢弃样本</li>";
+    $("#learningExportReport").innerHTML = `
+      <div class="learning-export-grid">
+        <article><h4>SFT 监督数据</h4><strong>${report.sft.count}</strong><small>输入 ${report.sft.audit.input} 条 · 丢弃 ${report.sft.audit.dropped} 条</small><ul>${reasons(report.sft.audit)}</ul></article>
+        <article><h4>DPO 偏好数据</h4><strong>${report.dpo.count}</strong><small>输入 ${report.dpo.audit.input} 条 · 丢弃 ${report.dpo.audit.dropped} 条</small><ul>${reasons(report.dpo.audit)}</ul></article>
+      </div>
+      <p class="learning-quality-meta">已从训练数据中排除 ${report.manifest.excludedEvaluationSources} 条固定评测原文（Gold ${report.manifest.goldSampleCount} 个样本、回归 ${report.manifest.regressionCaseCount} 个案例），避免训练集吃掉自己的基准。</p>`;
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function downloadTrainingDataset(dataset, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "导出中……";
+  try {
+    const response = await fetch("/api/learning/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...learningActionBody(), format: "jsonl", dataset })
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `导出失败：${response.status}`);
+    }
+    const blob = await response.blob();
+    if (!blob.size) {
+      toast("当前范围没有可导出的样本");
+      return;
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `kami-${dataset}-${learningActionBody().locale}.jsonl`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+    toast(`${dataset.toUpperCase()} 数据集已导出`);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+const TRAINING_STATUS_LABEL = {
+  draft: "草稿", frozen: "数据已冻结", submitted: "已提交", running: "训练中",
+  succeeded: "训练成功", failed: "失败", cancelled: "已取消", registered: "产物已登记", promoted: "已投产"
+};
+
+const TRAINING_NEXT_ACTIONS = {
+  frozen: [["submitted", "标记为已提交"]],
+  submitted: [["running", "标记为训练中"], ["failed", "标记失败"]],
+  running: [["succeeded", "标记训练成功"], ["failed", "标记失败"]],
+  succeeded: [["registered", "登记产出模型"]],
+  registered: [["promoted", "过门禁并投产"]]
+};
+
+async function loadTrainingRuns() {
+  const params = new URLSearchParams(learningActionBody());
+  try {
+    const payload = await api(`/api/training/runs?${params}`);
+    state.trainingRuns = payload.runs || [];
+    renderTrainingRuns();
+  } catch (error) {
+    $("#learningTrainingCount").textContent = "读取失败";
+    $("#learningTrainingList").innerHTML = `<div class="empty-list learning-empty">微调任务读取失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderTrainingRuns() {
+  const runs = state.trainingRuns || [];
+  $("#learningTrainingCount").textContent = `${runs.length} 个任务`;
+  $("#learningTrainingList").innerHTML = runs.length
+    ? runs.map((run) => {
+      const payload = run.payload || {};
+      const datasets = (payload.datasets || []).map((item) => `${item.kind.toUpperCase()} ${item.recordCount} 条 · 指纹 ${String(item.contentFingerprint).slice(0, 12)}…`).join("；");
+      const actions = (TRAINING_NEXT_ACTIONS[run.status] || [])
+        .map(([status, label]) => `<button class="button ghost small" type="button" data-training-advance="${escapeHtml(status)}" data-run-id="${escapeHtml(run.id)}">${escapeHtml(label)}</button>`)
+        .join("");
+      return `<article class="learning-training-item" data-status="${escapeHtml(run.status)}">
+        <div class="learning-training-head">
+          <span class="learning-training-status">${escapeHtml(TRAINING_STATUS_LABEL[run.status] || run.status)}</span>
+          <strong>${escapeHtml(run.name)}</strong>
+          <small>${escapeHtml(run.method.toUpperCase())} · 基座 ${escapeHtml(run.baseModel || "未填")}${run.teacherModel ? ` · 教师 ${escapeHtml(run.teacherModel)}` : ""}</small>
+        </div>
+        <p class="learning-training-datasets">${escapeHtml(datasets || "无数据集")}</p>
+        ${run.artifactModelId ? `<p class="learning-training-artifact">产出模型：${escapeHtml(run.artifactModelId)}${payload.gate ? ` · 门禁 ${escapeHtml(payload.gate.decision)}（${escapeHtml(payload.gate.runId || "")}）` : ""}</p>` : ""}
+        ${run.error ? `<p class="learning-training-error">${escapeHtml(run.error)}</p>` : ""}
+        <div class="learning-training-actions">
+          <button class="button ghost small" type="button" data-training-manifest="${escapeHtml(run.id)}">下载交接清单</button>
+          ${actions}
+        </div>
+      </article>`;
+    }).join("")
+    : '<div class="empty-list learning-empty">当前范围还没有微调任务</div>';
+  $$("[data-training-advance]").forEach((button) => button.addEventListener("click", () => advanceTrainingRunFromUi(button.dataset.runId, button.dataset.trainingAdvance, button)));
+  $$("[data-training-manifest]").forEach((button) => button.addEventListener("click", () => downloadTrainingManifest(button.dataset.trainingManifest)));
+}
+
+async function createTrainingRunFromUi(button) {
+  const method = $("#trainingMethod").value;
+  const baseModel = $("#trainingBaseModel").value.trim();
+  if (!baseModel) return toast("请先填写基座模型");
+  const teacherModel = $("#trainingTeacherModel").value.trim();
+  if (method === "distillation" && !teacherModel) return toast("蒸馏必须填写教师模型");
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "冻结中……";
+  try {
+    const created = await api("/api/training/runs", {
+      method: "POST",
+      body: JSON.stringify({ ...learningActionBody(), method, baseModel, teacherModel })
+    });
+    toast(`已冻结 ${created.run.totalRecords} 条样本并建立任务`);
+    await loadTrainingRuns();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function advanceTrainingRunFromUi(runId, status, button) {
+  const body = { ...learningActionBody(), status, by: "工作台" };
+  if (status === "registered") {
+    const modelId = prompt("产出模型 ID（外部训练平台返回的模型或适配器标识）");
+    if (!modelId) return;
+    body.artifact = { modelId, adapterUri: prompt("适配器地址（可留空）") || "" };
+  }
+  if (status === "failed") {
+    body.error = prompt("失败原因") || "未填写原因";
+  }
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "处理中……";
+  try {
+    await api(`/api/training/runs/${encodeURIComponent(runId)}/advance`, { method: "POST", body: JSON.stringify(body) });
+    toast(status === "promoted" ? "门禁通过，微调模型已投产" : "任务状态已更新");
+    await loadTrainingRuns();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function downloadTrainingManifest(runId) {
+  try {
+    const payload = await api(`/api/training/runs/${encodeURIComponent(runId)}/manifest`);
+    const blob = new Blob([JSON.stringify(payload.manifest, null, 2)], { type: "application/json" });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `kami-training-manifest-${runId}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 function renderLearning() {
   if (!state.learningData) return;
   const { payload, champion, candidates, evaluations, evidence } = learningPayload();
@@ -2887,6 +3323,8 @@ async function loadLearning(locale = state.learningLocale) {
     state.conflictReport = null;
     renderLearning();
     loadConflictReport();
+    loadQualityGate();
+    loadTrainingRuns();
   } catch (error) {
     state.learningData = null;
     state.learningLoading = false;
@@ -3176,6 +3614,13 @@ function bindEvents() {
   $("#learningContentType").addEventListener("change", () => loadLearning(state.learningLocale));
   $("#learningDomain").addEventListener("change", () => loadLearning(state.learningLocale));
   $("#learningConflictScan").addEventListener("click", (event) => runConflictScan(event.currentTarget));
+  $("#learningGateRun").addEventListener("click", (event) => runQualityGateFromUi(event.currentTarget));
+  $("#learningGoldSeed").addEventListener("click", (event) => seedGoldSetFromTrajectories(event.currentTarget));
+  $("#learningRegressionBuild").addEventListener("click", (event) => buildRegressionSuiteFromUi(event.currentTarget));
+  $("#learningExportAudit").addEventListener("click", (event) => auditTrainingExport(event.currentTarget));
+  $("#learningExportSft").addEventListener("click", (event) => downloadTrainingDataset("sft", event.currentTarget));
+  $("#learningExportDpo").addEventListener("click", (event) => downloadTrainingDataset("dpo", event.currentTarget));
+  $("#trainingCreate").addEventListener("click", (event) => createTrainingRunFromUi(event.currentTarget));
   $("#termFile").addEventListener("change", (event) => setImportFile(event.target.files[0]));
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); $("#dropZone").classList.add("dragging"); });
   $("#dropZone").addEventListener("dragleave", () => $("#dropZone").classList.remove("dragging"));
@@ -3211,6 +3656,9 @@ function bindEvents() {
   $("#openProvider").addEventListener("click", () => {
     const provider = state.bootstrap.provider;    $("#providerForm [name=baseUrl]").value = provider.baseUrl;
     $("#providerForm [name=model]").value = provider.model;
+    $("#providerForm [name=fastModel]").value = provider.fastModel || "";
+    $("#providerForm [name=qualityModel]").value = provider.qualityModel || "";
+    $("#providerForm [name=mtModel]").value = provider.mtModel || "";
     $("#providerForm [name=embeddingModel]").value = provider.embeddingModel || "";
     $("#providerForm [name=embeddingBaseUrl]").value = provider.embeddingBaseUrl || "";
     $("#providerForm [name=inputPricePerMTok]").value = provider.inputPricePerMTok || "";

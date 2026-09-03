@@ -69,7 +69,16 @@ import {
   saveDirectusSkillEvaluation,
   listDirectusSkillEvaluations,
   getDirectusSkillEvaluation,
-  updateDirectusSkillEvaluation
+  updateDirectusSkillEvaluation,
+  saveDirectusQualityAsset,
+  listDirectusQualityAssets,
+  getDirectusQualityAsset,
+  updateDirectusQualityAsset,
+  saveDirectusQualityRun,
+  listDirectusQualityRuns,
+  saveDirectusTrainingRun,
+  listDirectusTrainingRuns,
+  getDirectusTrainingRun
 } from "./directus-store.mjs";
 
 const ROOT = process.env.KAMI_DATA_DIR || fileURLToPath(new URL("../data", import.meta.url));
@@ -353,7 +362,7 @@ async function appendJsonQa(kind, input) {
 
 async function getJsonQaCases(locale, options = {}) {
   const items = await readJson(join(ROOT, "qa", "cases.json"), []);
-  return items.filter((item) => item.locale === assertLocale(locale) && ["machine_verified", "human_approved"].includes(item.status) && (!options.contentType || item.contentType === options.contentType) && (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general"));
+  return items.filter((item) => item.locale === assertLocale(locale) && item.status === "human_approved" && (!options.contentType || item.contentType === options.contentType) && (!options.domain || options.domain === "general" || item.domain === options.domain || item.domain === "general"));
 }
 
 async function getJsonAssets(locale) {
@@ -840,6 +849,176 @@ async function updateJsonLearningTrajectory(id, patch) {
   return saveJsonLearningTrajectory({ ...patch, id: String(id), _mustExist: true });
 }
 
+const QUALITY_ASSET_KINDS = new Set(["gold_set", "regression_candidate", "regression_suite"]);
+const QUALITY_GATE_DECISIONS = new Set(["pass", "block", "insufficient"]);
+
+function qualityAssetRecord(input, existing = null) {
+  const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+  const scope = cleanScope(input.scope || payload.scope || input, existing || {});
+  const items = Array.isArray(payload.samples) ? payload.samples : Array.isArray(payload.cases) ? payload.cases : [];
+  const now = new Date().toISOString();
+  return {
+    // 行 id 由存储层自己生成；资产的语义 id（series#v2）留在 payload 里，
+    // 两者混用会让"同一版本"和"同一行"这两件事互相污染。
+    id: existing?.id || input.id || randomUUID(),
+    kind: assertChoice(String(input.kind ?? payload.kind ?? existing?.kind ?? ""), QUALITY_ASSET_KINDS, "quality asset kind"),
+    ...scope,
+    name: String(payload.name ?? input.name ?? existing?.name ?? ""),
+    description: String(payload.description ?? input.description ?? existing?.description ?? ""),
+    seriesId: String(payload.seriesId ?? input.seriesId ?? existing?.seriesId ?? payload.id ?? ""),
+    version: Number(payload.version ?? input.version ?? existing?.version ?? 1),
+    parentVersionId: String(payload.parentVersionId ?? input.parentVersionId ?? existing?.parentVersionId ?? ""),
+    status: String(input.status ?? payload.status ?? existing?.status ?? "draft"),
+    enabled: Boolean(input.enabled ?? payload.enabled ?? existing?.enabled ?? false),
+    itemCount: items.length,
+    sourceQaCaseId: String(payload.sourceQaCaseId ?? input.sourceQaCaseId ?? existing?.sourceQaCaseId ?? ""),
+    fingerprint: String(payload.fingerprint ?? input.fingerprint ?? existing?.fingerprint ?? ""),
+    payload: jsonObject(payload),
+    approval: jsonObject(input.approval ?? payload.approval ?? existing?.approval, null),
+    changeNote: String(payload.changeNote ?? input.changeNote ?? existing?.changeNote ?? ""),
+    createdBy: String(payload.createdBy ?? input.createdBy ?? existing?.createdBy ?? ""),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  };
+}
+
+async function saveJsonQualityAsset(input) {
+  const path = learningPath("quality-assets.json");
+  return withJsonFileLock(path, async () => {
+    const items = await readJson(path, []);
+    const id = String(input.id ?? "");
+    const existing = id ? items.find((item) => item.id === id) : null;
+    const record = qualityAssetRecord(input, existing);
+    if (existing) items[items.indexOf(existing)] = record;
+    else items.unshift(record);
+    await writeJsonAtomic(path, items);
+    return record;
+  });
+}
+
+async function listJsonQualityAssets(filters = {}) {
+  const items = await readJson(learningPath("quality-assets.json"), []);
+  return items.filter((item) => matchesLearningScope(item, filters)
+    && (!filters.kind || item.kind === filters.kind)
+    && (!filters.status || item.status === filters.status)
+    && (!filters.seriesId || item.seriesId === filters.seriesId)
+    && (!filters.sourceQaCaseId || item.sourceQaCaseId === filters.sourceQaCaseId)
+    && (filters.enabled === undefined || Boolean(item.enabled) === Boolean(filters.enabled)))
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, normalizedLimit(filters.limit, 200));
+}
+
+async function getJsonQualityAsset(id) {
+  const items = await readJson(learningPath("quality-assets.json"), []);
+  return items.find((item) => item.id === String(id)) || null;
+}
+
+async function updateJsonQualityAsset(id, patch = {}) {
+  const path = learningPath("quality-assets.json");
+  return withJsonFileLock(path, async () => {
+    const items = await readJson(path, []);
+    const existing = items.find((item) => item.id === String(id));
+    if (!existing) return null;
+    const record = {
+      ...existing,
+      ...(patch.status === undefined ? {} : { status: String(patch.status) }),
+      ...(patch.enabled === undefined ? {} : { enabled: Boolean(patch.enabled) }),
+      ...(patch.approval === undefined ? {} : { approval: jsonObject(patch.approval, null) }),
+      ...(patch.changeNote === undefined ? {} : { changeNote: String(patch.changeNote) }),
+      ...(patch.payload === undefined ? {} : { payload: jsonObject(patch.payload) }),
+      updatedAt: new Date().toISOString()
+    };
+    items[items.indexOf(existing)] = record;
+    await writeJsonAtomic(path, items);
+    return record;
+  });
+}
+
+async function saveJsonQualityRun(input) {
+  const path = learningPath("quality-runs.json");
+  return withJsonFileLock(path, async () => {
+    const items = await readJson(path, []);
+    const record = {
+      id: input.id || randomUUID(),
+      ...cleanScope(input.scope || input, {}),
+      skillId: String(input.skillId ?? ""),
+      skillVersion: String(input.skillVersion ?? ""),
+      decision: assertChoice(String(input.decision ?? "insufficient"), QUALITY_GATE_DECISIONS, "quality gate decision"),
+      regressionTotal: Number(input.regressionTotal) || 0,
+      regressionPassed: Number(input.regressionPassed) || 0,
+      regressionPassRate: Number.isFinite(Number(input.regressionPassRate)) ? Number(input.regressionPassRate) : null,
+      goldTotal: Number(input.goldTotal) || 0,
+      goldTermAccuracy: Number.isFinite(Number(input.goldTermAccuracy)) ? Number(input.goldTermAccuracy) : null,
+      goldFactAccuracy: Number.isFinite(Number(input.goldFactAccuracy)) ? Number(input.goldFactAccuracy) : null,
+      assetVersions: jsonObject(input.assetVersions, {}),
+      metrics: jsonObject(input.metrics, {}),
+      report: jsonObject(input.report, {}),
+      blocking: jsonObject(input.blocking, []),
+      triggeredBy: String(input.triggeredBy ?? ""),
+      createdAt: new Date().toISOString()
+    };
+    items.unshift(record);
+    await writeJsonAtomic(path, items);
+    return record;
+  });
+}
+
+async function saveJsonTrainingRun(input) {
+  const path = learningPath("training-runs.json");
+  return withJsonFileLock(path, async () => {
+    const items = await readJson(path, []);
+    const id = String(input.id || "");
+    const existing = id ? items.find((item) => item.id === id) : null;
+    const payload = input.payload && typeof input.payload === "object" ? input.payload : input;
+    const now = new Date().toISOString();
+    const record = {
+      id: existing?.id || id || randomUUID(),
+      ...cleanScope(input.scope || payload.scope || input, existing || {}),
+      name: String(payload.name || existing?.name || ""),
+      method: String(payload.recipe?.method || existing?.method || "sft"),
+      status: String(payload.status || existing?.status || "draft"),
+      baseModel: String(payload.recipe?.baseModel || ""),
+      teacherModel: String(payload.recipe?.teacherModel || ""),
+      artifactModelId: String(payload.artifact?.modelId || ""),
+      externalJobId: String(payload.externalJobId || ""),
+      totalRecords: Number(payload.totalRecords) || 0,
+      runFingerprint: String(payload.fingerprint || ""),
+      payload: jsonObject(payload),
+      error: String(payload.error || ""),
+      createdBy: String(payload.createdBy || ""),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    };
+    if (existing) items[items.indexOf(existing)] = record;
+    else items.unshift(record);
+    await writeJsonAtomic(path, items);
+    return record;
+  });
+}
+
+async function listJsonTrainingRuns(filters = {}) {
+  const items = await readJson(learningPath("training-runs.json"), []);
+  return items.filter((item) => matchesLearningScope(item, filters)
+    && (!filters.status || item.status === filters.status)
+    && (!filters.method || item.method === filters.method))
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, normalizedLimit(filters.limit, 50));
+}
+
+async function getJsonTrainingRun(id) {
+  const items = await readJson(learningPath("training-runs.json"), []);
+  return items.find((item) => item.id === String(id)) || null;
+}
+
+async function listJsonQualityRuns(filters = {}) {
+  const items = await readJson(learningPath("quality-runs.json"), []);
+  return items.filter((item) => matchesLearningScope(item, filters)
+    && (!filters.skillId || item.skillId === filters.skillId)
+    && (!filters.decision || item.decision === filters.decision))
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, normalizedLimit(filters.limit, 50));
+}
+
 function activateJsonSkillInItems(items, target, { rollback = false } = {}) {
   if (target.status === "rejected") throw conflict("Rejected translation skill cannot be activated");
   const scope = cleanScope(target);
@@ -1281,6 +1460,42 @@ export async function getLearningTrajectory(id) {
 
 export async function updateLearningTrajectory(id, patch) {
   return usesDirectus() ? updateDirectusLearningTrajectory(id, patch) : updateJsonLearningTrajectory(id, patch);
+}
+
+export async function saveQualityAsset(input) {
+  return usesDirectus() ? saveDirectusQualityAsset(input) : saveJsonQualityAsset(input);
+}
+
+export async function listQualityAssets(filters) {
+  return usesDirectus() ? listDirectusQualityAssets(filters) : listJsonQualityAssets(filters);
+}
+
+export async function getQualityAsset(id) {
+  return usesDirectus() ? getDirectusQualityAsset(id) : getJsonQualityAsset(id);
+}
+
+export async function updateQualityAsset(id, patch) {
+  return usesDirectus() ? updateDirectusQualityAsset(id, patch) : updateJsonQualityAsset(id, patch);
+}
+
+export async function saveQualityRun(input) {
+  return usesDirectus() ? saveDirectusQualityRun(input) : saveJsonQualityRun(input);
+}
+
+export async function listQualityRuns(filters) {
+  return usesDirectus() ? listDirectusQualityRuns(filters) : listJsonQualityRuns(filters);
+}
+
+export async function saveTrainingRun(input) {
+  return usesDirectus() ? saveDirectusTrainingRun(input) : saveJsonTrainingRun(input);
+}
+
+export async function listTrainingRuns(filters) {
+  return usesDirectus() ? listDirectusTrainingRuns(filters) : listJsonTrainingRuns(filters);
+}
+
+export async function getTrainingRun(id) {
+  return usesDirectus() ? getDirectusTrainingRun(id) : getJsonTrainingRun(id);
 }
 
 export async function saveTranslationSkill(input) {

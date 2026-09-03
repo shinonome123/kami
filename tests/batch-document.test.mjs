@@ -147,3 +147,72 @@ test("XLSX 可采用 AI 返回的无表头列角色", async () => {
   assert.equal(prepared.segments.length, 1);
   assert.deepEqual(prepared.segments[0].context.metadata.map((item) => item.value), ["官网标题", "80字符内"]);
 });
+
+test("CSV 有表头时复用表格结构识别并原位回写译文", async () => {
+  const source = '\uFEFF位置,字数限制,Chinese Simp.,English\r\n官网标题,80字符内,"八月已至，折扣活动即将开启！","Keep, exactly"\r\n';
+  const base64 = Buffer.from(source, "utf8").toString("base64");
+  const prepared = await prepareBatchDocument({ filename: "delivery.csv", base64, segmentationMode: "paragraph" });
+
+  assert.equal(prepared.format, "csv");
+  assert.equal(prepared.spreadsheetAnalysis.sheets[0].headerRow, 1);
+  assert.equal(prepared.segments.length, 1);
+  assert.equal(prepared.segments[0].source, "八月已至，折扣活动即将开启！");
+  assert.deepEqual(prepared.segments[0].context.metadata.map((item) => item.value), ["官网标题", "80字符内"]);
+  assert.equal(prepared.segments[0].context.referenceTranslations[0].value, "Keep, exactly");
+
+  const exported = await exportBatchDocument({
+    filename: prepared.filename,
+    locale: "ja-JP",
+    format: prepared.format,
+    structure: prepared.structure,
+    base64,
+    segments: prepared.segments.map((segment) => ({ ...segment, translation: "8月になり、セールが始まります！" }))
+  });
+  const output = Buffer.from(exported.base64, "base64").toString("utf8");
+  assert.equal(output, '\uFEFF位置,字数限制,Chinese Simp.,English\r\n官网标题,80字符内,"8月になり、セールが始まります！","Keep, exactly"\r\n');
+  assert.equal(exported.filename, "delivery.ja-JP.csv");
+  assert.equal(exported.mimeType, "text/csv; charset=utf-8");
+});
+
+test("无表头分号 CSV 自动找到正文列且不改动其他列", async () => {
+  const source = "海外社媒;80字符内;八月已至，折扣活动即将开启！完成任务还可领取奖励。;August sale soon\n官网标题;30字符内;限时折扣现已开启。;Sale now";
+  const prepared = await prepareBatchDocument({ filename: "headerless.csv", text: source, segmentationMode: "paragraph" });
+
+  assert.equal(prepared.structure.csv.delimiter, ";");
+  assert.equal(prepared.spreadsheetAnalysis.sheets[0].headerRow, null);
+  assert.deepEqual(prepared.segments.map((segment) => [segment.locator.row, segment.locator.column]), [[1, 3], [2, 3]]);
+
+  const exported = await exportBatchDocument({
+    filename: prepared.filename,
+    locale: "ko-KR",
+    format: "csv",
+    structure: prepared.structure,
+    text: source,
+    segments: prepared.segments.map((segment) => ({ ...segment, translation: `번역 ${segment.index}` }))
+  });
+  assert.equal(Buffer.from(exported.base64, "base64").toString("utf8"), "海外社媒;80字符内;번역 1;August sale soon\n官网标题;30字符内;번역 2;Sale now");
+});
+
+test("CSV 支持带换行的引号字段并仅重写目标单元格", async () => {
+  const source = '位置,Chinese Simp.,English\r\n剧情,"第一句。\n第二句。","Existing translation"\r\n';
+  const prepared = await prepareBatchDocument({ filename: "multiline.csv", text: source, segmentationMode: "paragraph" });
+  assert.equal(prepared.segments.length, 1);
+  assert.equal(prepared.segments[0].source, "第一句。\n第二句。");
+
+  const exported = await exportBatchDocument({
+    filename: prepared.filename,
+    locale: "th-TH",
+    format: "csv",
+    structure: prepared.structure,
+    text: source,
+    segments: [{ ...prepared.segments[0], translation: 'บรรทัดหนึ่ง,\n"บรรทัดสอง"' }]
+  });
+  assert.equal(Buffer.from(exported.base64, "base64").toString("utf8"), '位置,Chinese Simp.,English\r\n剧情,"บรรทัดหนึ่ง,\n""บรรทัดสอง""","Existing translation"\r\n');
+});
+
+test("单列 CSV 的中文表头不会被当作待翻译正文", async () => {
+  const source = "中文原文\n欢迎回来！\n活动现已开启。";
+  const prepared = await prepareBatchDocument({ filename: "single-column.csv", text: source, segmentationMode: "paragraph" });
+  assert.equal(prepared.spreadsheetAnalysis.sheets[0].headerRow, 1);
+  assert.deepEqual(prepared.segments.map((segment) => segment.source), ["欢迎回来！", "活动现已开启。"]);
+});
